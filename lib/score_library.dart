@@ -10,6 +10,7 @@ class ScoreEntry {
     required this.title,
     required this.page,
     required this.openedAt,
+    this.metadata = const {},
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -17,18 +18,21 @@ class ScoreEntry {
     title: json['title'] as String,
     page: json['page'] as int,
     openedAt: DateTime.parse(json['openedAt'] as String),
+    metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
   );
 
   final String id;
   final String title;
   final int page;
   final DateTime openedAt;
+  final Map<String, String> metadata;
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
     'page': page,
     'openedAt': openedAt.toIso8601String(),
+    if (metadata.isNotEmpty) 'metadata': metadata,
   };
 }
 
@@ -173,6 +177,7 @@ class ScoreLibrary {
           title: old.title,
           page: page,
           openedAt: opened ? DateTime.now().toUtc() : old.openedAt,
+          metadata: old.metadata,
         );
         await storage.writeIndex([
           for (final entry in _scores.values) entry.id == id ? updated : entry,

@@ -1121,12 +1121,38 @@ class _LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<_LibraryScreen> {
   String _query = '';
+  String _browseBy = 'Recent';
+  String? _category;
+
+  static const _fields = {
+    'Composer': 'composer',
+    'Genre': 'genre',
+    'Label': 'label',
+    'Tag': 'tags',
+  };
+
+  Iterable<String> _categories(ScoreEntry score) =>
+      (score.metadata[_fields[_browseBy]] ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty);
 
   @override
   Widget build(BuildContext context) {
     final visible = widget.scores
         .where((score) => score.title.toLowerCase().contains(_query))
+        .where(
+          (score) =>
+              _category == null || _categories(score).contains(_category),
+        )
         .toList();
+    final categories = widget.scores.expand(_categories).toSet().toList()
+      ..sort();
+    if (_browseBy != 'Recent') {
+      visible.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Score library')),
       body: SafeArea(
@@ -1148,6 +1174,38 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: _browseBy,
+                    items: [
+                      for (final mode in ['Recent', 'Title', ..._fields.keys])
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text('Browse by $mode'),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      _browseBy = value ?? 'Recent';
+                      _category = null;
+                    }),
+                  ),
+                  if (categories.isNotEmpty)
+                    DropdownButton<String>(
+                      isExpanded: true,
+                      value: _category ?? '',
+                      items: [
+                        for (final category in ['', ...categories])
+                          DropdownMenuItem(
+                            value: category,
+                            child: Text(
+                              category.isEmpty ? 'All values' : category,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setState(
+                        () => _category = value == '' ? null : value,
+                      ),
+                    ),
                   Wrap(
                     spacing: 8,
                     children: [

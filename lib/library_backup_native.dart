@@ -125,6 +125,7 @@ void _exportBackup(
           title: old.title,
           page: old.page,
           openedAt: old.openedAt,
+          metadata: old.metadata,
         ),
       );
     }
