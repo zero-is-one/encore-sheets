@@ -14,6 +14,7 @@ class ReaderPreferences {
     this.left = ReaderTapAction.previous,
     this.center = ReaderTapAction.controls,
     this.right = ReaderTapAction.next,
+    this.keepAwake = false,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -26,16 +27,19 @@ class ReaderPreferences {
       left: read('left', ReaderTapAction.previous),
       center: read('center', ReaderTapAction.controls),
       right: read('right', ReaderTapAction.next),
+      keepAwake: json['keepAwake'] == true,
     );
   }
 
   final ReaderTapAction left;
   final ReaderTapAction center;
   final ReaderTapAction right;
+  final bool keepAwake;
 
   Map<String, dynamic> toJson() => {
     'left': left.name,
     'center': center.name,
     'right': right.name,
+    'keepAwake': keepAwake,
   };
 }

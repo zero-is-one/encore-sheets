@@ -17,7 +17,7 @@ const _rail = Color(0xff2e3a36);
 const _paper = Color(0xfff0eddf);
 const _brass = Color(0xffe9bd75);
 
-enum _ReaderDisplay { fit, performance, hideControls, gestures }
+enum _ReaderDisplay { fit, performance, hideControls, gestures, keepAwake }
 
 void main() => runApp(const EncoreSheets());
 
@@ -95,7 +95,7 @@ class _ReaderState extends State<Reader> {
     _restorePreferences();
     _lifecycle = AppLifecycleListener(
       onResume: () {
-        if (_performance) _keepScreenAwake(true);
+        if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
       },
     );
     if (_supportsSharedImport) {
@@ -113,6 +113,7 @@ class _ReaderState extends State<Reader> {
       final data = await _library.storage.readPreferences();
       if (mounted) {
         setState(() => _preferences = ReaderPreferences.fromJson(data));
+        if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
       // Use the default controls if preferences are unavailable.
@@ -183,14 +184,21 @@ class _ReaderState extends State<Reader> {
             ),
             actions: [
               TextButton(
-                onPressed: () =>
-                    Navigator.pop(context, const ReaderPreferences()),
+                onPressed: () => Navigator.pop(
+                  context,
+                  ReaderPreferences(keepAwake: _preferences.keepAwake),
+                ),
                 child: const Text('Reset'),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(
                   context,
-                  ReaderPreferences(left: left, center: center, right: right),
+                  ReaderPreferences(
+                    left: left,
+                    center: center,
+                    right: right,
+                    keepAwake: _preferences.keepAwake,
+                  ),
                 ),
                 child: const Text('Save'),
               ),
@@ -200,9 +208,16 @@ class _ReaderState extends State<Reader> {
       ),
     );
     if (configured == null || !mounted) return;
+    await _savePreferences(configured);
+  }
+
+  Future<void> _savePreferences(ReaderPreferences configured) async {
     try {
       await _library.storage.writePreferences(configured.toJson());
-      if (mounted) setState(() => _preferences = configured);
+      if (mounted) {
+        setState(() => _preferences = configured);
+        _keepScreenAwake(_performance || _preferences.keepAwake);
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -218,7 +233,7 @@ class _ReaderState extends State<Reader> {
       _sharedImports.setMethodCallHandler(null);
     }
     _lifecycle.dispose();
-    if (_performance) _keepScreenAwake(false);
+    if (_performance || _preferences.keepAwake) _keepScreenAwake(false);
     _focus.dispose();
     for (final ink in _ink.values) {
       ink.dispose();
@@ -440,7 +455,7 @@ class _ReaderState extends State<Reader> {
     try {
       await WakelockPlus.toggle(enable: enabled);
     } catch (_) {
-      if (enabled && mounted && _performance) {
+      if (enabled && mounted && (_performance || _preferences.keepAwake)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not keep the screen awake.')),
         );
@@ -455,7 +470,7 @@ class _ReaderState extends State<Reader> {
       _inking = false;
       _showControls = true;
     });
-    _keepScreenAwake(_performance);
+    _keepScreenAwake(_performance || _preferences.keepAwake);
     _focus.requestFocus();
   }
 
@@ -866,6 +881,15 @@ class _ReaderState extends State<Reader> {
                         setState(() => _showControls = false);
                       case _ReaderDisplay.gestures:
                         _configureGestures();
+                      case _ReaderDisplay.keepAwake:
+                        _savePreferences(
+                          ReaderPreferences(
+                            left: _preferences.left,
+                            center: _preferences.center,
+                            right: _preferences.right,
+                            keepAwake: !_preferences.keepAwake,
+                          ),
+                        );
                     }
                   },
                   itemBuilder: (_) => [
@@ -891,6 +915,11 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.gestures,
                       child: Text('Reader gestures'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.keepAwake,
+                      checked: _preferences.keepAwake,
+                      child: const Text('Keep screen awake'),
                     ),
                   ],
                 ),
