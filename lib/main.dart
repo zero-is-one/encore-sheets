@@ -56,6 +56,7 @@ import 'practice_activity.dart';
 import 'practice_dashboard.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
+import 'app_localization.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -84,6 +85,7 @@ enum _ReaderDisplay {
   practiceActivity,
   restrictions,
   support,
+  language,
   metronome,
   tuner,
   piano,
@@ -124,13 +126,23 @@ enum _ReaderDisplay {
 
 void main() => runApp(const EncoreSheets());
 
-class EncoreSheets extends StatelessWidget {
+class EncoreSheets extends StatefulWidget {
   const EncoreSheets({super.key});
+
+  @override
+  State<EncoreSheets> createState() => _EncoreSheetsState();
+}
+
+class _EncoreSheetsState extends State<EncoreSheets> {
+  Locale? _locale;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'EncoreSheets',
     debugShowCheckedModeBanner: false,
+    locale: _locale,
+    supportedLocales: readerLocales,
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: ThemeData(
       brightness: Brightness.dark,
       colorScheme: const ColorScheme.dark(
@@ -141,12 +153,18 @@ class EncoreSheets extends StatelessWidget {
       ),
       scaffoldBackgroundColor: _stand,
     ),
-    home: const Reader(),
+    home: Reader(
+      onLanguage: (language) {
+        final resolved = language == null ? null : Locale(language);
+        if (_locale != resolved) setState(() => _locale = resolved);
+      },
+    ),
   );
 }
 
 class Reader extends StatefulWidget {
-  const Reader({super.key});
+  const Reader({super.key, this.onLanguage});
+  final ValueChanged<String?>? onLanguage;
 
   @override
   State<Reader> createState() => _ReaderState();
@@ -195,6 +213,7 @@ class _ReaderState extends State<Reader> {
   ScoreAudioSession? _scoreAudio;
   late final _practice = PracticeActivity(_library);
   ReaderRestrictions? _restrictions;
+  String? _language;
   late final Future<void> _startupPreferences;
   EnsembleSession? _ensemble;
   bool _leadingSpread = false;
@@ -342,6 +361,11 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
           _practice.enabled = data['practiceTracking'] == true;
+          final language = data['readerLanguage'];
+          _language =
+              language is String && readerLanguageNames.containsKey(language)
+              ? language
+              : null;
           _restrictions = ReaderRestrictions.fromJson(
             data['readerRestrictions'],
           );
@@ -369,6 +393,7 @@ class _ReaderState extends State<Reader> {
           }
         });
         _listenToMidi();
+        widget.onLanguage?.call(_language);
         _focusPractice();
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
@@ -1601,6 +1626,49 @@ class _ReaderState extends State<Reader> {
       await _libraryReady;
       if (mounted)
         await _openReaderPanel<void>((_) => SupportScreen(library: _library));
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _chooseLanguage() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final result = await showDialog<String>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('App language'),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, ''),
+              child: Text(
+                _language == null
+                    ? '✓ Use device language'
+                    : 'Use device language',
+              ),
+            ),
+            for (final item in readerLanguageNames.entries)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, item.key),
+                child: Text(
+                  _language == item.key ? '✓ ${item.value}' : item.value,
+                ),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || result == null) return;
+      final language = result.isEmpty ? null : result;
+      await _library.updatePreferences({'readerLanguage': language});
+      if (!mounted) return;
+      _language = language;
+      widget.onLanguage?.call(language);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the language setting.')),
+        );
     } finally {
       _finishPicking();
     }
@@ -3938,12 +4006,12 @@ class _ReaderState extends State<Reader> {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: 'Score library',
+                  tooltip: ReaderText.library.of(context),
                   onPressed: _picking ? null : _showLibrary,
                   icon: const Icon(Icons.library_music_outlined),
                 ),
                 IconButton(
-                  tooltip: 'Setlists',
+                  tooltip: ReaderText.setlists.of(context),
                   onPressed: _picking
                       ? null
                       : () => _showLibrary(setlists: true),
@@ -3980,13 +4048,15 @@ class _ReaderState extends State<Reader> {
               children: [
                 if (!_restricted(RestrictedTool.markup))
                   IconButton(
-                    tooltip: _inking ? 'Done marking up' : 'Mark up score',
+                    tooltip: _inking
+                        ? 'Done marking up'
+                        : ReaderText.markup.of(context),
                     onPressed: _pages == 0 ? null : _toggleInk,
                     color: _inking ? _brass : null,
                     icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
                   ),
                 PopupMenuButton<_ReaderDisplay>(
-                  tooltip: 'Display options',
+                  tooltip: ReaderText.tools.of(context),
                   enabled: _pages > 0 && !_picking,
                   icon: const Icon(Icons.tune),
                   onSelected: (action) async {
@@ -4010,6 +4080,8 @@ class _ReaderState extends State<Reader> {
                         _showRestrictions();
                       case _ReaderDisplay.support:
                         _showSupport();
+                      case _ReaderDisplay.language:
+                        _chooseLanguage();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4186,9 +4258,13 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.restrictions,
                       child: Text('Shared-device restrictions'),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _ReaderDisplay.support,
-                      child: Text('Help and diagnostics'),
+                      child: Text(ReaderText.help.of(context)),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.language,
+                      child: Text('App language'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
@@ -4632,7 +4708,7 @@ class _ReaderState extends State<Reader> {
           Row(
             children: [
               IconButton(
-                tooltip: 'Previous page',
+                tooltip: ReaderText.previous.of(context),
                 onPressed: _page <= _firstPage && !_halfPreview
                     ? null
                     : () => _turn(-1),
@@ -4674,7 +4750,7 @@ class _ReaderState extends State<Reader> {
               IconButton(
                 tooltip: _page == _lastPage && _hasNextScore
                     ? 'Next score'
-                    : 'Next page',
+                    : ReaderText.next.of(context),
                 onPressed: _pages == 0 || (_page >= _lastPage && !_hasNextScore)
                     ? null
                     : () => _turn(1),
@@ -5155,13 +5231,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
               .toList();
     final actions =
         {
-              'import': 'Import PDF',
+              'import': ReaderText.importPdf.of(context),
               'create-template': 'Create from template',
               'import-text': 'Import text or Word document',
-              'setlists': 'Setlists',
-              'support': 'Help and diagnostics',
+              'setlists': ReaderText.setlists.of(context),
+              'support': ReaderText.help.of(context),
               if (widget.persistent) 'backup': 'Backup & restore',
-              'sample': 'Open sample score',
+              'sample': ReaderText.sample.of(context),
             }.entries
             .where(
               (entry) =>
@@ -5197,14 +5273,14 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 _unassigned
                     ? 'Unassigned scores'
                     : _collection == null
-                    ? 'Score library'
+                    ? ReaderText.library.of(context)
                     : _excludeCollection
                     ? 'Outside $_collection'
                     : _collection!,
               ),
         actions: [
           IconButton(
-            tooltip: 'Help and diagnostics',
+            tooltip: ReaderText.help.of(context),
             onPressed: () => Navigator.pop(context, 'support'),
             icon: const Icon(Icons.help_outline),
           ),
@@ -5232,10 +5308,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   TextField(
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      labelText: 'Search library',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search),
+                      labelText: ReaderText.search.of(context),
+                      border: const OutlineInputBorder(),
                     ),
                     onChanged: (value) =>
                         setState(() => _query = value.trim().toLowerCase()),
@@ -5275,88 +5351,78 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                     ),
                   Wrap(
                     spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       if (!widget.transferRestricted)
                         FilledButton.icon(
                           onPressed: () => Navigator.pop(context, 'import'),
                           icon: const Icon(Icons.add),
-                          label: const Text('Import PDF'),
-                        ),
-                      if (!widget.transferRestricted)
-                        OutlinedButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'create-template'),
-                          icon: const Icon(Icons.note_add_outlined),
-                          label: const Text('Create from template'),
-                        ),
-                      if (!widget.transferRestricted)
-                        OutlinedButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'import-text'),
-                          icon: const Icon(Icons.text_snippet_outlined),
-                          label: const Text('Import text or Word'),
-                        ),
-                      if (!widget.transferRestricted)
-                        TextButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'import-images'),
-                          icon: const Icon(Icons.image_outlined),
-                          label: const Text('Import images'),
-                        ),
-                      if (widget.canScan && !widget.transferRestricted)
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(context, 'scan'),
-                          icon: const Icon(Icons.document_scanner_outlined),
-                          label: const Text('Scan sheet music'),
-                        ),
-                      if (widget.canSync && !widget.connectionsRestricted)
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(context, 'sync'),
-                          icon: const Icon(Icons.cloud_sync_outlined),
-                          label: const Text('Device sync'),
-                        ),
-                      if (!widget.transferRestricted)
-                        TextButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'metadata-csv'),
-                          icon: const Icon(Icons.table_chart_outlined),
-                          label: const Text('CSV metadata'),
-                        ),
-                      if (!widget.transferRestricted &&
-                          !widget.connectionsRestricted)
-                        TextButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'cloud-files'),
-                          icon: const Icon(Icons.cloud_outlined),
-                          label: const Text('Cloud files'),
+                          label: Text(ReaderText.importPdf.of(context)),
                         ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),
                         icon: const Icon(Icons.queue_music),
-                        label: const Text('Setlists'),
+                        label: Text(ReaderText.setlists.of(context)),
                       ),
-                      if (!widget.transferRestricted &&
-                          widget.scores.length > 1)
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(context, 'combine'),
-                          icon: const Icon(Icons.merge_type),
-                          label: const Text('Combine PDFs'),
-                        ),
-                      if (!widget.transferRestricted &&
-                          (widget.persistent ||
-                              widget.library.recentlyDeleted.isNotEmpty))
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(context, 'backup'),
-                          icon: const Icon(Icons.settings_backup_restore),
-                          label: const Text('Backup & restore'),
-                        ),
-                      if (widget.persistent && !widget.transferRestricted)
-                        TextButton.icon(
-                          onPressed: () =>
-                              Navigator.pop(context, 'import-package'),
-                          icon: const Icon(Icons.inventory_2_outlined),
-                          label: const Text('Import score package'),
-                        ),
+                      PopupMenuButton<String>(
+                        tooltip: ReaderText.tools.of(context),
+                        onSelected: (value) => Navigator.pop(context, value),
+                        itemBuilder: (_) => [
+                          if (!widget.transferRestricted) ...[
+                            const PopupMenuItem(
+                              value: 'create-template',
+                              child: Text('Create from template'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'import-text',
+                              child: Text('Import text or Word'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'import-images',
+                              child: Text('Import images'),
+                            ),
+                            if (widget.canScan)
+                              const PopupMenuItem(
+                                value: 'scan',
+                                child: Text('Scan sheet music'),
+                              ),
+                            const PopupMenuItem(
+                              value: 'metadata-csv',
+                              child: Text('CSV metadata'),
+                            ),
+                            if (!widget.connectionsRestricted)
+                              const PopupMenuItem(
+                                value: 'cloud-files',
+                                child: Text('Cloud files'),
+                              ),
+                            if (widget.scores.length > 1)
+                              const PopupMenuItem(
+                                value: 'combine',
+                                child: Text('Combine PDFs'),
+                              ),
+                            if (widget.persistent ||
+                                widget.library.recentlyDeleted.isNotEmpty)
+                              const PopupMenuItem(
+                                value: 'backup',
+                                child: Text('Backup & restore'),
+                              ),
+                            if (widget.persistent)
+                              const PopupMenuItem(
+                                value: 'import-package',
+                                child: Text('Import score package'),
+                              ),
+                          ],
+                          if (widget.canSync && !widget.connectionsRestricted)
+                            const PopupMenuItem(
+                              value: 'sync',
+                              child: Text('Device sync'),
+                            ),
+                          PopupMenuItem(
+                            value: 'support',
+                            child: Text(ReaderText.help.of(context)),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -5550,7 +5616,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       alignment: AlignmentDirectional.centerStart,
                       child: TextButton(
                         onPressed: () => Navigator.pop(context, 'sample'),
-                        child: const Text('Open sample score'),
+                        child: Text(ReaderText.sample.of(context)),
                       ),
                     ),
                 ],

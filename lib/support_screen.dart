@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'score_audio.dart';
+import 'app_localization.dart';
 import 'score_library.dart';
 
 class SupportScreen extends StatefulWidget {
@@ -60,7 +61,7 @@ class _SupportScreenState extends State<SupportScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Help and diagnostics')),
+    appBar: AppBar(title: Text(ReaderText.help.of(context))),
     body: SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(16),

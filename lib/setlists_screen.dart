@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 
 import 'score_library.dart';
+import 'app_localization.dart';
 import 'program_duration.dart';
 import 'setlist_order.dart';
 import 'setlist_share.dart';
@@ -259,7 +260,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Setlists'),
+        title: Text(ReaderText.setlists.of(context)),
         actions: [
           if (widget.library.storage.persistent && widget.allowTransfers)
             IconButton(
