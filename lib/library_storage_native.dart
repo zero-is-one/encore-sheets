@@ -133,7 +133,9 @@ class NativeLibraryStorage implements LibraryStorage {
     final path =
         '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
-    final preferences = (await readPreferences())..remove('librarySyncState');
+    final preferences = (await readPreferences())
+      ..remove('librarySyncState')
+      ..remove('localScoreAudio');
     await Isolate.run(
       () =>
           _exportBackup(root, path, scores, setlists, preferences: preferences),

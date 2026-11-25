@@ -32,6 +32,8 @@ import 'half_page_turn.dart';
 import 'score_library.dart';
 import 'score_action.dart';
 import 'score_actions_screen.dart';
+import 'score_audio.dart';
+import 'score_audio_dialog.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
@@ -50,6 +52,7 @@ enum _ReaderDisplay {
   findInScore,
   pageNote,
   pageActions,
+  scoreAudio,
   fit,
   zoomIn,
   zoomOut,
@@ -143,6 +146,7 @@ class _ReaderState extends State<Reader> {
   bool _dispatchingEdgeLink = false;
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
+  ScoreAudioSession? _scoreAudio;
   List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
@@ -370,6 +374,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    unawaited(_scoreAudio?.dispose());
     _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
@@ -1022,6 +1027,24 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showScoreAudio() async {
+    final score = _entry;
+    if (!ScoreAudioSession.supported || _picking || score == null) return;
+    final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
+    final audio = _scoreAudio ??= ScoreAudioSession(_library);
+    setState(() => _picking = true);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) =>
+            ScoreAudioDialog(audio: audio, selection: selection, title: _title),
+      );
+    } finally {
+      _finishPicking();
+    }
+  }
+
   void _followJump(JumpPoint target) {
     if (_picking || !_viewer.isReady) return;
     _jumpToPage(target.page);
@@ -1364,6 +1387,8 @@ class _ReaderState extends State<Reader> {
     int? startPage,
     ScoreBookmark? item,
   }) {
+    final audio = _scoreAudio;
+    if (audio != null) unawaited(audio.stop().catchError((Object _) {}));
     if (_entry?.id != entry?.id) {
       _previousItem = (id: _entry?.id, page: _page);
     }
@@ -2518,6 +2543,8 @@ class _ReaderState extends State<Reader> {
                         _editPageNote(_page);
                       case _ReaderDisplay.pageActions:
                         _editScoreActions();
+                      case _ReaderDisplay.scoreAudio:
+                        _showScoreAudio();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2646,6 +2673,12 @@ class _ReaderState extends State<Reader> {
                       enabled: _entry != null,
                       child: const Text('On-page actions'),
                     ),
+                    if (ScoreAudioSession.supported)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.scoreAudio,
+                        enabled: _entry != null,
+                        child: const Text('Linked audio'),
+                      ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
