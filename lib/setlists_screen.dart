@@ -86,7 +86,7 @@ class _SetlistEditorState extends State<_SetlistEditor> {
     super.dispose();
   }
 
-  Future<void> _add() async {
+  Future<void> _add([int? replaceAt]) async {
     final scores = widget.library.recent;
     final score = await showModalBottomSheet<ScoreEntry>(
       context: context,
@@ -106,8 +106,14 @@ class _SetlistEditorState extends State<_SetlistEditor> {
               ],
             ),
     );
-    if (mounted && score != null)
-      setState(() => _scores.add((key: Object(), id: score.id)));
+    if (!mounted || score == null) return;
+    setState(() {
+      if (replaceAt == null) {
+        _scores.add((key: Object(), id: score.id));
+      } else {
+        _scores[replaceAt] = (key: _scores[replaceAt].key, id: score.id);
+      }
+    });
   }
 
   Future<void> _save() async {
@@ -177,6 +183,7 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                   widget.library.lookup(_scores[index].id)?.title ??
                       'Missing score',
                 ),
+                onTap: _saving ? null : () => _add(index),
                 trailing: IconButton(
                   tooltip: 'Remove score',
                   onPressed: _saving
