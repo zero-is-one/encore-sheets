@@ -6,6 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'score_library.dart';
@@ -548,17 +549,7 @@ class _ReaderState extends State<Reader> {
       if (event is KeyDownEvent) _togglePerformance();
       return KeyEventResult.handled;
     }
-    final int step = switch (key) {
-      LogicalKeyboardKey.arrowRight ||
-      LogicalKeyboardKey.arrowDown ||
-      LogicalKeyboardKey.pageDown ||
-      LogicalKeyboardKey.space ||
-      LogicalKeyboardKey.enter => 1,
-      LogicalKeyboardKey.arrowLeft ||
-      LogicalKeyboardKey.arrowUp ||
-      LogicalKeyboardKey.pageUp => -1,
-      _ => 0,
-    };
+    final step = pageTurnForKey(key);
     if (step == 0 || _picking || _pages == 0) return KeyEventResult.ignored;
     if (event is KeyDownEvent) _go(_page + step);
     return KeyEventResult.handled;
