@@ -1411,7 +1411,9 @@ class _ReaderState extends State<Reader> {
     ScoreBookmark? item,
   }) {
     final audio = _scoreAudio;
-    if (audio != null) unawaited(audio.stop().catchError((Object _) {}));
+    if (audio != null && audio.pinnedSelection == null) {
+      unawaited(audio.stop().catchError((Object _) {}));
+    }
     if (_entry?.id != entry?.id) {
       _previousItem = (id: _entry?.id, page: _page);
     }

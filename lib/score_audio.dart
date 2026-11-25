@@ -13,6 +13,10 @@ class ScoreAudioSession {
   final ScoreLibrary library;
   final player = AudioPlayer();
   String? _loaded;
+  String? pinnedSelection;
+  Duration? loopStart;
+  Duration? loopEnd;
+  bool get looping => loopEnd != null;
 
   static bool get supported =>
       !kIsWeb &&
@@ -21,6 +25,9 @@ class ScoreAudioSession {
         TargetPlatform.iOS,
         TargetPlatform.macOS,
       }.contains(defaultTargetPlatform);
+
+  static bool get supportsPitch =>
+      supported && defaultTargetPlatform == TargetPlatform.android;
 
   Future<String> _folder() async =>
       (await getApplicationDocumentsDirectory()).path;
@@ -53,7 +60,9 @@ class ScoreAudioSession {
     final path = '$folder/$file';
     try {
       await source.saveTo(path);
+      await player.setLoopMode(LoopMode.off);
       await player.setFilePath(path);
+      loopStart = loopEnd = null;
       await library.updatePreferences({
         'localScoreAudio': {
           ...attachments,
@@ -91,10 +100,39 @@ class ScoreAudioSession {
     final found = await track(selection);
     if (found == null) return false;
     if (_loaded != found.file) {
+      await player.setLoopMode(LoopMode.off);
       await player.setFilePath('${await _folder()}/${found.file}');
       _loaded = found.file;
+      loopStart = loopEnd = null;
+      if (pinnedSelection != selection) pinnedSelection = null;
     }
     return true;
+  }
+
+  void markLoopStart() {
+    if (!looping) loopStart = player.position;
+  }
+
+  Future<void> markLoopEnd() async {
+    final start = loopStart;
+    final end = player.position;
+    if (start == null || end - start < const Duration(milliseconds: 150)) {
+      throw const FormatException('Set B at least 150 ms after A.');
+    }
+    await player.setClip(start: start, end: end);
+    await player.setLoopMode(LoopMode.one);
+    await player.seek(Duration.zero);
+    loopEnd = end;
+  }
+
+  Future<void> clearLoop() async {
+    final start = loopStart;
+    if (looping) {
+      await player.setLoopMode(LoopMode.off);
+      await player.setClip();
+      if (start != null) await player.seek(start);
+    }
+    loopStart = loopEnd = null;
   }
 
   Future<bool> toggle(String selection) async {
@@ -113,6 +151,8 @@ class ScoreAudioSession {
 
   Future<void> stop() async {
     _loaded = null;
+    pinnedSelection = null;
+    loopStart = loopEnd = null;
     await player.stop();
   }
 
