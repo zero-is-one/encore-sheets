@@ -265,6 +265,20 @@ void _validateInk(Map<String, dynamic> pages) {
       }
       final width = stroke['width'];
       final color = stroke['color'];
+      final sampleWidths = stroke['sampleWidths'];
+      if (sampleWidths != null &&
+          (stroke['tool'] != 'pen' ||
+              sampleWidths is! List ||
+              sampleWidths.length != (stroke['points'] as List).length ||
+              sampleWidths.any(
+                (value) =>
+                    value is! num ||
+                    !value.isFinite ||
+                    value <= 0 ||
+                    value > .1,
+              ))) {
+        throw const FormatException('Invalid stylus widths');
+      }
       if ((width != null &&
               (width is! num || !width.isFinite || width <= 0 || width > .1)) ||
           (color != null &&

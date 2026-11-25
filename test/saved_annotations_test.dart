@@ -6,6 +6,17 @@ import 'package:encoresheets/score_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('persists the sampled stylus brush widths with a stroke', () {
+    final ink = PageInk();
+    addTearDown(ink.dispose);
+    ink.begin(const Offset(.1, .2), width: .005, sampleWidth: .002);
+    ink.extend(const Offset(.2, .25), sampleWidth: .009);
+    ink.finish(commit: true);
+    final reopened = PageInk(saved: ink.snapshot());
+    addTearDown(reopened.dispose);
+    expect(reopened.snapshot().single['sampleWidths'], [.002, .009]);
+  });
+
   test('selects a crossed stroke, moves it, and pastes it to another page', () {
     final source = PageInk();
     final target = PageInk();

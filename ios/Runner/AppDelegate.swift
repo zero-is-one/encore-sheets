@@ -6,6 +6,7 @@ import VisionKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
   VNDocumentCameraViewControllerDelegate {
   private var importChannel: FlutterMethodChannel?
+  private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
   private var scanResult: FlutterResult?
   override func application(
@@ -17,6 +18,10 @@ import VisionKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    stylusChannel = FlutterMethodChannel(
+      name: "encoresheets/stylus",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
     let channel = FlutterMethodChannel(
       name: "encoresheets/import",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -42,6 +47,10 @@ import VisionKit
       }
       self.startScan(result)
     }
+  }
+
+  func notifyPencilTap() {
+    stylusChannel?.invokeMethod("switchTool", arguments: nil)
   }
 
   private func startScan(_ result: @escaping FlutterResult) {

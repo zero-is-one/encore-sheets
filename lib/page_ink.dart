@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:flutter/gestures.dart'
+    show kPrimaryButton, kPrimaryStylusButton, kSecondaryStylusButton;
 import 'package:flutter/widgets.dart';
 
 enum InkTool { pen, highlighter, eraser, text, selection }
@@ -13,6 +15,10 @@ typedef InkLayerChange = ({String target, String? source});
 
 const defaultInkLayer = (id: 'base', name: 'Annotations', visible: true);
 
+bool isPenPointer(PointerEvent event) =>
+    event.kind == PointerDeviceKind.stylus ||
+    event.kind == PointerDeviceKind.invertedStylus;
+
 class _Stroke {
   _Stroke(
     this.tool,
@@ -21,6 +27,7 @@ class _Stroke {
     this.color,
     this.text,
     this.layer = 'base',
+    this.sampleWidths,
   });
 
   factory _Stroke.fromJson(Map<String, dynamic> data) => _Stroke(
@@ -33,6 +40,9 @@ class _Stroke {
     color: data['color'] as int?,
     text: data['text'] as String?,
     layer: data['layer'] as String? ?? 'base',
+    sampleWidths: (data['sampleWidths'] as List?)
+        ?.map((value) => (value as num).toDouble())
+        .toList(),
   );
 
   final InkTool tool;
@@ -41,6 +51,7 @@ class _Stroke {
   final int? color;
   final String? text;
   final String layer;
+  final List<double>? sampleWidths;
 
   _Stroke shifted(Offset delta, {String? intoLayer}) => _Stroke(
     tool,
@@ -49,6 +60,7 @@ class _Stroke {
     color: color,
     text: text,
     layer: intoLayer ?? layer,
+    sampleWidths: sampleWidths,
   );
 
   Map<String, dynamic> toJson() => {
@@ -57,6 +69,7 @@ class _Stroke {
     if (color != null) 'color': color,
     if (text != null) 'text': text,
     if (layer != 'base') 'layer': layer,
+    if (sampleWidths != null) 'sampleWidths': sampleWidths,
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
@@ -289,16 +302,29 @@ class PageInk extends ChangeNotifier {
     InkTool tool = InkTool.pen,
     double? width,
     int? color,
+    double? sampleWidth,
   }) {
     final layer = _activeLayer;
     if (layer == null) return;
     _activeStart = point;
-    _active = _Stroke(tool, [point], width: width, color: color, layer: layer);
+    _active = _Stroke(
+      tool,
+      [point],
+      width: width,
+      color: color,
+      layer: layer,
+      sampleWidths: sampleWidth == null ? null : [sampleWidth],
+    );
     notifyListeners();
   }
 
-  void extend(Offset point) {
-    _active?.points.add(point);
+  void extend(Offset point, {double? sampleWidth}) {
+    final stroke = _active;
+    if (stroke == null) return;
+    stroke.points.add(point);
+    if (stroke.sampleWidths case final widths?) {
+      widths.add(sampleWidth ?? widths.last);
+    }
     notifyListeners();
   }
 
@@ -459,6 +485,12 @@ class InkSurface extends StatefulWidget {
     this.onTextTap,
     this.shape,
     this.freeformSelection = false,
+    this.pressure = false,
+    this.tilt = false,
+    this.switchTools = true,
+    this.autoStylus = false,
+    this.onStylusStart,
+    this.onStylusEnd,
   });
 
   final PageInk ink;
@@ -470,6 +502,12 @@ class InkSurface extends StatefulWidget {
   final void Function(Offset point, Size pageSize)? onTextTap;
   final InkShape? shape;
   final bool freeformSelection;
+  final bool pressure;
+  final bool tilt;
+  final bool switchTools;
+  final bool autoStylus;
+  final VoidCallback? onStylusStart;
+  final void Function(bool commit)? onStylusEnd;
 
   @override
   State<InkSurface> createState() => _InkSurfaceState();
@@ -477,6 +515,9 @@ class InkSurface extends StatefulWidget {
 
 class _InkSurfaceState extends State<InkSurface> {
   int? _pointer;
+  InkTool? _activeTool;
+  InkShape? _activeShape;
+  bool _stylus = false;
 
   Offset _point(PointerEvent event, Size size) => Offset(
     (event.localPosition.dx / size.width).clamp(0.0, 1.0),
@@ -485,29 +526,57 @@ class _InkSurfaceState extends State<InkSurface> {
 
   void _end(bool commit) {
     _pointer = null;
-    if (widget.tool == InkTool.selection) {
+    if (_activeTool == InkTool.selection) {
       widget.ink.finishSelection(commit: commit);
     } else {
       widget.ink.finish(commit: commit);
     }
+    if (_stylus) widget.onStylusEnd?.call(commit);
+    _stylus = false;
+    _activeTool = null;
+    _activeShape = null;
+  }
+
+  double? _widthFor(PointerEvent event) {
+    if (!_stylus ||
+        _activeTool != InkTool.pen ||
+        _activeShape != null ||
+        !widget.pressure && !widget.tilt)
+      return null;
+    final pressure =
+        event.pressure.isFinite && event.pressureMax > event.pressureMin
+        ? ((event.pressure - event.pressureMin) /
+                  (event.pressureMax - event.pressureMin))
+              .clamp(0.0, 1.0)
+        : .6;
+    final tilt = event.tilt.isFinite ? event.tilt.clamp(0.0, math.pi / 2) : 0.0;
+    final force = widget.pressure ? .38 + pressure * 1.1 : 1.0;
+    final angle = widget.tilt ? 1 + math.sin(tilt) * .45 : 1.0;
+    return ((widget.width ?? .003) * force * angle).clamp(.0002, .1);
   }
 
   @override
   void didUpdateWidget(InkSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_pointer != null &&
-        (!widget.enabled ||
+        ((!widget.enabled && !widget.autoStylus) ||
             oldWidget.ink != widget.ink ||
             oldWidget.tool != widget.tool ||
             oldWidget.shape != widget.shape)) {
       _pointer = null;
       final ink = oldWidget.ink;
+      final tool = _activeTool;
+      final stylus = _stylus;
+      _activeTool = null;
+      _activeShape = null;
+      _stylus = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (oldWidget.tool == InkTool.selection) {
+        if (tool == InkTool.selection) {
           ink.finishSelection(commit: false);
         } else {
           ink.finish(commit: false);
         }
+        if (stylus) oldWidget.onStylusEnd?.call(false);
       });
     }
   }
@@ -522,21 +591,42 @@ class _InkSurfaceState extends State<InkSurface> {
         ),
       ),
     );
-    if (!widget.enabled) return IgnorePointer(child: canvas);
+    if (!widget.enabled && !widget.autoStylus)
+      return IgnorePointer(child: canvas);
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;
         return Listener(
-          behavior: HitTestBehavior.opaque,
+          behavior: widget.enabled
+              ? HitTestBehavior.opaque
+              : HitTestBehavior.translucent,
           onPointerDown: (event) {
-            if (_pointer != null || event.buttons != 1 || size.isEmpty) return;
-            if (widget.tool == InkTool.text) {
+            final stylus = isPenPointer(event);
+            if (_pointer != null ||
+                size.isEmpty ||
+                (!widget.enabled && !stylus) ||
+                (stylus ? event.buttons == 0 : event.buttons != kPrimaryButton))
+              return;
+            final erasing =
+                stylus &&
+                widget.switchTools &&
+                (event.kind == PointerDeviceKind.invertedStylus ||
+                    event.buttons &
+                            (kPrimaryStylusButton | kSecondaryStylusButton) !=
+                        0);
+            final tool = erasing
+                ? InkTool.eraser
+                : widget.enabled
+                ? widget.tool
+                : InkTool.pen;
+            if (tool == InkTool.text) {
               widget.onTextTap?.call(_point(event, size), size);
               return;
             }
-            if (widget.tool == InkTool.selection) {
+            if (tool == InkTool.selection) {
               _pointer = event.pointer;
+              _activeTool = tool;
               widget.ink.beginSelection(
                 _point(event, size),
                 freeform: widget.freeformSelection,
@@ -552,30 +642,35 @@ class _InkSurfaceState extends State<InkSurface> {
             };
             if (!accepted) return;
             _pointer = event.pointer;
+            _activeTool = tool;
+            _activeShape = widget.enabled && !erasing ? widget.shape : null;
+            _stylus = stylus;
             widget.ink.begin(
               _point(event, size),
-              tool: widget.tool,
+              tool: tool,
               width: widget.width,
               color: widget.color,
+              sampleWidth: _widthFor(event),
             );
+            if (stylus) widget.onStylusStart?.call();
           },
           onPointerMove: (event) {
             if (event.pointer == _pointer && !size.isEmpty) {
               final point = _point(event, size);
-              if (widget.tool == InkTool.selection) {
+              if (_activeTool == InkTool.selection) {
                 widget.ink.extendSelection(point);
-              } else if (widget.shape case final shape?) {
+              } else if (_activeShape case final shape?) {
                 widget.ink.extendShape(shape, point, size);
               } else {
-                widget.ink.extend(point);
+                widget.ink.extend(point, sampleWidth: _widthFor(event));
               }
             }
           },
           onPointerUp: (event) {
             if (event.pointer == _pointer) {
-              if (widget.tool == InkTool.selection && !size.isEmpty) {
+              if (_activeTool == InkTool.selection && !size.isEmpty) {
                 widget.ink.extendSelection(_point(event, size));
-              } else if (widget.shape case final shape? when !size.isEmpty) {
+              } else if (_activeShape case final shape? when !size.isEmpty) {
                 widget.ink.extendShape(shape, _point(event, size), size);
               }
               _end(true);
@@ -654,6 +749,31 @@ class _InkPainter extends CustomPainter {
         ..strokeWidth =
             size.width * (mark.width ?? (highlighted ? .023 : .003));
       final stroke = mark.points;
+      if (mark.sampleWidths case final widths?) {
+        final brush = Path();
+        Offset? previous;
+        var previousRadius = 0.0;
+        for (final (index, point) in stroke.indexed) {
+          final center = position(point);
+          final radius = widths[index] * size.width / 2;
+          brush.addOval(Rect.fromCircle(center: center, radius: radius));
+          if (previous != null && previous != center) {
+            final segment = center - previous;
+            final normal = Offset(segment.dy, -segment.dx) / segment.distance;
+            brush.addPolygon([
+              previous + normal * previousRadius,
+              center + normal * radius,
+              center - normal * radius,
+              previous - normal * previousRadius,
+            ], true);
+          }
+          previous = center;
+          previousRadius = radius;
+        }
+        paint.style = PaintingStyle.fill;
+        canvas.drawPath(brush, paint);
+        continue;
+      }
       final start = position(stroke.first);
       if (stroke.length == 1) {
         paint.style = PaintingStyle.fill;

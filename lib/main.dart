@@ -10,6 +10,8 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'drawing_settings.dart';
+import 'drawing_settings_dialog.dart';
 import 'page_crop.dart';
 import 'page_crop_dialog.dart';
 import 'ink_layers_dialog.dart';
@@ -50,6 +52,7 @@ enum _ReaderDisplay {
   scoreTabs,
   exportPdf,
   crop,
+  drawingSettings,
   shareScorePackage,
   performance,
   hideControls,
@@ -120,8 +123,9 @@ class _ReaderState extends State<Reader> {
   String? _activeInkLayer = defaultInkLayer.id;
   String? _stamp;
   List<String> _personalStamps = [];
-  double? _penWidth;
-  int? _penColor;
+  DrawingSettings _drawing = const DrawingSettings();
+  bool _stylusDrawing = false;
+  bool _lastReaderPointerStylus = false;
   final _edgeTaps = _EdgeTapTracker();
   bool _dispatchingEdgeLink = false;
   int _pdfLinkNavigations = 0;
@@ -135,6 +139,7 @@ class _ReaderState extends State<Reader> {
   List<String> _scoreTabIds = [];
   bool _savingTabs = false;
   static const _sharedImports = MethodChannel('encoresheets/import');
+  static const _stylusChannel = MethodChannel('encoresheets/stylus');
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
 
@@ -163,11 +168,19 @@ class _ReaderState extends State<Reader> {
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
+  bool get _isAppleMobile =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  bool get _autoStylus => _drawing.autoEnter && !_performance && !_picking;
 
   @override
   void initState() {
     super.initState();
     _restorePreferences();
+    if (_isAppleMobile) {
+      _stylusChannel.setMethodCallHandler((call) async {
+        if (call.method == 'switchTool') _switchStylusTool();
+      });
+    }
     _lifecycle = AppLifecycleListener(
       onResume: () {
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
@@ -195,6 +208,7 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          _drawing = DrawingSettings.fromJson(data['drawingSettings']);
           _scoreTabIds = ids
               .where((id) => _library.lookup(id) != null)
               .toList();
@@ -332,6 +346,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler(null);
     }
@@ -1058,6 +1073,8 @@ class _ReaderState extends State<Reader> {
       _itemBookmark = item;
       _halfPreview = false;
       _file = file;
+      _stylusDrawing = false;
+      _lastReaderPointerStylus = false;
       _bytes = bytes;
       _revision++;
       _viewer = PdfViewerController();
@@ -1386,6 +1403,52 @@ class _ReaderState extends State<Reader> {
     _focus.requestFocus();
   }
 
+  void _switchStylusTool() {
+    if (!_drawing.switchTools || _performance || _picking || _pages == 0)
+      return;
+    if (!_inking && _autoStylus) _toggleInk();
+    if (!_inking) return;
+    setState(() {
+      _tool = _tool == InkTool.eraser ? InkTool.pen : InkTool.eraser;
+      _stamp = null;
+      _shape = null;
+    });
+  }
+
+  void _stylusStarted() {
+    if (!_stylusDrawing) setState(() => _stylusDrawing = true);
+  }
+
+  void _stylusFinished(bool commit) {
+    if (!mounted || !_stylusDrawing) return;
+    setState(() => _stylusDrawing = false);
+    if (!commit || _picking || _performance) return;
+    if (_inking && _drawing.autoExit ||
+        !_inking && _autoStylus && !_drawing.autoExit) {
+      _toggleInk();
+    }
+  }
+
+  Future<void> _saveDrawing(DrawingSettings settings) async {
+    try {
+      await _library.updatePreferences({'drawingSettings': settings.toJson()});
+      if (mounted) setState(() => _drawing = settings);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the drawing settings.')),
+        );
+    }
+  }
+
+  Future<void> _configureDrawing() async {
+    final settings = await showDialog<DrawingSettings>(
+      context: context,
+      builder: (_) => DrawingSettingsDialog(initial: _drawing),
+    );
+    if (settings != null && mounted) await _saveDrawing(settings);
+  }
+
   void _fit() {
     if (!_viewer.isReady) return;
     if (!_fitCrop(_page, _viewer)) {
@@ -1596,8 +1659,12 @@ class _ReaderState extends State<Reader> {
         blurRadius: 14,
         offset: Offset(0, 6),
       ),
-      panEnabled: !_inking && !_preferences.halfPageTurns,
-      scaleEnabled: !_inking && !_performance && !_preferences.halfPageTurns,
+      panEnabled: !_inking && !_stylusDrawing && !_preferences.halfPageTurns,
+      scaleEnabled:
+          !_inking &&
+          !_stylusDrawing &&
+          !_performance &&
+          !_preferences.halfPageTurns,
       scrollByMouseWheel: _preferences.halfPageTurns ? null : .2,
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
@@ -1624,6 +1691,7 @@ class _ReaderState extends State<Reader> {
               onLinkTap: (link) {
                 final destination = link.dest;
                 if (destination == null ||
+                    (_autoStylus && _lastReaderPointerStylus) ||
                     (_itemBookmark != null &&
                         (destination.pageNumber < _firstPage ||
                             destination.pageNumber > _lastPage)) ||
@@ -1644,19 +1712,23 @@ class _ReaderState extends State<Reader> {
         Positioned.fill(
           child: Listener(
             behavior: HitTestBehavior.translucent,
-            onPointerDown: (event) => _edgeTaps.down(
-              event,
-              size.width,
-              canAdvance:
-                  !_inking &&
-                  (_preferences.halfPageTurns ||
-                      (_hasNextScore &&
-                          _pages > 0 &&
-                          _page == _lastPage &&
-                          _viewer.isReady &&
-                          _viewer.currentZoom <= _viewer.coverScale * 1.02)),
-              allowBackward: _preferences.halfPageTurns && !_inking,
-            ),
+            onPointerDown: (event) {
+              _lastReaderPointerStylus = isPenPointer(event);
+              if (_autoStylus && _lastReaderPointerStylus) return;
+              _edgeTaps.down(
+                event,
+                size.width,
+                canAdvance:
+                    !_inking &&
+                    (_preferences.halfPageTurns ||
+                        (_hasNextScore &&
+                            _pages > 0 &&
+                            _page == _lastPage &&
+                            _viewer.isReady &&
+                            _viewer.currentZoom <= _viewer.coverScale * 1.02)),
+                allowBackward: _preferences.halfPageTurns && !_inking,
+              );
+            },
             onPointerMove: _edgeTaps.move,
             onPointerCancel: _edgeTaps.cancel,
             onPointerSignal: (event) {
@@ -1761,7 +1833,7 @@ class _ReaderState extends State<Reader> {
         }
       },
       onGeneralTap: (context, controller, details) {
-        if (_inking) return true;
+        if (_inking || _autoStylus && _lastReaderPointerStylus) return true;
         if (_performance && details.type == PdfViewerGeneralTapType.doubleTap) {
           return true;
         }
@@ -1800,12 +1872,22 @@ class _ReaderState extends State<Reader> {
               enabled: _inking,
               allowFinger: _allowFinger || _shape != null,
               tool: _tool,
-              width: _tool == InkTool.pen ? _penWidth : null,
-              color: _tool == InkTool.pen ? _penColor : null,
+              width: _tool == InkTool.pen || !_inking
+                  ? _drawing.preset.width
+                  : null,
+              color: _tool == InkTool.pen || !_inking
+                  ? _drawing.preset.argb
+                  : null,
               onTextTap: (point, size) =>
                   _editText(page.pageNumber, point, size),
               shape: _shape,
               freeformSelection: _freeformSelection,
+              pressure: _drawing.pressure,
+              tilt: _drawing.tilt,
+              switchTools: _drawing.switchTools,
+              autoStylus: _autoStylus,
+              onStylusStart: _stylusStarted,
+              onStylusEnd: _stylusFinished,
             ),
           ),
         ),
@@ -2110,6 +2192,8 @@ class _ReaderState extends State<Reader> {
                         _showPdfExport();
                       case _ReaderDisplay.crop:
                         _showCrop();
+                      case _ReaderDisplay.drawingSettings:
+                        _configureDrawing();
                       case _ReaderDisplay.shareScorePackage:
                         _shareEditableScore();
                       case _ReaderDisplay.scoreTabs:
@@ -2224,6 +2308,10 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.crop,
                       enabled: _entry != null,
                       child: const Text('Crop and straighten'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.drawingSettings,
+                      child: Text('Drawing presets and stylus'),
                     ),
                     if (_library.storage.persistent)
                       PopupMenuItem(
@@ -2360,29 +2448,26 @@ class _ReaderState extends State<Reader> {
               children: [
                 _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
                 if (_tool == InkTool.pen)
-                  PopupMenuButton<(double, int)>(
+                  PopupMenuButton<int>(
                     tooltip: 'Pen style',
                     icon: const Icon(Icons.color_lens_outlined),
-                    onSelected: (style) => setState(() {
-                      _penWidth = style.$1;
-                      _penColor = style.$2;
-                    }),
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: (.003, 0xff9b352e),
-                        child: Text('Fine red'),
-                      ),
-                      PopupMenuItem(
-                        value: (.006, 0xff9b352e),
-                        child: Text('Broad red'),
-                      ),
-                      PopupMenuItem(
-                        value: (.003, 0xff244a91),
-                        child: Text('Fine blue'),
-                      ),
-                      PopupMenuItem(
-                        value: (.006, 0xff262626),
-                        child: Text('Broad black'),
+                    onSelected: (index) {
+                      if (index < 0) {
+                        _configureDrawing();
+                      } else {
+                        _saveDrawing(_drawing.copyWith(selected: index));
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      for (final (index, preset) in _drawing.presets.indexed)
+                        CheckedPopupMenuItem(
+                          value: index,
+                          checked: _drawing.selected == index,
+                          child: Text(preset.name),
+                        ),
+                      const PopupMenuItem(
+                        value: -1,
+                        child: Text('Edit presets and stylus'),
                       ),
                     ],
                   ),
