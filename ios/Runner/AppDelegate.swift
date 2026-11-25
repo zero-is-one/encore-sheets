@@ -538,4 +538,34 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
       NSLog("Could not stage PDF import: %@", error.localizedDescription)
     }
   }
+
+  nonisolated static func stageDroppedFile(_ url: URL, name: String?, fileExtension: String) throws -> String {
+    let accepted: Set<String> = ["pdf", "mp3", "m4a", "aac", "wav", "flac", "ogg", "aif", "aiff"]
+    let suffix = fileExtension.lowercased()
+    let details = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+    guard accepted.contains(suffix), details.isRegularFile == true,
+      let size = details.fileSize, size > 0, size <= 50 * 1024 * 1024 else {
+      throw CocoaError(.fileReadUnknown)
+    }
+    let original = ((name ?? url.lastPathComponent) as NSString).lastPathComponent
+    let stem = (original as NSString).pathExtension.lowercased() == suffix
+      ? (original as NSString).deletingPathExtension
+      : original
+    let folder = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let target = folder.appendingPathComponent((stem.isEmpty ? "Dropped file" : stem) + "." + suffix)
+    do {
+      try FileManager.default.copyItem(at: url, to: target)
+      return target.path
+    } catch {
+      try? FileManager.default.removeItem(at: folder)
+      throw error
+    }
+  }
+
+  func receiveStagedDrop(_ path: String) {
+    pendingPdfs.append(path)
+    importChannel?.invokeMethod("available", arguments: nil)
+  }
 }

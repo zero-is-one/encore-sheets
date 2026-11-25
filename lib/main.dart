@@ -587,7 +587,26 @@ class _ReaderState extends State<Reader> {
       await _startupPreferences;
       if (_restricted(RestrictedTool.transfers) || !mounted) return;
       await _libraryReady;
-      await _importScores(paths.map(XFile.new).toList());
+      final files = paths.map(XFile.new).toList();
+      await _importScores([
+        for (final file in files)
+          if (file.name.toLowerCase().endsWith('.pdf')) file,
+      ]);
+      final audio = files
+          .where(
+            (file) => const {
+              'mp3',
+              'm4a',
+              'aac',
+              'wav',
+              'flac',
+              'ogg',
+              'aif',
+              'aiff',
+            }.contains(file.name.split('.').last.toLowerCase()),
+          )
+          .firstOrNull;
+      if (audio != null && mounted) await _linkDroppedAudio(audio);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -597,6 +616,47 @@ class _ReaderState extends State<Reader> {
     } finally {
       _finishPicking();
     }
+  }
+
+  Future<void> _linkDroppedAudio(XFile file) async {
+    final score = _entry;
+    if (score == null || !ScoreAudioSession.supported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Open a score before dropping an audio track.'),
+        ),
+      );
+      return;
+    }
+    final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
+    final audio = _scoreAudio ??= ScoreAudioSession(_library);
+    final track = await audio.track(selection);
+    if (!mounted) return;
+    if (track != null) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Replace linked audio?'),
+          content: Text('Link ${file.name} in place of ${track.name}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
+    }
+    await audio.attach(selection, file);
+    if (mounted)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Linked ${file.name} to $_title.')),
+      );
   }
 
   void _finishPicking() {

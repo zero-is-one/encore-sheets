@@ -5,6 +5,7 @@ import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.view.DragEvent
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -21,6 +22,7 @@ class MainActivity : FlutterActivity() {
     private val pendingLinks = mutableListOf<String>()
     private var scorePresentation: ScorePresentation? = null
     private val sharedPdfs = mutableListOf<Uri>()
+    private val stagedDrops = mutableListOf<String>()
 
     @Suppress("DEPRECATION")
     private fun collectPdfs(intent: Intent) {
@@ -52,6 +54,77 @@ class MainActivity : FlutterActivity() {
         pendingLinks.add(link)
         intent.action = null
         linksChannel?.invokeMethod("available", null)
+    }
+
+    private fun stageImport(uri: Uri, dropped: Boolean): String? = runCatching {
+        val display = contentResolver.query(
+            uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+        )?.use { if (it.moveToFirst()) it.getString(0) else null }
+        val original = display?.substringAfterLast('/')?.substringAfterLast('\\')
+        val extension = original?.substringAfterLast('.', "")?.lowercase()
+        val name = when {
+            !original.isNullOrBlank() && extension == "pdf" -> original
+            !dropped -> "Shared score.pdf"
+            !original.isNullOrBlank() && extension in supportedAudioTypes -> original
+            contentResolver.getType(uri) == "application/pdf" -> "Dropped score.pdf"
+            else -> return@runCatching null
+        }
+        val directory = File(cacheDir, "score-import-${java.util.UUID.randomUUID()}")
+        check(directory.mkdir())
+        val target = File(directory, name)
+        try {
+            val input = contentResolver.openInputStream(uri) ?: error("Missing file")
+            input.use { source ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var size = 0L
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count == -1) break
+                        size += count
+                        if (dropped && size > 50L * 1024 * 1024) error("Dropped file exceeds 50 MB")
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            target.path
+        } catch (error: Exception) {
+            target.delete()
+            directory.delete()
+            throw error
+        }
+    }.getOrNull()
+
+    private fun enableFileDrop() {
+        window.decorView.setOnDragListener { _, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> event.clipDescription?.let {
+                    it.hasMimeType("application/pdf") || it.hasMimeType("audio/*") ||
+                        it.hasMimeType("application/octet-stream")
+                } == true
+                DragEvent.ACTION_DROP -> {
+                    val data = event.clipData ?: return@setOnDragListener false
+                    val incoming = (0 until minOf(data.itemCount, 20))
+                        .mapNotNull { data.getItemAt(it).uri }
+                        .filter { it.scheme == "content" }
+                        .distinct()
+                    if (incoming.isEmpty()) return@setOnDragListener false
+                    val rights = requestDragAndDropPermissions(event)
+                    Thread {
+                        val paths = incoming.mapNotNull { stageImport(it, dropped = true) }
+                        runOnUiThread {
+                            rights?.release()
+                            if (!isDestroyed && paths.isNotEmpty()) {
+                                stagedDrops.addAll(paths)
+                                importChannel?.invokeMethod("available", null)
+                            }
+                        }
+                    }.start()
+                    true
+                }
+                else -> true
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -122,6 +195,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        enableFileDrop()
         linksChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/links")
         linksChannel?.setMethodCallHandler { call, result ->
             if (call.method == "take") {
@@ -198,22 +272,10 @@ class MainActivity : FlutterActivity() {
             }
             val pending = sharedPdfs.toList()
             sharedPdfs.clear()
+            val drops = stagedDrops.toList()
+            stagedDrops.clear()
             Thread {
-                val paths = pending.mapNotNull { uri ->
-                    runCatching {
-                        val display = contentResolver.query(
-                            uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
-                        )?.use { if (it.moveToFirst()) it.getString(0) else null }
-                        val name = display?.substringAfterLast('/')?.substringAfterLast('\\')
-                            ?.takeIf { it.endsWith(".pdf", ignoreCase = true) } ?: "Shared score.pdf"
-                        val folder = File(cacheDir, "pdf-import-${java.util.UUID.randomUUID()}")
-                        check(folder.mkdir())
-                        val target = File(folder, name)
-                        val input = contentResolver.openInputStream(uri) ?: error("Missing PDF")
-                        input.use { source -> target.outputStream().use { source.copyTo(it) } }
-                        target.path
-                    }.getOrNull()
-                }
+                val paths = drops + pending.mapNotNull { stageImport(it, dropped = false) }
                 runOnUiThread { result.success(paths) }
             }.start()
         }
@@ -282,6 +344,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private companion object {
+        val supportedAudioTypes = setOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "aif", "aiff")
         const val BACKUP_REQUEST = 8041
         const val SCAN_REQUEST = 8042
     }

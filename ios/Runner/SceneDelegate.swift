@@ -1,9 +1,11 @@
 import Flutter
 import PDFKit
 import UIKit
+import UniformTypeIdentifiers
 
-class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate {
+class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate, UIDropInteractionDelegate {
   private var pencilInteraction: UIPencilInteraction?
+  private var scoreDrop: UIDropInteraction?
 
   override func scene(
     _ scene: UIScene,
@@ -17,8 +19,44 @@ class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate {
       interaction.delegate = self
       view.addInteraction(interaction)
       pencilInteraction = interaction
+      let drop = UIDropInteraction(delegate: self)
+      view.addInteraction(drop)
+      scoreDrop = drop
     }
     receive(connectionOptions.urlContexts)
+  }
+
+  func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+    session.hasItemsConforming(toTypeIdentifiers: [UTType.pdf.identifier, UTType.audio.identifier])
+  }
+
+  func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession)
+    -> UIDropProposal {
+    UIDropProposal(operation: .copy)
+  }
+
+  func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+    guard let delegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    for item in session.items.prefix(20) {
+      let provider = item.itemProvider
+      let type = provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+        ? UTType.pdf
+        : provider.registeredTypeIdentifiers.compactMap { UTType($0) }
+          .first { $0.conforms(to: .audio) && $0.preferredFilenameExtension != nil }
+      guard let type, let fileExtension = type.preferredFilenameExtension else { continue }
+      let label = provider.suggestedName
+      provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
+        guard let url else { return }
+        let path: String
+        do {
+          path = try AppDelegate.stageDroppedFile(url, name: label, fileExtension: fileExtension)
+        } catch {
+          NSLog("Could not stage dropped score file: %@", error.localizedDescription)
+          return
+        }
+        DispatchQueue.main.async { delegate.receiveStagedDrop(path) }
+      }
+    }
   }
 
   func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
