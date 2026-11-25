@@ -21,6 +21,11 @@ void main() {
       final (first, _) = await original.import(XFile(firstFile.path));
       final (second, _) = await original.import(XFile(secondFile.path));
       await original.record(second.id, 3);
+      const movement = ScoreBookmark('movement', 'Movement', 2, endPage: 3);
+      await original.updateScore(
+        second.id,
+        (score) => score.copyWith(bookmarks: [movement]),
+      );
       final annotation = {
         '3': [
           {
@@ -36,7 +41,11 @@ void main() {
       };
       await original.writeInk(second.id, annotation);
       await original.saveSetlist(
-        Setlist('evening', 'Evening set', [second.id, first.id, second.id]),
+        Setlist('evening', 'Evening set', [
+          second.id,
+          first.id,
+          movement.selectionId(second.id),
+        ]),
       );
       final backup = await original.createBackup();
 
@@ -47,8 +56,9 @@ void main() {
       final reopened = ScoreLibrary(NativeLibraryStorage(directory: target));
       await reopened.load();
       final ids = reopened.setlists.single.scores;
-      expect(ids.first, ids.last);
-      expect(ids.map((id) => reopened.lookup(id)?.title), [
+      expect(reopened.lookupSelection(ids.last)?.$1.id, ids.first);
+      expect(reopened.lookupSelection(ids.last)?.$2?.endPage, 3);
+      expect(ids.map((id) => reopened.lookupSelection(id)?.$1.title), [
         'Second',
         'First',
         'Second',

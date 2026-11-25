@@ -88,7 +88,7 @@ class _SetlistEditorState extends State<_SetlistEditor> {
 
   Future<void> _add([int? replaceAt]) async {
     final scores = widget.library.recent;
-    final score = await showModalBottomSheet<ScoreEntry>(
+    final selection = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
       builder: (context) => scores.isEmpty
@@ -97,21 +97,34 @@ class _SetlistEditorState extends State<_SetlistEditor> {
             )
           : ListView(
               children: [
-                for (final score in scores)
+                for (final score in scores) ...[
                   ListTile(
                     leading: const Icon(Icons.description_outlined),
                     title: Text(score.title),
-                    onTap: () => Navigator.pop(context, score),
+                    onTap: () => Navigator.pop(context, score.id),
                   ),
+                  for (final bookmark in score.bookmarks.where(
+                    (item) => item.isItem,
+                  ))
+                    ListTile(
+                      leading: const Icon(Icons.bookmark_outline),
+                      title: Text(bookmark.title),
+                      subtitle: Text(score.title),
+                      onTap: () => Navigator.pop(
+                        context,
+                        bookmark.selectionId(score.id),
+                      ),
+                    ),
+                ],
               ],
             ),
     );
-    if (!mounted || score == null) return;
+    if (!mounted || selection == null) return;
     setState(() {
       if (replaceAt == null) {
-        _scores.add((key: Object(), id: score.id));
+        _scores.add((key: Object(), id: selection));
       } else {
-        _scores[replaceAt] = (key: _scores[replaceAt].key, id: score.id);
+        _scores[replaceAt] = (key: _scores[replaceAt].key, id: selection);
       }
     });
   }
@@ -179,10 +192,13 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                     child: Icon(Icons.drag_handle),
                   ),
                 ),
-                title: Text(
-                  widget.library.lookup(_scores[index].id)?.title ??
-                      'Missing score',
-                ),
+                title: Text(switch (widget.library.lookupSelection(
+                  _scores[index].id,
+                )) {
+                  (final score, final bookmark) =>
+                    bookmark?.title ?? score.title,
+                  null => 'Missing score',
+                }),
                 onTap: _saving ? null : () => _add(index),
                 trailing: IconButton(
                   tooltip: 'Remove score',

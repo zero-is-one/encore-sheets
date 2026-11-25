@@ -5,19 +5,28 @@ import 'library_storage_memory.dart'
     as platform;
 
 class ScoreBookmark {
-  const ScoreBookmark(this.id, this.title, this.page);
+  const ScoreBookmark(this.id, this.title, this.page, {this.endPage});
 
   factory ScoreBookmark.fromJson(Map<String, dynamic> json) => ScoreBookmark(
     json['id'] as String,
     json['title'] as String,
     json['page'] as int,
+    endPage: json['endPage'] as int?,
   );
 
   final String id;
   final String title;
   final int page;
+  final int? endPage;
+  bool get isItem => endPage != null;
+  String selectionId(String scoreId) => '$scoreId:$id';
 
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'page': page};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'page': page,
+    if (endPage != null) 'endPage': endPage,
+  };
 }
 
 class ScoreEntry {
@@ -135,6 +144,19 @@ class ScoreLibrary {
       _scores.values.toList()..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
   ScoreEntry? lookup(String id) => _scores[id];
+  (ScoreEntry, ScoreBookmark?)? lookupSelection(String id) {
+    final parts = id.split(':');
+    final score = lookup(parts.first);
+    if (score == null) return null;
+    if (parts.length == 1) return (score, null);
+    final bookmark = score.bookmarks
+        .where((item) => item.isItem && item.id == parts.last)
+        .firstOrNull;
+    return bookmark == null ? null : (score, bookmark);
+  }
+
+  bool isInSetlist(String id) =>
+      _setlists.values.any((setlist) => setlist.scores.contains(id));
   List<String> get collections => {
     ..._collections,
     for (final score in _scores.values) ...score.collections,

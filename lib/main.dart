@@ -70,6 +70,7 @@ class _ReaderState extends State<Reader> {
   late final _library = ScoreLibrary(LibraryStorage.create());
   late final _libraryReady = _library.load();
   ScoreEntry? _entry;
+  ScoreBookmark? _itemBookmark;
   XFile? _file;
   Uint8List? _bytes;
   int _revision = 0;
@@ -101,16 +102,24 @@ class _ReaderState extends State<Reader> {
   bool get _hasNextScore =>
       _playing != null && _setIndex + 1 < _playing!.scores.length;
 
+  int get _firstPage =>
+      (_itemBookmark?.page ?? 1).clamp(1, _pages > 0 ? _pages : 1);
+  int get _lastPage => (_itemBookmark?.endPage ?? _pages).clamp(
+    _firstPage,
+    _pages > 0 ? _pages : 1,
+  );
+
   String? get _nextTitle {
     if (!_preferences.showNextTitle ||
         !_hasNextScore ||
         _pages == 0 ||
-        _page != _pages)
+        _page != _lastPage)
       return null;
-    return _library.lookup(_playing!.scores[_setIndex + 1])?.title;
+    final next = _library.lookupSelection(_playing!.scores[_setIndex + 1]);
+    return next?.$2?.title ?? next?.$1.title;
   }
 
-  String get _title => _entry?.title ?? 'First Light';
+  String get _title => _itemBookmark?.title ?? _entry?.title ?? 'First Light';
   bool get _supportsSharedImport =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
@@ -464,7 +473,11 @@ class _ReaderState extends State<Reader> {
         final bookmark = entry.bookmarks.firstWhere(
           (item) => item.id == parts[2],
         );
-        await _openLibraryScore(entry, startPage: bookmark.page);
+        await _openLibraryScore(
+          entry,
+          startPage: bookmark.page,
+          item: bookmark.isItem ? bookmark : null,
+        );
       } else {
         await _openLibraryScore(_library.lookup(result)!);
       }
@@ -479,8 +492,12 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _openLibraryScore(ScoreEntry entry, {int? startPage}) async {
-    if (_entry?.id != entry.id) {
+  Future<void> _openLibraryScore(
+    ScoreEntry entry, {
+    int? startPage,
+    ScoreBookmark? item,
+  }) async {
+    if (_entry?.id != entry.id || _itemBookmark?.id != item?.id) {
       final local = await _library.storage.openScore(entry.id);
       final bytes = kIsWeb ? await local.readAsBytes() : null;
       final annotations = await _library.readInk(entry.id);
@@ -491,6 +508,7 @@ class _ReaderState extends State<Reader> {
         bytes,
         annotations: annotations,
         startPage: startPage,
+        item: item,
       );
     } else if (startPage != null) {
       _jumpToPage(startPage);
@@ -512,25 +530,44 @@ class _ReaderState extends State<Reader> {
           pageCount: _pages,
         ),
       );
-      if (mounted && bookmark != null) _jumpToPage(bookmark.page);
+      if (mounted && bookmark != null) {
+        if (bookmark.isItem || _itemBookmark != null) {
+          await _openLibraryScore(
+            entry,
+            startPage: bookmark.page,
+            item: bookmark.isItem ? bookmark : null,
+          );
+        } else {
+          _jumpToPage(bookmark.page);
+        }
+      }
     } finally {
       _finishPicking();
     }
   }
 
   Future<void> _playScore(Setlist setlist, int index) async {
-    final entry = _library.lookup(setlist.scores[index]);
-    if (entry == null) throw StateError('Setlist score is missing');
+    final selection = _library.lookupSelection(setlist.scores[index]);
+    if (selection == null) throw StateError('Setlist score is missing');
+    final (entry, item) = selection;
     final local = await _library.storage.openScore(entry.id);
     final bytes = kIsWeb ? await local.readAsBytes() : null;
     final annotations = await _library.readInk(entry.id);
     if (!mounted) return;
-    _load(entry, local, bytes, annotations: annotations, startPage: 1);
+    final start = item?.page ?? 1;
+    _load(
+      entry,
+      local,
+      bytes,
+      annotations: annotations,
+      startPage: start,
+      item: item,
+    );
     setState(() {
       _playing = setlist;
       _setIndex = index;
     });
-    _remember(entry.id, 1, opened: true);
+    _remember(entry.id, start, opened: true);
   }
 
   Future<void> _editScore(ScoreEntry score) async {
@@ -628,6 +665,7 @@ class _ReaderState extends State<Reader> {
     Uint8List? bytes, {
     Map<String, dynamic> annotations = const {},
     int? startPage,
+    ScoreBookmark? item,
   }) {
     if (_entry?.id != entry?.id) {
       _previousItem = (id: _entry?.id, page: _page);
@@ -642,6 +680,7 @@ class _ReaderState extends State<Reader> {
     final retiredInk = _ink.values.toList();
     setState(() {
       _entry = entry;
+      _itemBookmark = item;
       _file = file;
       _bytes = bytes;
       _revision++;
@@ -664,7 +703,7 @@ class _ReaderState extends State<Reader> {
 
   void _go(int page) {
     if (_picking || !_viewer.isReady || _pages == 0) return;
-    if (page > _pages && _hasNextScore) {
+    if (page > _lastPage && _hasNextScore) {
       _nextScore();
       return;
     }
@@ -673,7 +712,7 @@ class _ReaderState extends State<Reader> {
 
   void _jumpToPage(int page) {
     if (!_viewer.isReady || _pages == 0) return;
-    final target = page.clamp(1, _pages);
+    final target = page.clamp(_firstPage, _lastPage);
     if (target == _page) return;
     _ink[_page]?.finish(commit: false);
     _previousPage = _page;
@@ -777,6 +816,9 @@ class _ReaderState extends State<Reader> {
               onLinkTap: (link) {
                 final destination = link.dest;
                 if (destination == null ||
+                    (_itemBookmark != null &&
+                        (destination.pageNumber < _firstPage ||
+                            destination.pageNumber > _lastPage)) ||
                     (_edgeTaps.handled && !_dispatchingEdgeLink) ||
                     revision != _revision ||
                     !_viewer.isReady) {
@@ -796,7 +838,7 @@ class _ReaderState extends State<Reader> {
                   !_inking &&
                   _hasNextScore &&
                   _pages > 0 &&
-                  _page == _pages &&
+                  _page == _lastPage &&
                   _viewer.isReady &&
                   _viewer.currentZoom <= _viewer.coverScale * 1.02,
             ),
@@ -847,6 +889,13 @@ class _ReaderState extends State<Reader> {
             _pages == 0 ||
             page == null ||
             page == _page) {
+          return;
+        }
+        if (page < _firstPage || page > _lastPage) {
+          _viewer.goToPage(
+            pageNumber: page.clamp(_firstPage, _lastPage),
+            duration: Duration.zero,
+          );
           return;
         }
         _previousPage = _page;
@@ -1188,7 +1237,8 @@ class _ReaderState extends State<Reader> {
   Future<void> _showThumbnails() async {
     if (_picking || _pages == 0 || !_viewer.isReady) return;
     final document = _viewer.document;
-    final count = _pages;
+    final start = _firstPage;
+    final count = _lastPage - start + 1;
     setState(() => _picking = true);
     int? destination;
     try {
@@ -1205,7 +1255,7 @@ class _ReaderState extends State<Reader> {
             ),
             itemCount: count,
             itemBuilder: (context, index) {
-              final page = index + 1;
+              final page = index + start;
               return OutlinedButton(
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.all(6),
@@ -1314,23 +1364,27 @@ class _ReaderState extends State<Reader> {
             children: [
               IconButton(
                 tooltip: 'Previous page',
-                onPressed: _page <= 1 ? null : () => _go(_page - 1),
+                onPressed: _page <= _firstPage ? null : () => _go(_page - 1),
                 icon: const Icon(Icons.chevron_left),
               ),
               Expanded(
                 child: Slider(
                   // A saved page is known before the PDF has loaded its count.
-                  value: _pages > 1
+                  value: _lastPage > _firstPage
                       ? (_seek ?? _page.toDouble()).clamp(
-                          1.0,
-                          _pages.toDouble(),
+                          _firstPage.toDouble(),
+                          _lastPage.toDouble(),
                         )
-                      : 1.0,
-                  min: 1,
-                  max: _pages > 1 ? _pages.toDouble() : 2,
-                  divisions: _pages > 1 ? _pages - 1 : null,
+                      : _firstPage.toDouble(),
+                  min: _firstPage.toDouble(),
+                  max: _lastPage > _firstPage
+                      ? _lastPage.toDouble()
+                      : (_firstPage + 1).toDouble(),
+                  divisions: _lastPage > _firstPage
+                      ? _lastPage - _firstPage
+                      : null,
                   semanticFormatterCallback: (value) => 'Page ${value.round()}',
-                  onChanged: _pages > 1
+                  onChanged: _lastPage > _firstPage
                       ? (value) => setState(() => _seek = value)
                       : null,
                   onChangeEnd: (value) {
@@ -1347,10 +1401,10 @@ class _ReaderState extends State<Reader> {
                 ),
               ),
               IconButton(
-                tooltip: _page == _pages && _hasNextScore
+                tooltip: _page == _lastPage && _hasNextScore
                     ? 'Next score'
                     : 'Next page',
-                onPressed: _pages == 0 || (_page >= _pages && !_hasNextScore)
+                onPressed: _pages == 0 || (_page >= _lastPage && !_hasNextScore)
                     ? null
                     : () => _go(_page + 1),
                 icon: const Icon(Icons.chevron_right),
@@ -1662,11 +1716,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             )
             .toList();
     final matchingBookmarks = [
-      if (_query.isNotEmpty)
-        for (final score in inCollection)
-          for (final bookmark in score.bookmarks)
-            if (bookmark.title.toLowerCase().contains(_query))
-              (score, bookmark),
+      for (final score in inCollection)
+        for (final bookmark in score.bookmarks)
+          if ((bookmark.isItem || _query.isNotEmpty) &&
+              bookmark.title.toLowerCase().contains(_query))
+            (score, bookmark),
     ];
     return Scaffold(
       appBar: AppBar(

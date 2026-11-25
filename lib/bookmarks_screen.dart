@@ -26,6 +26,10 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   Future<void> _edit([ScoreBookmark? bookmark]) async {
     var title = bookmark?.title ?? '';
     var page = bookmark?.page ?? widget.page;
+    var end = bookmark?.endPage?.toString() ?? '';
+    final usedInSetlist =
+        bookmark != null &&
+        widget.library.isInSetlist(bookmark.selectionId(widget.scoreId));
     final saved = await showDialog<ScoreBookmark>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -47,6 +51,14 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 onChanged: (value) =>
                     refresh(() => page = int.tryParse(value) ?? 0),
               ),
+              TextFormField(
+                initialValue: end,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'End page (optional)',
+                ),
+                onChanged: (value) => refresh(() => end = value.trim()),
+              ),
             ],
           ),
           actions: [
@@ -56,7 +68,13 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
             ),
             FilledButton(
               onPressed:
-                  title.trim().isEmpty || page < 1 || page > widget.pageCount
+                  title.trim().isEmpty ||
+                      page < 1 ||
+                      page > widget.pageCount ||
+                      (usedInSetlist && end.isEmpty) ||
+                      (end.isNotEmpty &&
+                          ((int.tryParse(end) ?? 0) < page ||
+                              (int.tryParse(end) ?? 0) > widget.pageCount))
                   ? null
                   : () => Navigator.pop(
                       context,
@@ -65,6 +83,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                             DateTime.now().microsecondsSinceEpoch.toString(),
                         title.trim(),
                         page,
+                        endPage: int.tryParse(end),
                       ),
                     ),
               child: const Text('Save'),
@@ -128,7 +147,11 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 return ListTile(
                   leading: const Icon(Icons.bookmark_outline),
                   title: Text(bookmark.title),
-                  subtitle: Text('Page ${bookmark.page}'),
+                  subtitle: Text(
+                    bookmark.isItem
+                        ? 'Pages ${bookmark.page}–${bookmark.endPage}'
+                        : 'Page ${bookmark.page}',
+                  ),
                   onTap: _saving
                       ? null
                       : () => Navigator.pop(context, bookmark),
@@ -145,9 +168,15 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                         );
                       }
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'edit', child: Text('Edit')),
-                      PopupMenuItem(value: 'remove', child: Text('Remove')),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(
+                        value: 'remove',
+                        enabled: !widget.library.isInSetlist(
+                          bookmark.selectionId(widget.scoreId),
+                        ),
+                        child: const Text('Remove'),
+                      ),
                     ],
                   ),
                 );

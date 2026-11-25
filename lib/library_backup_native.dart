@@ -64,6 +64,12 @@ void _exportBackup(
         Setlist.fromJson(row as Map<String, dynamic>),
     ];
     final sourceIds = sourceScores.map((score) => score.id).toSet();
+    final validSelections = {
+      ...sourceIds,
+      for (final score in sourceScores)
+        for (final bookmark in score.bookmarks.where((item) => item.isItem))
+          bookmark.selectionId(score.id),
+    };
     if (sourceIds.length != sourceScores.length ||
         sourceSetlists.map((setlist) => setlist.id).toSet().length !=
             sourceSetlists.length ||
@@ -73,7 +79,7 @@ void _exportBackup(
         sourceSetlists.any(
           (setlist) =>
               setlist.name.trim().isEmpty ||
-              setlist.scores.any((id) => !sourceIds.contains(id)),
+              setlist.scores.any((id) => !validSelections.contains(id)),
         )) {
       throw const FormatException('Invalid library backup catalog');
     }
@@ -91,6 +97,9 @@ void _exportBackup(
           File('$root/$id.ink.json').existsSync());
       ids.add(id);
       mapped[old.id] = id;
+      for (final bookmark in old.bookmarks.where((item) => item.isItem)) {
+        mapped[bookmark.selectionId(old.id)] = bookmark.selectionId(id);
+      }
       final pdf = archive.find('scores/$index.pdf');
       if (pdf == null || !pdf.isFile || pdf.isSymbolicLink || pdf.size < 5) {
         throw const FormatException('Missing backup PDF');
