@@ -15,6 +15,7 @@ import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
 import 'score_library.dart';
+import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
 
@@ -470,18 +471,19 @@ class _ReaderState extends State<Reader> {
         return;
       }
       if (result == 'batch') {
-        final edit = await editBatchMetadata(context, _library.recent);
-        if (edit != null) {
-          await _library.batchMetadata(
-            edit.ids,
-            edit.field,
-            edit.value,
-            append: edit.append,
-          );
-          if (mounted && _entry != null) {
-            setState(() => _entry = _library.lookup(_entry!.id));
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => ScoreManagementScreen(library: _library),
+        );
+        if (!mounted) return;
+        if (_entry case final current?) {
+          if (_library.lookup(current.id) case final refreshed?) {
+            setState(() => _entry = refreshed);
+          } else {
+            _playing = null;
+            _load(null, null, null);
           }
         }
+        if (score != null) await _openLibraryScore(score);
         return;
       }
       if (result.startsWith('edit:')) {
@@ -2346,11 +2348,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             icon: const Icon(Icons.folder_copy_outlined),
           ),
           IconButton(
-            tooltip: 'Edit multiple scores',
+            tooltip: 'Select scores',
             onPressed: widget.scores.isEmpty
                 ? null
                 : () => Navigator.pop(context, 'batch'),
-            icon: const Icon(Icons.edit_note),
+            icon: const Icon(Icons.checklist),
           ),
         ],
       ),
@@ -2531,7 +2533,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                   itemBuilder: (_) => const [
                                     PopupMenuItem(
                                       value: 'details',
-                                      child: Text('Score details'),
+                                      child: Text('Rename or edit details'),
                                     ),
                                     PopupMenuItem(
                                       value: 'libraries',

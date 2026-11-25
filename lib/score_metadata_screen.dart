@@ -94,8 +94,15 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
 }
 
 Future<({Set<String> ids, String field, String value, bool append})?>
-editBatchMetadata(BuildContext context, List<ScoreEntry> scores) async {
-  final ids = <String>{};
+editBatchMetadata(
+  BuildContext context,
+  List<ScoreEntry> scores, {
+  bool selectAll = false,
+}) async {
+  final ids = <String>{
+    if (selectAll)
+      for (final score in scores) score.id,
+  };
   var field = 'tags';
   var append = true;
   var value = '';

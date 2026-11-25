@@ -4,10 +4,16 @@ import 'pdf_assembly.dart';
 import 'score_library.dart';
 
 class PdfAssemblyScreen extends StatefulWidget {
-  const PdfAssemblyScreen({super.key, required this.library, this.source});
+  const PdfAssemblyScreen({
+    super.key,
+    required this.library,
+    this.source,
+    this.initialSelection = const [],
+  });
 
   final ScoreLibrary library;
   final ScoreEntry? source;
+  final List<ScoreEntry> initialSelection;
 
   @override
   State<PdfAssemblyScreen> createState() => _PdfAssemblyScreenState();
@@ -15,7 +21,7 @@ class PdfAssemblyScreen extends StatefulWidget {
 
 class _PdfAssemblyScreenState extends State<PdfAssemblyScreen> {
   final _form = GlobalKey<FormState>();
-  final _selected = <ScoreEntry>[];
+  late final _selected = [...widget.initialSelection];
   late final _title = TextEditingController(
     text: widget.source == null
         ? 'Combined score'
