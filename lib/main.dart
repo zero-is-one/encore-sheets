@@ -10,6 +10,7 @@ import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'bookmarks_screen.dart';
+import 'jump_links_screen.dart';
 import 'score_library.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
@@ -26,6 +27,7 @@ enum _ReaderDisplay {
   previousPage,
   previousScore,
   bookmarks,
+  jumpLinks,
   performance,
   hideControls,
   gestures,
@@ -554,6 +556,76 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showJumpLinks() async {
+    final id = _entry?.id;
+    if (id == null || _picking || !_viewer.isReady) return;
+    final score = _library.lookup(id)!;
+    final document = _viewer.document;
+    setState(() => _picking = true);
+    try {
+      final links = await Navigator.of(context).push<List<ScoreJump>>(
+        MaterialPageRoute(
+          builder: (_) => JumpLinksScreen(
+            document: document,
+            page: _page,
+            links: score.jumps,
+          ),
+        ),
+      );
+      if (links == null || !mounted) return;
+      await _library.updateScore(id, (old) => old.copyWith(jumps: links));
+      if (mounted) setState(() => _entry = _library.lookup(id));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save score links.')),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Iterable<(ScoreJump, JumpPoint, JumpPoint, bool)> _jumpMarkers() sync* {
+    for (final link in _entry?.jumps ?? const <ScoreJump>[]) {
+      if (link.source.page < _firstPage ||
+          link.source.page > _lastPage ||
+          link.target.page < _firstPage ||
+          link.target.page > _lastPage)
+        continue;
+      yield (link, link.source, link.target, false);
+      yield (link, link.target, link.source, true);
+    }
+  }
+
+  Offset _jumpPosition(JumpPoint point) {
+    final rect = _viewer.layout.pageLayouts[point.page - 1];
+    return rect.topLeft + Offset(rect.width * point.x, rect.height * point.y);
+  }
+
+  bool _followJumpAt(Offset position) {
+    if (_picking || _inking || !_viewer.isReady || _pages == 0) return false;
+    for (final (_, marker, target, _) in _jumpMarkers()) {
+      if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
+              .distance <=
+          22) {
+        _followJump(target);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _followJump(JumpPoint target) {
+    if (_picking || !_viewer.isReady) return;
+    _jumpToPage(target.page);
+    final point = _jumpPosition(target);
+    _viewer.ensureVisible(
+      Rect.fromCenter(center: point, width: 1, height: 1),
+      duration: Duration.zero,
+    );
+    _focus.requestFocus();
+  }
+
   Future<void> _playScore(Setlist setlist, int index) async {
     final selection = _library.lookupSelection(setlist.scores[index]);
     if (selection == null) throw StateError('Setlist score is missing');
@@ -864,7 +936,9 @@ class _ReaderState extends State<Reader> {
               // callback from the viewer's double-tap recognizer.
               _dispatchingEdgeLink = true;
               try {
-                if (!handleLinkTap(event.localPosition)) _performTap(step);
+                if (!_followJumpAt(event.localPosition) &&
+                    !handleLinkTap(event.localPosition))
+                  _performTap(step);
               } finally {
                 _dispatchingEdgeLink = false;
               }
@@ -936,7 +1010,7 @@ class _ReaderState extends State<Reader> {
         }
         if (details.type != PdfViewerGeneralTapType.tap) return false;
         _focus.requestFocus();
-        _performTap(0);
+        if (!_followJumpAt(details.localPosition)) _performTap(0);
         return true;
       },
       pageOverlaysBuilder: (context, rect, page) => [
@@ -954,6 +1028,36 @@ class _ReaderState extends State<Reader> {
             color: _tool == InkTool.pen ? _penColor : null,
           ),
         ),
+        if (!_inking)
+          for (final (link, point, target, returning) in _jumpMarkers())
+            if (point.page == page.pageNumber)
+              Positioned(
+                left: point.x * rect.width - 18,
+                top: point.y * rect.height - 18,
+                child: IgnorePointer(
+                  child: Semantics(
+                    label: returning ? 'Return from ${link.title}' : link.title,
+                    button: true,
+                    onTap: () => _followJump(target),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: returning ? _brass : const Color(0xff316989),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: Icon(
+                        returning
+                            ? Icons.reply
+                            : Icons.subdirectory_arrow_right,
+                        size: 19,
+                        color: returning ? _rail : Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
       ],
       loadingBannerBuilder: (_, _, _) =>
           const Center(child: CircularProgressIndicator()),
@@ -1126,6 +1230,8 @@ class _ReaderState extends State<Reader> {
                         _returnToPreviousScore();
                       case _ReaderDisplay.bookmarks:
                         _showBookmarks();
+                      case _ReaderDisplay.jumpLinks:
+                        _showJumpLinks();
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -1181,6 +1287,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.bookmarks,
                       enabled: _entry != null,
                       child: const Text('Bookmarks'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.jumpLinks,
+                      enabled: _entry != null,
+                      child: const Text('Repeat & coda links'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,

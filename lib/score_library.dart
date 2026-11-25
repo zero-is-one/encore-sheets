@@ -29,6 +29,36 @@ class ScoreBookmark {
   };
 }
 
+class JumpPoint {
+  const JumpPoint(this.page, this.x, this.y);
+  factory JumpPoint.fromJson(Map<String, dynamic> data) => JumpPoint(
+    data['page'] as int,
+    (data['x'] as num).toDouble(),
+    (data['y'] as num).toDouble(),
+  );
+  final int page;
+  final double x;
+  final double y;
+  Map<String, dynamic> toJson() => {'page': page, 'x': x, 'y': y};
+}
+
+class ScoreJump {
+  const ScoreJump(this.title, this.source, this.target);
+  factory ScoreJump.fromJson(Map<String, dynamic> data) => ScoreJump(
+    data['title'] as String,
+    JumpPoint.fromJson(data['source'] as Map<String, dynamic>),
+    JumpPoint.fromJson(data['target'] as Map<String, dynamic>),
+  );
+  final String title;
+  final JumpPoint source;
+  final JumpPoint target;
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'source': source.toJson(),
+    'target': target.toJson(),
+  };
+}
+
 class ScoreEntry {
   const ScoreEntry({
     required this.id,
@@ -39,6 +69,7 @@ class ScoreEntry {
     this.collections = const [],
     this.bookmarks = const [],
     this.flags = const [],
+    this.jumps = const [],
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -53,6 +84,10 @@ class ScoreEntry {
         ScoreBookmark.fromJson(item as Map<String, dynamic>),
     ],
     flags: (json['flags'] as List?)?.cast<int>() ?? const [],
+    jumps: [
+      for (final item in (json['jumps'] as List? ?? const []))
+        ScoreJump.fromJson(item as Map<String, dynamic>),
+    ],
   );
 
   final String id;
@@ -63,6 +98,7 @@ class ScoreEntry {
   final List<String> collections;
   final List<ScoreBookmark> bookmarks;
   final List<int> flags;
+  final List<ScoreJump> jumps;
 
   ScoreEntry copyWith({
     String? id,
@@ -73,6 +109,7 @@ class ScoreEntry {
     List<String>? collections,
     List<ScoreBookmark>? bookmarks,
     List<int>? flags,
+    List<ScoreJump>? jumps,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -82,6 +119,7 @@ class ScoreEntry {
     collections: collections ?? this.collections,
     bookmarks: bookmarks ?? this.bookmarks,
     flags: flags ?? this.flags,
+    jumps: jumps ?? this.jumps,
   );
 
   Map<String, dynamic> toJson() => {
@@ -94,6 +132,7 @@ class ScoreEntry {
     if (bookmarks.isNotEmpty)
       'bookmarks': bookmarks.map((item) => item.toJson()).toList(),
     if (flags.isNotEmpty) 'flags': flags,
+    if (jumps.isNotEmpty) 'jumps': jumps.map((item) => item.toJson()).toList(),
   };
 }
 
