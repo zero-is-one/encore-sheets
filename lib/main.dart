@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
@@ -8,6 +10,8 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'page_crop.dart';
+import 'page_crop_dialog.dart';
 import 'ink_layers_dialog.dart';
 import 'pdf_assembly_screen.dart';
 import 'pdf_export_screen.dart';
@@ -45,6 +49,7 @@ enum _ReaderDisplay {
   spreads,
   scoreTabs,
   exportPdf,
+  crop,
   shareScorePackage,
   performance,
   hideControls,
@@ -119,6 +124,7 @@ class _ReaderState extends State<Reader> {
   int? _penColor;
   final _edgeTaps = _EdgeTapTracker();
   bool _dispatchingEdgeLink = false;
+  int _pdfLinkNavigations = 0;
   Setlist? _playing;
   int _setIndex = 0;
   bool _performance = false;
@@ -1145,6 +1151,36 @@ class _ReaderState extends State<Reader> {
       ? 0
       : _preferences.spreadStep;
 
+  PageCrop? _cropFor(int page) => _entry?.crops[page];
+
+  bool _fitCrop(int page, PdfViewerController controller) {
+    final crop = _cropFor(page);
+    if (crop == null || _spreadStep > 0 || !controller.isReady) return false;
+    final bounds = crop.pdfBounds(controller.document.pages[page - 1]);
+    if (_landscapeWidth) {
+      final visible = controller.calcRectForRectInsidePage(
+        pageNumber: page,
+        rect: bounds,
+      );
+      final zoom = math.max(1, controller.viewSize.width - 24) / visible.width;
+      controller.goToPosition(
+        documentOffset: Offset(
+          visible.left - 12 / zoom,
+          visible.top - 12 / zoom,
+        ),
+        zoom: zoom,
+      );
+      return true;
+    }
+    controller.goToRectInsidePage(
+      pageNumber: page,
+      rect: bounds,
+      anchor: PdfPageAnchor.center,
+      duration: Duration.zero,
+    );
+    return true;
+  }
+
   bool get _landscapeWidth =>
       _preferences.landscapeWidth &&
       _spreadStep == 0 &&
@@ -1153,7 +1189,8 @@ class _ReaderState extends State<Reader> {
 
   bool _turnLandscapeSection(int step) {
     final visible = _viewer.visibleRect;
-    final page = _viewer.layout.pageLayouts[_page - 1];
+    final fullPage = _viewer.layout.pageLayouts[_page - 1];
+    final page = _cropFor(_page)?.within(fullPage) ?? fullPage;
     final bottom = page.bottom - visible.height;
     if (bottom <= page.top) return false;
     if (step < 0 && visible.top <= page.top + 1 ||
@@ -1177,6 +1214,7 @@ class _ReaderState extends State<Reader> {
       return;
     }
     _ink[_page]?.finish(commit: false);
+    final wasCropped = _cropFor(_page) != null;
     _previousPage = _page;
     setState(() {
       _page = target;
@@ -1189,8 +1227,15 @@ class _ReaderState extends State<Reader> {
           viewer.goToPage(pageNumber: target, duration: Duration.zero);
         }
       });
-    } else {
-      _viewer.goToPage(pageNumber: target, duration: Duration.zero);
+    } else if (!_fitCrop(target, _viewer)) {
+      if (wasCropped && _spreadStep == 0) {
+        _viewer.goTo(
+          _viewer.calcMatrixForFit(pageNumber: target),
+          duration: Duration.zero,
+        );
+      } else {
+        _viewer.goToPage(pageNumber: target, duration: Duration.zero);
+      }
     }
     _remember(_entry?.id, target);
   }
@@ -1343,8 +1388,71 @@ class _ReaderState extends State<Reader> {
 
   void _fit() {
     if (!_viewer.isReady) return;
-    _viewer.goTo(_viewer.calcMatrixForFit(pageNumber: _page));
+    if (!_fitCrop(_page, _viewer)) {
+      _viewer.goTo(_viewer.calcMatrixForFit(pageNumber: _page));
+    }
     _focus.requestFocus();
+  }
+
+  Future<void> _showCrop() async {
+    final score = _entry;
+    if (_picking || score == null || !_viewer.isReady || _pages == 0) return;
+    final current = _page;
+    final document = _viewer.document;
+    setState(() => _picking = true);
+    try {
+      final result = await showDialog<(PageCropScope, PageCrop)>(
+        context: context,
+        builder: (_) => PageCropDialog(
+          page: document.pages[current - 1],
+          initial: score.crops[current],
+        ),
+      );
+      if (result == null || !mounted) return;
+      final (scope, crop) = result;
+      final next = Map.of(score.crops);
+      void save(int page, PageCrop value) {
+        if (value.isIdentity) {
+          next.remove(page);
+        } else {
+          next[page] = value;
+        }
+      }
+
+      switch (scope) {
+        case PageCropScope.current:
+          save(current, crop);
+        case PageCropScope.allLikeCurrent:
+          for (var page = 1; page <= document.pages.length; page++) {
+            save(page, crop);
+          }
+        case PageCropScope.autoAll:
+          for (final page in document.pages) {
+            if (!mounted) return;
+            final detected = await detectPageMargins(page);
+            save(
+              page.pageNumber,
+              detected.copyWith(angle: next[page.pageNumber]?.angle),
+            );
+          }
+        case PageCropScope.resetAll:
+          next.clear();
+      }
+      await _library.updateScore(
+        score.id,
+        (previous) => previous.copyWith(crops: next),
+      );
+      if (!mounted || _entry?.id != score.id) return;
+      setState(() => _entry = _library.lookup(score.id));
+      _fit();
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not apply the page crop.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   double _splitFor(int page) =>
@@ -1494,6 +1602,19 @@ class _ReaderState extends State<Reader> {
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
       maxImageBytesCachedOnMemory: 72 * 1024 * 1024,
+      pagePaintCallbacks: _entry?.crops.isNotEmpty == true
+          ? [
+              (canvas, rect, page) {
+                final crop = _cropFor(page.pageNumber);
+                if (crop == null) return;
+                final mask = Path()
+                  ..fillType = PathFillType.evenOdd
+                  ..addRect(rect)
+                  ..addRect(crop.within(rect));
+                canvas.drawPath(mask, Paint()..color = _stand);
+              },
+            ]
+          : null,
       linkHandlerParams: _inking
           ? null
           : PdfLinkHandlerParams(
@@ -1511,7 +1632,12 @@ class _ReaderState extends State<Reader> {
                     !_viewer.isReady) {
                   return;
                 }
-                _viewer.goToDest(destination, duration: Duration.zero);
+                _pdfLinkNavigations++;
+                _viewer
+                    .goToDest(destination, duration: Duration.zero)
+                    .whenComplete(() {
+                      _pdfLinkNavigations--;
+                    });
               },
             ),
       viewerOverlayBuilder: (context, size, handleLinkTap) => [
@@ -1587,14 +1713,23 @@ class _ReaderState extends State<Reader> {
           _page = restored;
         });
         _remember(_entry?.id, restored);
+        if (_cropFor(restored) != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && revision == _revision && _page == restored) {
+              _fitCrop(restored, controller);
+            }
+          });
+        }
       },
       onViewSizeChanged: (size, previous, controller) {
         if (!mounted || previous == null || revision != _revision) return;
         // Keep the score on the same page when the controls resize the viewport.
-        controller.goToPage(
-          pageNumber: pageBeforeResize,
-          duration: Duration.zero,
-        );
+        if (!_fitCrop(pageBeforeResize, controller)) {
+          controller.goToPage(
+            pageNumber: pageBeforeResize,
+            duration: Duration.zero,
+          );
+        }
       },
       onPageChanged: (page) {
         if (!mounted ||
@@ -1617,6 +1752,13 @@ class _ReaderState extends State<Reader> {
           _halfPreview = false;
         });
         _remember(_entry?.id, page);
+        if (_pdfLinkNavigations == 0 && _cropFor(page) != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && revision == _revision && _page == page) {
+              _fitCrop(page, _viewer);
+            }
+          });
+        }
       },
       onGeneralTap: (context, controller, details) {
         if (_inking) return true;
@@ -1650,17 +1792,21 @@ class _ReaderState extends State<Reader> {
       },
       pageOverlaysBuilder: (context, rect, page) => [
         Positioned.fill(
-          child: InkSurface(
-            key: ValueKey(page.pageNumber),
-            ink: _ink.putIfAbsent(page.pageNumber, _newPageInk),
-            enabled: _inking,
-            allowFinger: _allowFinger || _shape != null,
-            tool: _tool,
-            width: _tool == InkTool.pen ? _penWidth : null,
-            color: _tool == InkTool.pen ? _penColor : null,
-            onTextTap: (point, size) => _editText(page.pageNumber, point, size),
-            shape: _shape,
-            freeformSelection: _freeformSelection,
+          child: ClipRect(
+            clipper: _PageCropClipper(_cropFor(page.pageNumber)),
+            child: InkSurface(
+              key: ValueKey(page.pageNumber),
+              ink: _ink.putIfAbsent(page.pageNumber, _newPageInk),
+              enabled: _inking,
+              allowFinger: _allowFinger || _shape != null,
+              tool: _tool,
+              width: _tool == InkTool.pen ? _penWidth : null,
+              color: _tool == InkTool.pen ? _penColor : null,
+              onTextTap: (point, size) =>
+                  _editText(page.pageNumber, point, size),
+              shape: _shape,
+              freeformSelection: _freeformSelection,
+            ),
           ),
         ),
         if (!_inking)
@@ -1775,7 +1921,10 @@ class _ReaderState extends State<Reader> {
               if (_showControls && !_performance) _header(),
               if (_showControls && !_performance && _scoreTabIds.isNotEmpty)
                 _scoreTabs(),
-              Expanded(key: const ValueKey('score-viewport'), child: _score()),
+              Expanded(
+                key: const ValueKey('score-viewport'),
+                child: _deskewedScore(),
+              ),
               if (_nextTitle case final title?)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1791,6 +1940,13 @@ class _ReaderState extends State<Reader> {
       ),
     ),
   );
+
+  Widget _deskewedScore() {
+    final angle = _spreadStep == 0 ? _cropFor(_page)?.angle ?? 0 : 0;
+    return ClipRect(
+      child: Transform.rotate(angle: angle * math.pi / 180, child: _score()),
+    );
+  }
 
   Widget _scoreTabs() => Material(
     color: _rail,
@@ -1952,6 +2108,8 @@ class _ReaderState extends State<Reader> {
                         _togglePerformance();
                       case _ReaderDisplay.exportPdf:
                         _showPdfExport();
+                      case _ReaderDisplay.crop:
+                        _showCrop();
                       case _ReaderDisplay.shareScorePackage:
                         _shareEditableScore();
                       case _ReaderDisplay.scoreTabs:
@@ -2061,6 +2219,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.exportPdf,
                       enabled: _file != null,
                       child: const Text('Share or print PDF'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.crop,
+                      enabled: _entry != null,
+                      child: const Text('Crop and straighten'),
                     ),
                     if (_library.storage.persistent)
                       PopupMenuItem(
@@ -2453,6 +2616,18 @@ class _ReaderState extends State<Reader> {
     }),
     icon: Icon(icon),
   );
+}
+
+class _PageCropClipper extends CustomClipper<Rect> {
+  _PageCropClipper(this.crop);
+  final PageCrop? crop;
+
+  @override
+  Rect getClip(Size size) =>
+      crop?.within(Offset.zero & size) ?? (Offset.zero & size);
+
+  @override
+  bool shouldReclip(_PageCropClipper oldClipper) => crop != oldClipper.crop;
 }
 
 class _EdgeTapTracker {

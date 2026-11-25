@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 
+import 'page_crop.dart';
 import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
     as platform;
@@ -71,6 +72,7 @@ class ScoreEntry {
     this.flags = const [],
     this.jumps = const [],
     this.halfSplits = const {},
+    this.crops = const {},
     this.deletedAt,
   });
 
@@ -100,6 +102,11 @@ class ScoreEntry {
               (entry.value as num) <= .8)
             page: (entry.value as num).toDouble(),
     },
+    crops: {
+      for (final entry in (json['crops'] as Map? ?? const {}).entries)
+        if (int.tryParse(entry.key.toString()) case final page? when page > 0)
+          if (PageCrop.fromJson(entry.value) case final crop?) page: crop,
+    },
   );
 
   final String id;
@@ -113,6 +120,7 @@ class ScoreEntry {
   final List<int> flags;
   final List<ScoreJump> jumps;
   final Map<int, double> halfSplits;
+  final Map<int, PageCrop> crops;
 
   ScoreEntry copyWith({
     String? id,
@@ -125,6 +133,7 @@ class ScoreEntry {
     List<int>? flags,
     List<ScoreJump>? jumps,
     Map<int, double>? halfSplits,
+    Map<int, PageCrop>? crops,
     DateTime? deletedAt,
     bool recover = false,
   }) => ScoreEntry(
@@ -138,6 +147,7 @@ class ScoreEntry {
     flags: flags ?? this.flags,
     jumps: jumps ?? this.jumps,
     halfSplits: halfSplits ?? this.halfSplits,
+    crops: crops ?? this.crops,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
 
@@ -157,6 +167,10 @@ class ScoreEntry {
       'halfSplits': {
         for (final entry in halfSplits.entries)
           entry.key.toString(): entry.value,
+      },
+    if (crops.isNotEmpty)
+      'crops': {
+        for (final entry in crops.entries) '${entry.key}': entry.value.toJson(),
       },
   };
 }

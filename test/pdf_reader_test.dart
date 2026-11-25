@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:encoresheets/pdf_assembly.dart';
+import 'package:encoresheets/page_crop.dart';
 import 'package:encoresheets/pdf_export.dart';
 import 'package:encoresheets/pdf_rearrange.dart';
 import 'package:encoresheets/score_library.dart';
@@ -11,6 +12,20 @@ import 'package:pdfrx/pdfrx.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   Pdfrx.cacheDirectoryPath = Directory.systemTemp.path;
+
+  test('finds content margins for the bundled score', () async {
+    final document = await openRearrangeDocument(
+      XFile('assets/first_light.pdf'),
+    );
+    try {
+      final crop = await detectPageMargins(document.pages.first);
+      expect(crop.isIdentity, isFalse);
+      expect(crop.pdfBounds(document.pages.first).isNotEmpty, isTrue);
+      expect(PageCrop.fromJson(crop.toJson())?.toJson(), crop.toJson());
+    } finally {
+      await document.dispose();
+    }
+  });
 
   test('rearranges and rotates PDF pages and remaps saved marks', () async {
     final document = await openRearrangeDocument(
