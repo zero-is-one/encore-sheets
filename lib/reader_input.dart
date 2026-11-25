@@ -23,6 +23,9 @@ String? shortcutMidi(List<int> bytes) {
 
 String shortcutLabel(String code) {
   final parts = code.split(':');
+  if (parts.length == 2 && parts.first == 'turntouch') {
+    return 'Turn Touch · ${parts[1]}';
+  }
   if (parts.length == 2 && parts.first == 'key') {
     final id = int.tryParse(parts[1]);
     return id == null ? code : LogicalKeyboardKey(id).keyLabel;

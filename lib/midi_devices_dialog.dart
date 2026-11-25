@@ -2,10 +2,18 @@ import 'dart:async';
 
 import 'package:flutter_midi_command/flutter_midi_command.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:universal_ble/universal_ble.dart';
+
+import 'turn_touch.dart';
 
 class MidiDevicesDialog extends StatefulWidget {
-  const MidiDevicesDialog({super.key, required this.midi});
+  const MidiDevicesDialog({
+    super.key,
+    required this.midi,
+    required this.turnTouch,
+  });
   final MidiCommand midi;
+  final TurnTouch turnTouch;
 
   @override
   State<MidiDevicesDialog> createState() => _MidiDevicesDialogState();
@@ -14,6 +22,9 @@ class MidiDevicesDialog extends StatefulWidget {
 class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
   List<MidiDevice> _devices = [];
   StreamSubscription<MidiSetupChange>? _changes;
+  StreamSubscription<bool>? _remoteConnection;
+  StreamSubscription<BleDevice>? _remoteScan;
+  final _remotes = <String, BleDevice>{};
   Timer? _scanTimer;
   bool _scanning = false, _busy = false;
   String? _error;
@@ -24,6 +35,9 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
     _changes = widget.midi.onMidiSetupChanged?.listen((_) {
       unawaited(_refresh().catchError((Object _) {}));
     });
+    _remoteConnection = widget.turnTouch.connectionChanges.listen((_) {
+      if (mounted) setState(() {});
+    });
     _run(_refresh);
   }
 
@@ -32,7 +46,7 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
     if (mounted) setState(() => _devices = devices);
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(Future<void> Function() action, {String? device}) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -41,13 +55,15 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
     try {
       await action();
     } catch (_) {
-      _error = 'Could not use MIDI. Check Bluetooth permissions and device pairing mode.';
+      _error =
+          'Could not use ${device ?? 'MIDI'}. Check Bluetooth permissions and device pairing mode.';
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _scan() async {
+    await _stopRemoteScan();
     if (_scanning) {
       _stopScan();
       return;
@@ -79,10 +95,45 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
     _scanning = false;
   }
 
+  Future<void> _scanRemotes() async {
+    if (_remoteScan != null) {
+      await _stopRemoteScan();
+      return;
+    }
+    _stopScan();
+    await UniversalBle.requestPermissions();
+    _remotes.clear();
+    _remoteScan = UniversalBle.scanStream.listen((remote) {
+      if (mounted) setState(() => _remotes[remote.deviceId] = remote);
+    });
+    try {
+      await UniversalBle.startScan(
+        scanFilter: ScanFilter(withServices: [TurnTouch.service]),
+      );
+      _scanTimer = Timer(const Duration(seconds: 12), () {
+        unawaited(_run(_stopRemoteScan, device: 'Turn Touch'));
+      });
+    } catch (_) {
+      await _stopRemoteScan();
+      rethrow;
+    }
+  }
+
+  Future<void> _stopRemoteScan() async {
+    final scan = _remoteScan;
+    if (scan == null) return;
+    _remoteScan = null;
+    _scanTimer?.cancel();
+    await scan.cancel();
+    await UniversalBle.stopScan();
+  }
+
   @override
   void dispose() {
     _stopScan();
+    unawaited(_stopRemoteScan().catchError((Object _) {}));
     unawaited(_changes?.cancel());
+    unawaited(_remoteConnection?.cancel());
     super.dispose();
   }
 
@@ -99,10 +150,11 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Put a Bluetooth MIDI controller in pairing mode, then scan. Pair keyboard-mode pedals in your device’s Bluetooth settings.',
+              'Scan in MIDI mode for BlueBoard or Genki Wave. Pair AirTurn and other keyboard-mode pedals in your device’s Bluetooth settings.',
             ),
             if (_error case final error?) Text(error),
-            if (_busy || _scanning) const LinearProgressIndicator(),
+            if (_busy || _scanning || _remoteScan != null)
+              const LinearProgressIndicator(),
             if (!_busy && _devices.isEmpty)
               const Text('No MIDI devices found.'),
             for (final device in _devices)
@@ -129,10 +181,49 @@ class _MidiDevicesDialogState extends State<MidiDevicesDialog> {
                   child: Text(device.connected ? 'Disconnect' : 'Connect'),
                 ),
               ),
+            const Divider(),
+            if (widget.turnTouch.device case final remote?)
+              ListTile(
+                title: Text(remote.name ?? 'Turn Touch Remote'),
+                subtitle: const Text('Turn Touch connected'),
+                trailing: TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _run(
+                          widget.turnTouch.disconnect,
+                          device: 'Turn Touch',
+                        ),
+                  child: const Text('Disconnect'),
+                ),
+              ),
+            for (final remote in _remotes.values)
+              if (remote.deviceId != widget.turnTouch.device?.deviceId)
+                ListTile(
+                  title: Text(remote.name ?? 'Turn Touch Remote'),
+                  trailing: TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                            await _stopRemoteScan();
+                            await widget.turnTouch.connect(remote);
+                          }, device: 'Turn Touch'),
+                    child: const Text('Connect'),
+                  ),
+                ),
           ],
         ),
       ),
       actions: [
+        TextButton(
+          onPressed: _busy
+              ? null
+              : () => _run(_scanRemotes, device: 'Turn Touch'),
+          child: Text(
+            _remoteScan == null
+                ? 'Scan for Turn Touch'
+                : 'Stop Turn Touch scan',
+          ),
+        ),
         TextButton(
           onPressed: _busy ? null : () => _run(_scan),
           child: Text(_scanning ? 'Stop scan' : 'Scan for Bluetooth MIDI'),

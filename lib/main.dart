@@ -44,6 +44,7 @@ import 'metadata_csv_screen.dart';
 import 'cloud_files_screen.dart';
 import 'embedded_pdf_info.dart';
 import 'midi_devices_dialog.dart';
+import 'turn_touch.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -177,6 +178,7 @@ class _ReaderState extends State<Reader> {
   ReferenceTone? _referenceTone;
   Map<String, ReaderShortcut> _shortcuts = {};
   final _midiShortcuts = StreamController<String>.broadcast();
+  TurnTouch? _turnTouch;
   StreamSubscription<MidiPacket>? _midiInput;
   late final _midi = MidiCommand(
     bleTransport: _supportsSharedImport ? UniversalBleMidiTransport() : null,
@@ -422,6 +424,7 @@ class _ReaderState extends State<Reader> {
   @override
   void dispose() {
     unawaited(_midiInput?.cancel());
+    unawaited(_turnTouch?.dispose().catchError((Object _) {}));
     unawaited(_midiShortcuts.close());
     unawaited(_referenceTone?.dispose());
     _metronome?.dispose();
@@ -1948,14 +1951,23 @@ class _ReaderState extends State<Reader> {
     if (!ScoreAudioSession.supported || _midiInput != null) return;
     final stream = _midi.onMidiPacketReceived;
     _midiInput = stream?.listen((packet) {
-      if (!mounted) return;
       final key = shortcutMidi(packet.data);
-      if (key == null) return;
-      _midiShortcuts.add(key);
-      if (_shortcuts[key] case final action? when !_picking && _pages > 0) {
-        _runShortcut(action);
-      }
+      if (key != null) _handleControllerShortcut(key);
     }, onError: (Object _) {});
+  }
+
+  void _handleControllerShortcut(String key) {
+    if (!mounted) return;
+    _midiShortcuts.add(key);
+    if (_picking || _pages == 0) return;
+    final action =
+        _shortcuts[key] ??
+        switch (key) {
+          'turntouch:North' || 'turntouch:West' => ReaderShortcut.previous,
+          'turntouch:East' || 'turntouch:South' => ReaderShortcut.next,
+          _ => null,
+        };
+    if (action != null) _runShortcut(action);
   }
 
   void _runShortcut(ReaderShortcut shortcut) {
@@ -2020,7 +2032,10 @@ class _ReaderState extends State<Reader> {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => MidiDevicesDialog(midi: _midi),
+        builder: (_) => MidiDevicesDialog(
+          midi: _midi,
+          turnTouch: _turnTouch ??= TurnTouch(_handleControllerShortcut),
+        ),
       );
     } finally {
       _finishPicking();
