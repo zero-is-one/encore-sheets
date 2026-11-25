@@ -69,8 +69,8 @@ final class ScoreWindowSceneDelegate: UIResponder, UIWindowSceneDelegate {
     self.pdfView = view
     if let data = activity?.userInfo,
        let path = data["path"] as? String,
-       let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
-       URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(documents.path + "/"),
+       let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+       URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(support.path + "/LibraryData/"),
        let document = PDFDocument(url: URL(fileURLWithPath: path)) {
       view.document = document
       if let index = data["page"] as? Int, let page = document.page(at: max(0, index - 1)) {

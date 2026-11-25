@@ -4,8 +4,9 @@ import 'dart:isolate';
 
 import 'package:archive/archive_io.dart';
 import 'package:file_selector/file_selector.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 
+import 'app_document_paths.dart';
 import 'score_library.dart';
 
 part 'library_backup_native.dart';
@@ -45,7 +46,7 @@ class NativeLibraryStorage implements LibraryStorage {
       );
 
   Future<Directory> _prepare() async {
-    final documents = _override ?? await getApplicationDocumentsDirectory();
+    final documents = _override ?? await managedDocuments();
     return Directory('${documents.path}/scores').create(recursive: true);
   }
 

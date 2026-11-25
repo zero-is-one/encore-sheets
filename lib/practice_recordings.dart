@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'app_document_paths.dart';
 import 'score_library.dart';
 
 class PracticeRecordings {
@@ -31,7 +31,7 @@ class PracticeRecordings {
   Future<List<String>> unlinked() async => _takes(await _catalog(), _unlinked);
 
   Future<String> path(String file) async =>
-      '${(await getApplicationDocumentsDirectory()).path}/$file';
+      '${(await managedDocuments()).path}/$file';
 
   Future<bool> start() async {
     if (!await recorder.hasPermission()) return false;

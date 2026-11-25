@@ -5,8 +5,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:path_provider/path_provider.dart';
 
+import 'app_document_paths.dart';
 import 'score_library.dart';
 import 'audio_page_cues.dart';
 
@@ -58,8 +58,7 @@ class ScoreAudioSession {
   static bool get supportsMusic =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
-  Future<String> _folder() async =>
-      (await getApplicationDocumentsDirectory()).path;
+  Future<String> _folder() async => (await managedDocuments()).path;
 
   Future<Map<String, dynamic>> _attachments() async {
     final preferences = await library.storage.readPreferences();

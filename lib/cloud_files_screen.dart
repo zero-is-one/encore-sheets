@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'score_library.dart';
 import 'cloud_provider.dart';
 import 'direct_cloud_screen.dart';
+import 'app_document_paths.dart';
 
 class CloudFilesScreen extends StatefulWidget {
   const CloudFilesScreen({super.key, required this.library});
@@ -26,6 +27,8 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
   String? _status;
   String? _selection;
   ScoreEntry? _lastImported;
+  bool get _appleFiles =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<void> _run(Future<void> Function() task) async {
     if (_busy) return;
@@ -112,6 +115,46 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
     }
   });
 
+  Future<void> _importTransferFile() => _run(() async {
+    final files = await transferScores();
+    if (!mounted) return;
+    if (files.isEmpty) {
+      _status = 'Copy a PDF into On My iPad or On My iPhone → EncoreSheets → Scores for Transfer.';
+      return;
+    }
+    final file = await showDialog<XFile>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Scores for Transfer'),
+        children: [
+          for (final file in files)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, file),
+              child: Text(file.name),
+            ),
+        ],
+      ),
+    );
+    if (file == null || !mounted) return;
+    final (score, _) = await widget.library.import(file);
+    _lastImported = score;
+    _status = 'Imported ${score.title}.';
+  });
+
+  Future<void> _exportTransferFile() => _run(() async {
+    final id = _selection;
+    final score = id == null ? null : widget.library.lookup(id);
+    if (score == null) return;
+    final title = score.title
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
+        .trim();
+    final name = await saveTransferScore(
+      await widget.library.storage.openScore(score.id),
+      '${title.isEmpty ? 'Score' : title}.pdf',
+    );
+    _status = 'Saved $name in EncoreSheets → Scores for Transfer.';
+  });
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy,
@@ -133,6 +176,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
               onPressed: _busy ? null : _import,
               child: const Text('Browse and import PDFs'),
             ),
+            if (_appleFiles)
+              TextButton(
+                onPressed: _busy ? null : _importTransferFile,
+                child: const Text('Import from Scores for Transfer'),
+              ),
             if (_lastImported case final score?)
               TextButton(
                 onPressed: _busy ? null : () => Navigator.pop(context, score),
@@ -158,6 +206,13 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
               onPressed: _busy || _selection == null ? null : _export,
               child: const Text('Save or share PDF'),
             ),
+            if (_appleFiles)
+              TextButton(
+                onPressed: _busy || _selection == null
+                    ? null
+                    : _exportTransferFile,
+                child: const Text('Copy to EncoreSheets in Files'),
+              ),
             if (_busy) const LinearProgressIndicator(),
             if (_status case final status?) Text(status),
           ],
