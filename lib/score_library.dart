@@ -79,6 +79,7 @@ class ScoreEntry {
     this.jumps = const [],
     this.halfSplits = const {},
     this.crops = const {},
+    this.pageNotes = const {},
     this.deletedAt,
   });
 
@@ -113,6 +114,11 @@ class ScoreEntry {
         if (int.tryParse(entry.key.toString()) case final page? when page > 0)
           if (PageCrop.fromJson(entry.value) case final crop?) page: crop,
     },
+    pageNotes: {
+      for (final row in (json['pageNotes'] as Map? ?? const {}).entries)
+        if (int.tryParse(row.key.toString()) case final page? when page > 0)
+          if (row.value case final String text when text.isNotEmpty) page: text,
+    },
   );
 
   final String id;
@@ -127,6 +133,7 @@ class ScoreEntry {
   final List<ScoreJump> jumps;
   final Map<int, double> halfSplits;
   final Map<int, PageCrop> crops;
+  final Map<int, String> pageNotes;
 
   ScoreEntry copyWith({
     String? id,
@@ -140,6 +147,7 @@ class ScoreEntry {
     List<ScoreJump>? jumps,
     Map<int, double>? halfSplits,
     Map<int, PageCrop>? crops,
+    Map<int, String>? pageNotes,
     DateTime? deletedAt,
     bool recover = false,
   }) => ScoreEntry(
@@ -154,6 +162,7 @@ class ScoreEntry {
     jumps: jumps ?? this.jumps,
     halfSplits: halfSplits ?? this.halfSplits,
     crops: crops ?? this.crops,
+    pageNotes: pageNotes ?? this.pageNotes,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
 
@@ -177,6 +186,10 @@ class ScoreEntry {
     if (crops.isNotEmpty)
       'crops': {
         for (final entry in crops.entries) '${entry.key}': entry.value.toJson(),
+      },
+    if (pageNotes.isNotEmpty)
+      'pageNotes': {
+        for (final row in pageNotes.entries) '${row.key}': row.value,
       },
   };
 }

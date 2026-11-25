@@ -32,6 +32,7 @@ import 'score_library.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
+import 'score_text_search_screen.dart';
 import 'setlists_screen.dart';
 import 'text_annotation_dialog.dart';
 
@@ -42,6 +43,7 @@ const _brass = Color(0xffe9bd75);
 
 enum _ReaderDisplay {
   nowPlaying,
+  findInScore,
   fit,
   zoomIn,
   zoomOut,
@@ -1077,6 +1079,30 @@ class _ReaderState extends State<Reader> {
     } finally {
       _finishPicking();
     }
+  }
+
+  Future<void> _findInScore() async {
+    if (_picking || _pages == 0 || !_viewer.isReady) return;
+    final revision = _revision;
+    final document = _viewer.document;
+    final first = _firstPage;
+    final last = _lastPage;
+    setState(() => _picking = true);
+    int? page;
+    try {
+      page = await _openReaderPanel<int>(
+        (_) => ScoreTextSearchScreen(
+          document: document,
+          firstPage: first,
+          lastPage: last,
+          annotations: _inkSnapshot(),
+          notes: _entry?.pageNotes ?? const {},
+        ),
+      );
+    } finally {
+      _finishPicking();
+    }
+    if (mounted && revision == _revision && page != null) _go(page);
   }
 
   Future<void> _keepScreenAwake(bool enabled) async {
@@ -2321,6 +2347,8 @@ class _ReaderState extends State<Reader> {
                     switch (action) {
                       case _ReaderDisplay.nowPlaying:
                         _showNowPlaying();
+                      case _ReaderDisplay.findInScore:
+                        _findInScore();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2430,6 +2458,10 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.nowPlaying,
                       enabled: _entry != null,
                       child: const Text('Now playing'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.findInScore,
+                      child: Text('Find in score'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,

@@ -5,6 +5,7 @@ import 'package:encoresheets/page_crop.dart';
 import 'package:encoresheets/pdf_export.dart';
 import 'package:encoresheets/pdf_rearrange.dart';
 import 'package:encoresheets/score_library.dart';
+import 'package:encoresheets/score_text_search.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -12,6 +13,44 @@ import 'package:pdfrx/pdfrx.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   Pdfrx.cacheDirectoryPath = Directory.systemTemp.path;
+
+  test('finds PDF text, annotation text, and page notes by page', () async {
+    final document = await openRearrangeDocument(
+      XFile('assets/first_light.pdf'),
+    );
+    addTearDown(document.dispose);
+    final matches = await searchScoreText(
+      document: document,
+      query: 'first  LIGHT',
+      firstPage: 1,
+      lastPage: 2,
+      notes: {2: 'First Light at half tempo'},
+      annotations: {
+        '1': [
+          {'tool': 'text', 'text': 'Play First Light as written'},
+        ],
+      },
+    ).toList();
+    expect(
+      matches.any(
+        (match) => match.source == ScoreTextSource.pdf && match.page == 1,
+      ),
+      isTrue,
+    );
+    expect(
+      matches.any(
+        (match) =>
+            match.source == ScoreTextSource.annotation && match.page == 1,
+      ),
+      isTrue,
+    );
+    expect(
+      matches.any(
+        (match) => match.source == ScoreTextSource.note && match.page == 2,
+      ),
+      isTrue,
+    );
+  });
 
   test('finds content margins for the bundled score', () async {
     final document = await openRearrangeDocument(
