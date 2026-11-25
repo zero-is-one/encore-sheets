@@ -43,6 +43,7 @@ class PageInk extends ChangeNotifier {
   final VoidCallback? onChanged;
   List<_Stroke> _strokes;
   final _undo = <List<_Stroke>>[];
+  final _redo = <List<_Stroke>>[];
   _Stroke? _active;
 
   List<Map<String, dynamic>> snapshot() => [
@@ -74,6 +75,7 @@ class PageInk extends ChangeNotifier {
           : [..._strokes, stroke];
       if (next.length != _strokes.length) {
         _undo.add(_strokes);
+        _redo.clear();
         _strokes = next;
         onChanged?.call();
       }
@@ -82,6 +84,7 @@ class PageInk extends ChangeNotifier {
   }
 
   void undo() {
+    final previous = _strokes;
     if (_undo.isNotEmpty) {
       _strokes = _undo.removeLast();
     } else if (_strokes.isNotEmpty) {
@@ -89,6 +92,15 @@ class PageInk extends ChangeNotifier {
     } else {
       return;
     }
+    _redo.add(previous);
+    onChanged?.call();
+    notifyListeners();
+  }
+
+  void redo() {
+    if (_redo.isEmpty) return;
+    _undo.add(_strokes);
+    _strokes = _redo.removeLast();
     onChanged?.call();
     notifyListeners();
   }

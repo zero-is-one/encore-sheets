@@ -1028,6 +1028,11 @@ class _ReaderState extends State<Reader> {
                   onPressed: () => _ink[_page]?.undo(),
                   icon: const Icon(Icons.undo),
                 ),
+                IconButton(
+                  tooltip: 'Redo stroke',
+                  onPressed: () => _ink[_page]?.redo(),
+                  icon: const Icon(Icons.redo),
+                ),
               ],
             ),
           Row(

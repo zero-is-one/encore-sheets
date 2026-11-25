@@ -61,6 +61,9 @@ void main() {
       restored.undo();
       expect(restored.snapshot(), pen.snapshot());
       expect(changes, 2);
+      restored.redo();
+      expect(restored.snapshot(), isEmpty);
+      expect(changes, 3);
     },
   );
 }
