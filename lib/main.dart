@@ -73,12 +73,18 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   int _setIndex = 0;
   bool _performance = false;
+  static const _sharedImports = MethodChannel('encoresheets/import');
+  bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
 
   bool get _hasNextScore =>
       _playing != null && _setIndex + 1 < _playing!.scores.length;
 
   String get _title => _entry?.title ?? 'First Light';
+  bool get _supportsSharedImport =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   @override
   void initState() {
@@ -88,10 +94,21 @@ class _ReaderState extends State<Reader> {
         if (_performance) _keepScreenAwake(true);
       },
     );
+    if (_supportsSharedImport) {
+      _sharedImports.setMethodCallHandler((call) async {
+        if (call.method == 'available') _requestSharedImport();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _requestSharedImport();
+      });
+    }
   }
 
   @override
   void dispose() {
+    if (_supportsSharedImport) {
+      _sharedImports.setMethodCallHandler(null);
+    }
     _lifecycle.dispose();
     if (_performance) _keepScreenAwake(false);
     _focus.dispose();
@@ -101,11 +118,43 @@ class _ReaderState extends State<Reader> {
     super.dispose();
   }
 
+  void _requestSharedImport() {
+    _sharedWaiting = true;
+    _drainSharedImports();
+  }
+
+  Future<void> _drainSharedImports() async {
+    if (!_sharedWaiting || _picking || !mounted) return;
+    _sharedWaiting = false;
+    setState(() => _picking = true);
+    try {
+      final paths = await _sharedImports.invokeListMethod<String>('take') ?? [];
+      if (paths.isEmpty || !mounted) return;
+      await _libraryReady;
+      await _importScores(paths.map(XFile.new).toList());
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not receive the shared PDFs.')),
+        );
+      }
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  void _finishPicking() {
+    if (!mounted) return;
+    setState(() => _picking = false);
+    _focus.requestFocus();
+    if (_sharedWaiting) _drainSharedImports();
+  }
+
   Future<void> _open() async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      final file = await openFile(
+      final files = await openFiles(
         acceptedTypeGroups: const [
           XTypeGroup(
             label: 'PDF scores',
@@ -115,13 +164,9 @@ class _ReaderState extends State<Reader> {
           ),
         ],
       );
-      if (file == null || !mounted) return;
+      if (files.isEmpty || !mounted) return;
       await _libraryReady;
-      final (entry, local) = await _library.import(file);
-      final bytes = kIsWeb ? await local.readAsBytes() : null;
-      if (!mounted) return;
-      _playing = null;
-      _load(entry, local, bytes);
+      await _importScores(files);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -129,10 +174,35 @@ class _ReaderState extends State<Reader> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _picking = false);
-        _focus.requestFocus();
+      _finishPicking();
+    }
+  }
+
+  Future<void> _importScores(List<XFile> files) async {
+    (ScoreEntry, XFile)? first;
+    var failed = 0;
+    for (final file in files) {
+      try {
+        final imported = await _library.import(file);
+        first ??= imported;
+      } catch (_) {
+        failed++;
       }
+    }
+    if (first case (final entry, final local)) {
+      final bytes = kIsWeb ? await local.readAsBytes() : null;
+      if (!mounted) return;
+      _playing = null;
+      _load(entry, local, bytes);
+    }
+    if (failed > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not import $failed of ${files.length} selected PDFs.',
+          ),
+        ),
+      );
     }
   }
 
@@ -223,10 +293,7 @@ class _ReaderState extends State<Reader> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _picking = false);
-        _focus.requestFocus();
-      }
+      _finishPicking();
     }
   }
 
@@ -257,10 +324,7 @@ class _ReaderState extends State<Reader> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _picking = false);
-        _focus.requestFocus();
-      }
+      _finishPicking();
     }
   }
 
