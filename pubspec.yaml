@@ -15,6 +15,8 @@ dependencies:
   pdfrx: 3.1.0
   share_plus: ^13.3.1
   wakelock_plus: ^1.8.2
+  printing: ^5.15.1
+  pdf: ^3.13.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

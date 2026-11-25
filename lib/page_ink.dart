@@ -125,6 +125,9 @@ class PageInk extends ChangeNotifier {
     for (final stroke in _strokes) stroke.toJson(),
   ];
 
+  void paint(Canvas canvas, Size size) =>
+      _InkPainter(this, showSelection: false).paint(canvas, size);
+
   bool get hasSelection => _selection.isNotEmpty;
 
   List<Map<String, dynamic>> copySelection() => [

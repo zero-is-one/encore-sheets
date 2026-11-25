@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'page_ink.dart';
 import 'ink_layers_dialog.dart';
 import 'pdf_assembly_screen.dart';
+import 'pdf_export_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
@@ -40,6 +41,7 @@ enum _ReaderDisplay {
   landscapeWidth,
   spreads,
   scoreTabs,
+  exportPdf,
   performance,
   hideControls,
   gestures,
@@ -839,6 +841,20 @@ class _ReaderState extends State<Reader> {
   Future<void> _saveInk() async {
     final id = _entry?.id;
     if (id == null) return;
+    final pages = _inkSnapshot();
+    try {
+      await _library.writeInk(id, pages);
+      _inkSaveWarning = false;
+    } catch (_) {
+      if (!mounted || _inkSaveWarning) return;
+      _inkSaveWarning = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save score annotations.')),
+      );
+    }
+  }
+
+  Map<String, dynamic> _inkSnapshot() {
     final pages = <String, dynamic>{};
     if (_inkLayers.length != 1 ||
         _inkLayers.single != defaultInkLayer ||
@@ -857,15 +873,26 @@ class _ReaderState extends State<Reader> {
       final strokes = ink.snapshot();
       if (strokes.isNotEmpty) pages['$page'] = strokes;
     }
+    return pages;
+  }
+
+  Future<void> _showPdfExport() async {
+    final source = _file;
+    if (_picking || source == null || _pages == 0) return;
+    setState(() => _picking = true);
     try {
-      await _library.writeInk(id, pages);
-      _inkSaveWarning = false;
-    } catch (_) {
-      if (!mounted || _inkSaveWarning) return;
-      _inkSaveWarning = true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not save score annotations.')),
+      await _openReaderPanel<void>(
+        (_) => PdfExportScreen(
+          source: source,
+          title: _title,
+          firstPage: _firstPage,
+          lastPage: _lastPage,
+          pageCount: _pages,
+          annotations: _inkSnapshot(),
+        ),
       );
+    } finally {
+      _finishPicking();
     }
   }
 
@@ -1820,6 +1847,8 @@ class _ReaderState extends State<Reader> {
                         }
                       case _ReaderDisplay.performance:
                         _togglePerformance();
+                      case _ReaderDisplay.exportPdf:
+                        _showPdfExport();
                       case _ReaderDisplay.scoreTabs:
                         if (_entry case final score?) {
                           _updateScoreTabs([
@@ -1922,6 +1951,11 @@ class _ReaderState extends State<Reader> {
                       enabled: _entry != null && !_savingTabs,
                       checked: _scoreTabIds.contains(_entry?.id),
                       child: const Text('Keep score in tabs'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.exportPdf,
+                      enabled: _file != null,
+                      child: const Text('Share or print PDF'),
                     ),
                     PopupMenuItem(
                       value: _ReaderDisplay.hideControls,
