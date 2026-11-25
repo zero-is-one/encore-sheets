@@ -1,5 +1,11 @@
 part of 'library_storage_native.dart';
 
+String _archiveFormat(LibraryArchive kind) => switch (kind) {
+  LibraryArchive.library => 'EncoreSheetsLibrary',
+  LibraryArchive.score => 'EncoreSheetsScore',
+  LibraryArchive.setlist => 'EncoreSheetsSetlist',
+};
+
 Map<String, dynamic> _catalog(
   List<ScoreEntry> scores,
   List<Setlist> setlists, {
@@ -15,7 +21,8 @@ void _exportBackup(
   String path,
   List<ScoreEntry> scores,
   List<Setlist> setlists, {
-  bool scorePackage = false,
+  LibraryArchive kind = LibraryArchive.library,
+  bool includeScores = true,
   Map<String, dynamic>? preferences,
 }) {
   final zip = ZipFileEncoder()..create(path);
@@ -24,12 +31,14 @@ void _exportBackup(
       ArchiveFile.string(
         'manifest.json',
         jsonEncode({
-          'format': scorePackage ? 'EncoreSheetsScore' : 'EncoreSheetsLibrary',
+          'format': _archiveFormat(kind),
           'version': 1,
+          if (!includeScores) 'referencesOnly': true,
           ..._catalog(scores, setlists, preferences: preferences),
         }),
       ),
     );
+    if (!includeScores) return;
     for (final (index, score) in scores.indexed) {
       zip.addFileSync(
         File('$root/${score.id}.pdf'),
@@ -49,7 +58,7 @@ void _exportBackup(
   String path,
   List<ScoreEntry> existingScores,
   List<Setlist> existingSetlists, {
-  bool scorePackage = false,
+  LibraryArchive kind = LibraryArchive.library,
   required Map<String, dynamic> existingPreferences,
 }) {
   final input = InputFileStream(path);
@@ -57,8 +66,8 @@ void _exportBackup(
   try {
     final archive = ZipDecoder().decodeStream(input, verify: true);
     final manifest = _jsonEntry(archive.find('manifest.json'));
-    final format = scorePackage ? 'EncoreSheetsScore' : 'EncoreSheetsLibrary';
-    if (manifest['format'] != format || manifest['version'] != 1) {
+    if (manifest['format'] != _archiveFormat(kind) ||
+        manifest['version'] != 1) {
       throw const FormatException('Unsupported library backup');
     }
     final sourceScores = [
@@ -73,12 +82,17 @@ void _exportBackup(
     if (savedPreferences != null && savedPreferences is! Map<String, dynamic>) {
       throw const FormatException('Invalid backup preferences');
     }
-    if (scorePackage &&
+    if (kind == LibraryArchive.score &&
         (sourceScores.length != 1 ||
             sourceSetlists.isNotEmpty ||
             sourceScores.single.deletedAt != null)) {
       throw const FormatException('Invalid editable score package');
     }
+    if (kind == LibraryArchive.setlist && sourceSetlists.length != 1) {
+      throw const FormatException('Invalid editable setlist package');
+    }
+    final referencesOnly =
+        kind == LibraryArchive.setlist && manifest['referencesOnly'] == true;
     final sourceIds = sourceScores.map((score) => score.id).toSet();
     final validSelections = {
       ...sourceIds,
@@ -95,16 +109,58 @@ void _exportBackup(
         sourceSetlists.any(
           (setlist) =>
               setlist.name.trim().isEmpty ||
-              setlist.scores.any((id) => !validSelections.contains(id)),
+              setlist.scores.any(
+                (id) =>
+                    !validSelections.contains(id) &&
+                    !setlist.placeholders.containsKey(id),
+              ),
         )) {
       throw const FormatException('Invalid library backup catalog');
     }
 
     final ids = existingScores.map((score) => score.id).toSet();
     final mapped = <String, String>{};
+    final sourceTitles = <String, String>{
+      for (final score in sourceScores) score.id: score.title,
+      for (final score in sourceScores)
+        for (final item in score.bookmarks.where((item) => item.isItem))
+          item.selectionId(score.id): item.title,
+    };
     final scores = <ScoreEntry>[];
     var sequence = DateTime.now().microsecondsSinceEpoch;
     for (final (index, old) in sourceScores.indexed) {
+      if (referencesOnly) {
+        final matching = existingScores
+            .where(
+              (score) =>
+                  score.deletedAt == null &&
+                  (score.id == old.id ||
+                      score.title.toLowerCase() == old.title.toLowerCase() &&
+                          score.metadata['composer']?.toLowerCase() ==
+                              old.metadata['composer']?.toLowerCase()),
+            )
+            .toList();
+        final target =
+            matching.where((score) => score.id == old.id).firstOrNull ??
+            (matching.length == 1 ? matching.single : null);
+        if (target == null) continue;
+        mapped[old.id] = target.id;
+        for (final bookmark in old.bookmarks.where((item) => item.isItem)) {
+          final match = target.bookmarks
+              .where(
+                (item) =>
+                    item.isItem &&
+                    item.title == bookmark.title &&
+                    item.page == bookmark.page &&
+                    item.endPage == bookmark.endPage,
+              )
+              .firstOrNull;
+          if (match != null) {
+            mapped[bookmark.selectionId(old.id)] = match.selectionId(target.id);
+          }
+        }
+        continue;
+      }
       String id;
       do {
         id = '${sequence++}';
@@ -154,18 +210,38 @@ void _exportBackup(
       do {
         id = '${sequence++}';
       } while (!listIds.add(id));
+      final unresolved = <String, String>{};
+      final names = <String, String>{};
+      final selections = <String>[];
+      for (final selection in old.scores) {
+        if (mapped[selection] case final match?) {
+          selections.add(match);
+        } else {
+          final key = unresolved.putIfAbsent(
+            selection,
+            () => 'missing-$id-${unresolved.length}',
+          );
+          names[key] =
+              old.placeholders[selection] ??
+              sourceTitles[selection] ??
+              'Missing score';
+          selections.add(key);
+        }
+      }
       setlists.add(
-        old.copyWith(id: id, scores: old.scores.map((id) => mapped[id]!)),
+        old.copyWith(id: id, scores: selections, placeholders: names),
       );
     }
 
     final staged = File('$root/catalog.json.tmp');
     final preferences = {
-      if (!scorePackage && existingScores.isEmpty && savedPreferences is Map)
+      if (kind == LibraryArchive.library &&
+          existingScores.isEmpty &&
+          savedPreferences is Map)
         ...savedPreferences.cast<String, dynamic>(),
       ...existingPreferences,
     };
-    if (!scorePackage && savedPreferences is Map) {
+    if (kind == LibraryArchive.library && savedPreferences is Map) {
       Iterable<String> values(Object? value) =>
           value is List ? value.whereType<String>() : const [];
       for (final key in ['scoreCollections', 'personalStamps']) {

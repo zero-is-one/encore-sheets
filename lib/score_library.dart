@@ -189,7 +189,9 @@ class Setlist {
     this.folder = '',
     this.label = '',
     this.notes = '',
-  }) : scores = List.unmodifiable(scores);
+    Map<String, String> placeholders = const {},
+  }) : scores = List.unmodifiable(scores),
+       placeholders = Map.unmodifiable(placeholders);
 
   factory Setlist.fromJson(Map<String, dynamic> row) => Setlist(
     row['id'] as String,
@@ -198,6 +200,8 @@ class Setlist {
     folder: row['folder'] as String? ?? '',
     label: row['label'] as String? ?? '',
     notes: row['notes'] as String? ?? '',
+    placeholders:
+        (row['placeholders'] as Map?)?.cast<String, String>() ?? const {},
   );
 
   final String id;
@@ -206,6 +210,7 @@ class Setlist {
   final String folder;
   final String label;
   final String notes;
+  final Map<String, String> placeholders;
 
   Setlist copyWith({
     String? id,
@@ -214,6 +219,7 @@ class Setlist {
     String? folder,
     String? label,
     String? notes,
+    Map<String, String>? placeholders,
   }) => Setlist(
     id ?? this.id,
     name ?? this.name,
@@ -221,6 +227,7 @@ class Setlist {
     folder: folder ?? this.folder,
     label: label ?? this.label,
     notes: notes ?? this.notes,
+    placeholders: placeholders ?? this.placeholders,
   );
 
   Map<String, dynamic> toJson() => {
@@ -230,8 +237,11 @@ class Setlist {
     if (folder.isNotEmpty) 'folder': folder,
     if (label.isNotEmpty) 'label': label,
     if (notes.isNotEmpty) 'notes': notes,
+    if (placeholders.isNotEmpty) 'placeholders': placeholders,
   };
 }
+
+enum LibraryArchive { library, score, setlist }
 
 abstract class LibraryStorage {
   static LibraryStorage create() => platform.createStorage();
@@ -256,11 +266,17 @@ abstract class LibraryStorage {
     XFile? extractedPdf,
     Map<String, dynamic>? extractedInk,
   });
+  Future<XFile> createSetlistPackage(
+    Setlist setlist,
+    List<ScoreEntry> scores, {
+    required String name,
+    required bool includeScores,
+  });
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
     List<Setlist> setlists, {
-    bool scorePackage = false,
+    LibraryArchive kind = LibraryArchive.library,
   });
 }
 
@@ -658,11 +674,49 @@ class ScoreLibrary {
       source,
       _scores.values.toList(),
       setlists,
-      scorePackage: true,
+      kind: LibraryArchive.score,
     );
     final score = restored.scores.single;
     _scores[score.id] = score;
     return score;
+  });
+
+  Future<XFile> createSetlistPackage(
+    Setlist setlist, {
+    required String name,
+    required bool includeScores,
+  }) => _serialize(() {
+    final scores = <String, ScoreEntry>{};
+    final placeholders = <String, String>{};
+    for (final id in setlist.scores) {
+      final match = lookupSelection(id);
+      if (match == null) {
+        placeholders[id] = setlist.placeholders[id] ?? 'Missing score';
+      } else {
+        scores[match.$1.id] = match.$1;
+      }
+    }
+    return storage.createSetlistPackage(
+      setlist.copyWith(placeholders: placeholders),
+      scores.values.toList(),
+      name: name,
+      includeScores: includeScores,
+    );
+  });
+
+  Future<Setlist> restoreSetlistPackage(XFile source) => _serialize(() async {
+    final restored = await storage.restoreBackup(
+      source,
+      _scores.values.toList(),
+      setlists,
+      kind: LibraryArchive.setlist,
+    );
+    for (final score in restored.scores) {
+      _scores[score.id] = score;
+    }
+    final setlist = restored.setlists.single;
+    _setlists[setlist.id] = setlist;
+    return setlist;
   });
 
   Future<({int scores, int setlists})> restoreBackup(XFile source) =>

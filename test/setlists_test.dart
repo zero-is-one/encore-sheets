@@ -4,10 +4,53 @@ import 'package:encoresheets/library_storage_native.dart';
 import 'package:encoresheets/program_duration.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/setlist_order.dart';
+import 'package:encoresheets/setlist_share.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('shares setlists with editable scores or named placeholders', () async {
+    final root = await Directory.systemTemp.createTemp('encore_setlist_share');
+    addTearDown(() => root.delete(recursive: true));
+    ScoreLibrary library(String name) => ScoreLibrary(
+      NativeLibraryStorage(directory: Directory('${root.path}/$name')),
+    );
+    final source = library('source');
+    final target = library('target');
+    final (score, _) = await source.import(XFile('assets/first_light.pdf'));
+    final program = Setlist('evening', 'Evening', [
+      score.id,
+      score.id,
+    ], folder: 'Spring');
+    final text = await exportSetlist(source, program, SetlistShareFormat.text);
+    expect(await text.readAsString(), contains('2. ${score.title}'));
+
+    final reference = await exportSetlist(
+      source,
+      program,
+      SetlistShareFormat.references,
+    );
+    final unresolved = await target.restoreSetlistPackage(reference);
+    expect(target.recent, isEmpty);
+    expect(unresolved.scores, [
+      unresolved.scores.first,
+      unresolved.scores.first,
+    ]);
+    expect(unresolved.placeholders.values.single, score.title);
+
+    final package = await exportSetlist(
+      source,
+      program,
+      SetlistShareFormat.withScores,
+    );
+    final imported = await target.restoreSetlistPackage(package);
+    expect(imported.folder, 'Spring');
+    expect(imported.scores, [target.recent.single.id, target.recent.single.id]);
+    final matched = await target.restoreSetlistPackage(reference);
+    expect(matched.scores, imported.scores);
+    expect(matched.placeholders, isEmpty);
+  });
+
   test(
     'counts repeated pieces and reports excerpts without independent timings',
     () async {

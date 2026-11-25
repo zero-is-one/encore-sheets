@@ -179,7 +179,8 @@ class NativeLibraryStorage implements LibraryStorage {
         }
       }
       await Isolate.run(
-        () => _exportBackup(root, path, [score], [], scorePackage: true),
+        () =>
+            _exportBackup(root, path, [score], [], kind: LibraryArchive.score),
       );
       return XFile(path, mimeType: 'application/zip');
     } finally {
@@ -190,11 +191,35 @@ class NativeLibraryStorage implements LibraryStorage {
   }
 
   @override
+  Future<XFile> createSetlistPackage(
+    Setlist setlist,
+    List<ScoreEntry> scores, {
+    required String name,
+    required bool includeScores,
+  }) async {
+    final temp = _override ?? await getTemporaryDirectory();
+    final folder = await temp.createTemp('encoresheets-setlist-');
+    final path = '${folder.path}/$name.encoreset.zip';
+    final root = (await _root).path;
+    await Isolate.run(
+      () => _exportBackup(
+        root,
+        path,
+        scores,
+        [setlist],
+        kind: LibraryArchive.setlist,
+        includeScores: includeScores,
+      ),
+    );
+    return XFile(path, mimeType: 'application/zip');
+  }
+
+  @override
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
     List<Setlist> setlists, {
-    bool scorePackage = false,
+    LibraryArchive kind = LibraryArchive.library,
   }) async {
     final root = (await _root).path;
     final path = source.path;
@@ -205,7 +230,7 @@ class NativeLibraryStorage implements LibraryStorage {
         path,
         scores,
         setlists,
-        scorePackage: scorePackage,
+        kind: kind,
         existingPreferences: existingPreferences,
       ),
     );

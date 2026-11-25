@@ -1,10 +1,13 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 
 import 'score_library.dart';
 import 'program_duration.dart';
 import 'setlist_order.dart';
+import 'setlist_share.dart';
 
-enum _SetlistAction { edit, duplicate, playInOrder, earlier, later }
+enum _SetlistAction { edit, duplicate, playInOrder, earlier, later, share }
 
 String _durationText(ScoreLibrary library, Iterable<String> selections) {
   final estimate = library.estimateSetlistDuration(selections);
@@ -27,6 +30,72 @@ class SetlistsScreen extends StatefulWidget {
 
 class _SetlistsScreenState extends State<SetlistsScreen> {
   SetlistOrder _sort = SetlistOrder.manual;
+  bool _transferring = false;
+
+  Future<void> _transfer(Future<void> Function() work, String failure) async {
+    if (_transferring) return;
+    setState(() => _transferring = true);
+    try {
+      await work();
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(failure)));
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  Future<void> _importPackage() => _transfer(() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'EncoreSheets setlist packages',
+          extensions: ['zip'],
+          mimeTypes: ['application/zip'],
+          uniformTypeIdentifiers: ['public.zip-archive'],
+        ),
+      ],
+    );
+    if (file == null || !mounted) return;
+    await widget.library.restoreSetlistPackage(file);
+  }, 'Could not import the setlist package.');
+
+  Future<void> _share(Setlist list) => _transfer(() async {
+    final box = context.findRenderObject() as RenderBox;
+    final origin = box.localToGlobal(Offset.zero) & box.size;
+    final canCombine =
+        list.scores.isNotEmpty &&
+        list.scores.every((id) => widget.library.lookupSelection(id) != null);
+    final format = await showDialog<SetlistShareFormat>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Share setlist'),
+        children: [
+          for (final format in SetlistShareFormat.values)
+            if (widget.library.storage.persistent ||
+                format == SetlistShareFormat.text ||
+                format == SetlistShareFormat.pdf)
+              SimpleDialogOption(
+                onPressed: format == SetlistShareFormat.pdf && !canCombine
+                    ? null
+                    : () => Navigator.pop(dialog, format),
+                child: Text(format.label),
+              ),
+        ],
+      ),
+    );
+    if (!mounted || format == null) return;
+    final output = await exportSetlist(widget.library, list, format);
+    if (!mounted) return;
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [output],
+        fileNameOverrides: [output.name],
+        sharePositionOrigin: origin,
+      ),
+    );
+  }, 'Could not share the setlist.');
 
   Future<void> _edit([Setlist? initial]) async {
     await Navigator.of(context).push<void>(
@@ -120,6 +189,8 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
             _move(list, group[index - 1]);
           case _SetlistAction.later:
             _move(list, group[index + 1]);
+          case _SetlistAction.share:
+            _share(list);
         }
       },
       itemBuilder: (_) => [
@@ -135,6 +206,11 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
           value: _SetlistAction.playInOrder,
           enabled: list.scores.isNotEmpty,
           child: const Text('Choose play order'),
+        ),
+        PopupMenuItem(
+          value: _SetlistAction.share,
+          enabled: !_transferring,
+          child: const Text('Share setlist'),
         ),
         if (_sort == SetlistOrder.manual) ...[
           PopupMenuItem(
@@ -179,6 +255,12 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       appBar: AppBar(
         title: const Text('Setlists'),
         actions: [
+          if (widget.library.storage.persistent)
+            IconButton(
+              tooltip: 'Import setlist package',
+              onPressed: _transferring ? null : _importPackage,
+              icon: const Icon(Icons.file_open_outlined),
+            ),
           PopupMenuButton<SetlistOrder>(
             tooltip: 'Sort setlists',
             icon: const Icon(Icons.sort),
@@ -310,6 +392,11 @@ class _SetlistEditorState extends State<_SetlistEditor> {
           folder: _folder.text.trim(),
           label: _label.text.trim(),
           notes: _notes.text.trim(),
+          placeholders: {
+            for (final item in _scores)
+              if (widget.initial?.placeholders[item.id] case final name?)
+                item.id: name,
+          },
         ),
       );
       if (mounted) Navigator.pop(context);
@@ -401,8 +488,17 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                 )) {
                   (final score, final bookmark) =>
                     bookmark?.title ?? score.title,
-                  null => 'Missing score',
+                  null =>
+                    widget.initial?.placeholders[_scores[index].id] ??
+                        'Missing score',
                 }),
+                subtitle:
+                    widget.initial?.placeholders.containsKey(
+                          _scores[index].id,
+                        ) ==
+                        true
+                    ? const Text('Tap to choose a score')
+                    : null,
                 onTap: _saving ? null : () => _add(index),
                 trailing: IconButton(
                   tooltip: 'Remove score',
