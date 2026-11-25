@@ -50,6 +50,7 @@ import 'midi_automation_dialog.dart';
 import 'ensemble_dialog.dart';
 import 'ensemble_session.dart';
 import 'rehearsal_piano.dart';
+import 'pdf_template.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -570,6 +571,17 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  XFile _generatedScore(Uint8List bytes, String title) {
+    final stem = title.replaceAll(RegExp(r'[/\\\x00-\x1f]'), '_').trim();
+    final filename = '${stem.isEmpty ? 'Untitled score' : stem}.pdf';
+    return XFile.fromData(
+      bytes,
+      name: filename,
+      path: filename,
+      mimeType: 'application/pdf',
+    );
+  }
+
   Future<T?> _openReaderPanel<T>(WidgetBuilder builder) async {
     if (MediaQuery.sizeOf(context).width < 720 ||
         _preferences.fullScreenPanels) {
@@ -708,6 +720,17 @@ class _ReaderState extends State<Reader> {
           (_) => ScanCleanupScreen(library: _library),
         );
         if (mounted && score != null) await _openLibraryScore(score);
+        return;
+      }
+      if (result == 'create-template') {
+        final config = await showDialog<ScoreTemplateConfig>(
+          context: context,
+          builder: (_) => const ScoreTemplateDialog(),
+        );
+        if (config == null || !mounted) return;
+        final bytes = await createTemplatePdf(config);
+        if (mounted)
+          await _importScores([_generatedScore(bytes, config.title)]);
         return;
       }
       if (result == 'scan') {
@@ -4782,6 +4805,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     final actions =
         {
               'import': 'Import PDF',
+              'create-template': 'Create from template',
               'setlists': 'Setlists',
               if (widget.persistent) 'backup': 'Backup & restore',
               'sample': 'Open sample score',
@@ -4883,6 +4907,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         onPressed: () => Navigator.pop(context, 'import'),
                         icon: const Icon(Icons.add),
                         label: const Text('Import PDF'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            Navigator.pop(context, 'create-template'),
+                        icon: const Icon(Icons.note_add_outlined),
+                        label: const Text('Create from template'),
                       ),
                       TextButton.icon(
                         onPressed: () =>
