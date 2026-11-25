@@ -35,6 +35,7 @@ enum _ReaderDisplay {
   halfIndicator,
   landscapeWidth,
   spreads,
+  scoreTabs,
   performance,
   hideControls,
   gestures,
@@ -107,6 +108,8 @@ class _ReaderState extends State<Reader> {
   final _sampleSplits = <int, double>{};
   Duration? _lastHalfScroll;
   ReaderPreferences _preferences = const ReaderPreferences();
+  List<String> _scoreTabIds = [];
+  bool _savingTabs = false;
   static const _sharedImports = MethodChannel('encoresheets/import');
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
@@ -160,7 +163,18 @@ class _ReaderState extends State<Reader> {
     try {
       final data = await _library.storage.readPreferences();
       if (mounted) {
-        setState(() => _preferences = ReaderPreferences.fromJson(data));
+        final indexedTabs = data['scoreTabs'];
+        final ids = indexedTabs is List
+            ? indexedTabs.whereType<String>().toSet().toList()
+            : <String>[];
+        if (ids.isNotEmpty) await _library.load();
+        if (!mounted) return;
+        setState(() {
+          _preferences = ReaderPreferences.fromJson(data);
+          _scoreTabIds = ids
+              .where((id) => _library.lookup(id) != null)
+              .toList();
+        });
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
@@ -534,6 +548,45 @@ class _ReaderState extends State<Reader> {
     }
     setState(() => _playing = null);
     _remember(entry.id, _page, opened: true);
+  }
+
+  Future<void> _updateScoreTabs(List<String> ids) async {
+    if (_savingTabs) return;
+    setState(() => _savingTabs = true);
+    try {
+      await _library.updatePreferences({'scoreTabs': ids});
+      if (mounted) setState(() => _scoreTabIds = ids);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save score tabs.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingTabs = false);
+    }
+  }
+
+  Future<void> _switchScoreTab(String id) async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await _library.load();
+      final score = _library.lookup(id);
+      if (score == null) {
+        await _updateScoreTabs(_scoreTabIds.where((tab) => tab != id).toList());
+      } else if (mounted) {
+        await _openLibraryScore(score);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this score.')),
+        );
+      }
+    } finally {
+      _finishPicking();
+    }
   }
 
   Future<void> _showBookmarks() async {
@@ -1379,6 +1432,8 @@ class _ReaderState extends State<Reader> {
           child: Column(
             children: [
               if (_showControls && !_performance) _header(),
+              if (_showControls && !_performance && _scoreTabIds.isNotEmpty)
+                _scoreTabs(),
               Expanded(key: const ValueKey('score-viewport'), child: _score()),
               if (_nextTitle case final title?)
                 Padding(
@@ -1392,6 +1447,38 @@ class _ReaderState extends State<Reader> {
             ],
           ),
         ),
+      ),
+    ),
+  );
+
+  Widget _scoreTabs() => Material(
+    color: _rail,
+    child: SizedBox(
+      height: 48,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        scrollDirection: Axis.horizontal,
+        itemCount: _scoreTabIds.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final id = _scoreTabIds[index];
+          final title = _library.lookup(id)?.title ?? 'Saved score';
+          return InputChip(
+            label: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 170),
+              child: Text(title, overflow: TextOverflow.ellipsis),
+            ),
+            labelStyle: TextStyle(color: id == _entry?.id ? _brass : _paper),
+            selected: id == _entry?.id && _itemBookmark == null,
+            onPressed: _picking ? null : () => _switchScoreTab(id),
+            deleteButtonTooltipMessage: 'Close tab',
+            onDeleted: _picking || _savingTabs
+                ? null
+                : () => _updateScoreTabs(
+                    _scoreTabIds.where((tab) => tab != id).toList(),
+                  ),
+          );
+        },
       ),
     ),
   );
@@ -1522,6 +1609,13 @@ class _ReaderState extends State<Reader> {
                         }
                       case _ReaderDisplay.performance:
                         _togglePerformance();
+                      case _ReaderDisplay.scoreTabs:
+                        if (_entry case final score?) {
+                          _updateScoreTabs([
+                            ..._scoreTabIds.where((id) => id != score.id),
+                            if (!_scoreTabIds.contains(score.id)) score.id,
+                          ]);
+                        }
                       case _ReaderDisplay.hideControls:
                         setState(() => _showControls = false);
                       case _ReaderDisplay.gestures:
@@ -1611,6 +1705,12 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
                       child: Text('Performance mode'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.scoreTabs,
+                      enabled: _entry != null && !_savingTabs,
+                      checked: _scoreTabIds.contains(_entry?.id),
+                      child: const Text('Keep score in tabs'),
                     ),
                     PopupMenuItem(
                       value: _ReaderDisplay.hideControls,
