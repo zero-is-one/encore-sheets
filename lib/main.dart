@@ -522,7 +522,7 @@ class _ReaderState extends State<Reader> {
     if (entry == null || _picking || _pages == 0) return;
     setState(() => _picking = true);
     try {
-      final bookmark = await _openReaderPanel<ScoreBookmark>(
+      final destination = await _openReaderPanel<BookmarkDestination>(
         (_) => BookmarksScreen(
           library: _library,
           scoreId: entry.id,
@@ -530,17 +530,25 @@ class _ReaderState extends State<Reader> {
           pageCount: _pages,
         ),
       );
-      if (mounted && bookmark != null) {
-        if (bookmark.isItem || _itemBookmark != null) {
-          await _openLibraryScore(
-            entry,
-            startPage: bookmark.page,
-            item: bookmark.isItem ? bookmark : null,
-          );
-        } else {
-          _jumpToPage(bookmark.page);
-        }
+      if (!mounted || destination == null) return;
+      final score = _library.lookup(destination.scoreId);
+      if (score == null) return;
+      if (score.id != entry.id ||
+          destination.item != null ||
+          _itemBookmark != null) {
+        await _openLibraryScore(
+          score,
+          startPage: destination.page,
+          item: destination.item,
+        );
+      } else {
+        _jumpToPage(destination.page);
       }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the saved page.')),
+        );
     } finally {
       _finishPicking();
     }

@@ -38,6 +38,7 @@ class ScoreEntry {
     this.metadata = const {},
     this.collections = const [],
     this.bookmarks = const [],
+    this.flags = const [],
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -51,6 +52,7 @@ class ScoreEntry {
       for (final item in (json['bookmarks'] as List? ?? const []))
         ScoreBookmark.fromJson(item as Map<String, dynamic>),
     ],
+    flags: (json['flags'] as List?)?.cast<int>() ?? const [],
   );
 
   final String id;
@@ -60,6 +62,7 @@ class ScoreEntry {
   final Map<String, String> metadata;
   final List<String> collections;
   final List<ScoreBookmark> bookmarks;
+  final List<int> flags;
 
   ScoreEntry copyWith({
     String? id,
@@ -69,6 +72,7 @@ class ScoreEntry {
     Map<String, String>? metadata,
     List<String>? collections,
     List<ScoreBookmark>? bookmarks,
+    List<int>? flags,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -77,6 +81,7 @@ class ScoreEntry {
     metadata: metadata ?? this.metadata,
     collections: collections ?? this.collections,
     bookmarks: bookmarks ?? this.bookmarks,
+    flags: flags ?? this.flags,
   );
 
   Map<String, dynamic> toJson() => {
@@ -88,6 +93,7 @@ class ScoreEntry {
     if (collections.isNotEmpty) 'collections': collections,
     if (bookmarks.isNotEmpty)
       'bookmarks': bookmarks.map((item) => item.toJson()).toList(),
+    if (flags.isNotEmpty) 'flags': flags,
   };
 }
 

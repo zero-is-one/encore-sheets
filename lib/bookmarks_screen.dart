@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'score_library.dart';
 
+typedef BookmarkDestination = ({String scoreId, int page, ScoreBookmark? item});
+
 class BookmarksScreen extends StatefulWidget {
   const BookmarksScreen({
     super.key,
@@ -22,6 +24,27 @@ class BookmarksScreen extends StatefulWidget {
 
 class _BookmarksScreenState extends State<BookmarksScreen> {
   bool _saving = false;
+  bool _showFlags = false;
+  bool _allScores = false;
+
+  Future<void> _toggleFlag(String scoreId, int page) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await widget.library.updateScore(scoreId, (score) {
+        final pages = score.flags.toSet();
+        if (!pages.remove(page)) pages.add(page);
+        return score.copyWith(flags: pages.toList()..sort());
+      });
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update page flags.')),
+        );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   Future<void> _edit([ScoreBookmark? bookmark]) async {
     var title = bookmark?.title ?? '';
@@ -129,16 +152,41 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       ..sort((a, b) => a.page.compareTo(b.page));
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bookmarks'),
+        title: Text(_showFlags ? 'Flags' : 'Bookmarks'),
         actions: [
           IconButton(
-            tooltip: 'Add bookmark',
-            onPressed: _saving ? null : _edit,
-            icon: const Icon(Icons.add),
+            tooltip: _showFlags ? 'Show bookmarks' : 'Show flags',
+            onPressed: _saving
+                ? null
+                : () => setState(() => _showFlags = !_showFlags),
+            icon: Icon(
+              _showFlags ? Icons.bookmark_outline : Icons.flag_outlined,
+            ),
+          ),
+          IconButton(
+            tooltip: _showFlags
+                ? score.flags.contains(widget.page)
+                      ? 'Unflag current page'
+                      : 'Flag current page'
+                : 'Add bookmark',
+            onPressed: _saving
+                ? null
+                : _showFlags
+                ? () => _toggleFlag(score.id, widget.page)
+                : _edit,
+            icon: Icon(
+              _showFlags
+                  ? score.flags.contains(widget.page)
+                        ? Icons.flag
+                        : Icons.outlined_flag
+                  : Icons.add,
+            ),
           ),
         ],
       ),
-      body: items.isEmpty
+      body: _showFlags
+          ? _flags(score)
+          : items.isEmpty
           ? const Center(child: Text('No bookmarks in this score.'))
           : ListView.builder(
               itemCount: items.length,
@@ -154,7 +202,11 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   ),
                   onTap: _saving
                       ? null
-                      : () => Navigator.pop(context, bookmark),
+                      : () => Navigator.pop(context, (
+                          scoreId: score.id,
+                          page: bookmark.page,
+                          item: bookmark.isItem ? bookmark : null,
+                        )),
                   trailing: PopupMenuButton<String>(
                     enabled: !_saving,
                     onSelected: (action) {
@@ -182,6 +234,49 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 );
               },
             ),
+    );
+  }
+
+  Widget _flags(ScoreEntry current) {
+    final entries = [
+      for (final score in _allScores ? widget.library.recent : [current])
+        for (final page in score.flags) (score, page),
+    ];
+    return Column(
+      children: [
+        SwitchListTile(
+          title: const Text('Show all scores'),
+          value: _allScores,
+          onChanged: (enabled) => setState(() => _allScores = enabled),
+        ),
+        Expanded(
+          child: entries.isEmpty
+              ? const Center(child: Text('No flagged pages.'))
+              : ListView.builder(
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) {
+                    final (score, page) = entries[index];
+                    return ListTile(
+                      leading: const Icon(Icons.flag_outlined),
+                      title: Text('Page $page'),
+                      subtitle: _allScores ? Text(score.title) : null,
+                      onTap: () => Navigator.pop(context, (
+                        scoreId: score.id,
+                        page: page,
+                        item: null as ScoreBookmark?,
+                      )),
+                      trailing: IconButton(
+                        tooltip: 'Remove flag',
+                        icon: const Icon(Icons.clear),
+                        onPressed: _saving
+                            ? null
+                            : () => _toggleFlag(score.id, page),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
