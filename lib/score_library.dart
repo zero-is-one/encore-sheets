@@ -181,20 +181,39 @@ class ScoreEntry {
 }
 
 class Setlist {
-  Setlist(this.id, this.name, Iterable<String> scores)
+  Setlist(this.id, this.name, Iterable<String> scores, {this.folder = ''})
     : scores = List.unmodifiable(scores);
 
   factory Setlist.fromJson(Map<String, dynamic> row) => Setlist(
     row['id'] as String,
     row['name'] as String,
     (row['scores'] as List<dynamic>).cast<String>(),
+    folder: row['folder'] as String? ?? '',
   );
 
   final String id;
   final String name;
   final List<String> scores;
+  final String folder;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'scores': scores};
+  Setlist copyWith({
+    String? id,
+    String? name,
+    Iterable<String>? scores,
+    String? folder,
+  }) => Setlist(
+    id ?? this.id,
+    name ?? this.name,
+    scores ?? this.scores,
+    folder: folder ?? this.folder,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'scores': scores,
+    if (folder.isNotEmpty) 'folder': folder,
+  };
 }
 
 abstract class LibraryStorage {
@@ -381,6 +400,25 @@ class ScoreLibrary {
     final updated = {..._setlists, setlist.id: setlist};
     await storage.writeSetlists(updated.values.toList());
     _setlists[setlist.id] = setlist;
+  });
+
+  Future<void> duplicateSetlist(Setlist setlist) => _serialize(() async {
+    var sequence = DateTime.now().microsecondsSinceEpoch;
+    while (_setlists.containsKey('$sequence')) {
+      sequence++;
+    }
+    final names = _setlists.values
+        .where((list) => list.folder == setlist.folder)
+        .map((list) => list.name.toLowerCase())
+        .toSet();
+    var name = '${setlist.name} copy';
+    var suffix = 2;
+    while (names.contains(name.toLowerCase())) {
+      name = '${setlist.name} copy ${suffix++}';
+    }
+    final copy = setlist.copyWith(id: '$sequence', name: name);
+    await storage.writeSetlists([..._setlists.values, copy]);
+    _setlists[copy.id] = copy;
   });
   Future<void> flush() => _pending;
 
@@ -654,10 +692,8 @@ class ScoreLibrary {
           .map((bookmark) => bookmark.id)
           .toSet();
       for (final old in _setlists.values) {
-        lists[old.id] = Setlist(
-          old.id,
-          old.name,
-          old.scores.expand((selection) {
+        lists[old.id] = old.copyWith(
+          scores: old.scores.expand((selection) {
             final parts = selection.split(':');
             if (parts.first != previous.id) return [selection];
             if (parts.length == 1) return [score.id];

@@ -936,10 +936,10 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _playScore(Setlist setlist, int index) async {
     if (index == 0) {
-      setlist = Setlist(
-        setlist.id,
-        setlist.name,
-        setlist.scores.where((id) => _library.lookupSelection(id) != null),
+      setlist = setlist.copyWith(
+        scores: setlist.scores.where(
+          (id) => _library.lookupSelection(id) != null,
+        ),
       );
       if (setlist.scores.isEmpty) return;
     }

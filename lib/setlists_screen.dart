@@ -22,9 +22,43 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _duplicate(Setlist original) async {
+    try {
+      await widget.library.duplicateSetlist(original);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not duplicate the setlist.')),
+        );
+      }
+    }
+  }
+
+  Widget _row(Setlist list) => ListTile(
+    leading: const Icon(Icons.queue_music),
+    title: Text(list.name),
+    subtitle: Text('${list.scores.length} scores'),
+    onTap: list.scores.isEmpty
+        ? () => _edit(list)
+        : () => Navigator.pop(context, list),
+    trailing: PopupMenuButton<bool>(
+      tooltip: 'Options for ${list.name}',
+      onSelected: (duplicate) => duplicate ? _duplicate(list) : _edit(list),
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: false, child: Text('Edit setlist')),
+        PopupMenuItem(value: true, child: Text('Duplicate setlist')),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final lists = widget.library.setlists;
+    final folders = {
+      for (final list in lists)
+        if (list.folder.isNotEmpty) list.folder,
+    }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return Scaffold(
       appBar: AppBar(
         title: const Text('Setlists'),
@@ -42,20 +76,18 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
             )
           : ListView(
               children: [
-                for (final list in lists)
-                  ListTile(
-                    leading: const Icon(Icons.queue_music),
-                    title: Text(list.name),
-                    subtitle: Text('${list.scores.length} scores'),
-                    onTap: list.scores.isEmpty
-                        ? () => _edit(list)
-                        : () => Navigator.pop(context, list),
-                    trailing: IconButton(
-                      tooltip: 'Edit ${list.name}',
-                      onPressed: () => _edit(list),
-                      icon: const Icon(Icons.edit_outlined),
-                    ),
+                for (final folder in folders)
+                  ExpansionTile(
+                    key: PageStorageKey(folder),
+                    leading: const Icon(Icons.folder_outlined),
+                    title: Text(folder),
+                    children: [
+                      for (final list in lists)
+                        if (list.folder == folder) _row(list),
+                    ],
                   ),
+                for (final list in lists)
+                  if (list.folder.isEmpty) _row(list),
               ],
             ),
     );
@@ -74,6 +106,9 @@ class _SetlistEditor extends StatefulWidget {
 
 class _SetlistEditorState extends State<_SetlistEditor> {
   late final _name = TextEditingController(text: widget.initial?.name ?? '');
+  late final _folder = TextEditingController(
+    text: widget.initial?.folder ?? '',
+  );
   late final _scores = [
     for (final id in widget.initial?.scores ?? <String>[])
       (key: Object(), id: id),
@@ -83,6 +118,7 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   @override
   void dispose() {
     _name.dispose();
+    _folder.dispose();
     super.dispose();
   }
 
@@ -137,7 +173,12 @@ class _SetlistEditorState extends State<_SetlistEditor> {
     setState(() => _saving = true);
     try {
       await widget.library.saveSetlist(
-        Setlist(id, name, _scores.map((item) => item.id)),
+        Setlist(
+          id,
+          name,
+          _scores.map((item) => item.id),
+          folder: _folder.text.trim(),
+        ),
       );
       if (mounted) Navigator.pop(context);
     } catch (_) {
@@ -170,6 +211,14 @@ class _SetlistEditorState extends State<_SetlistEditor> {
               enabled: !_saving,
               decoration: const InputDecoration(labelText: 'Setlist name'),
               onChanged: (_) => setState(() {}),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              controller: _folder,
+              enabled: !_saving,
+              decoration: const InputDecoration(labelText: 'Folder (optional)'),
             ),
           ),
           Expanded(

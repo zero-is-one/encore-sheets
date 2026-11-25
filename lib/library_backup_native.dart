@@ -154,7 +154,9 @@ void _exportBackup(
       do {
         id = '${sequence++}';
       } while (!listIds.add(id));
-      setlists.add(Setlist(id, old.name, old.scores.map((id) => mapped[id]!)));
+      setlists.add(
+        old.copyWith(id: id, scores: old.scores.map((id) => mapped[id]!)),
+      );
     }
 
     final staged = File('$root/catalog.json.tmp');
