@@ -181,6 +181,9 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
   EnsembleSession? _ensemble;
+  bool _leadingSpread = false;
+  bool _followingSpread = false;
+  bool _missingFacingPage = false;
   AudioPageCueMode _audioCueMode = AudioPageCueMode.off;
   StreamSubscription<Duration>? _audioCuePlayback;
   String? _audioCueFile;
@@ -1867,7 +1870,7 @@ class _ReaderState extends State<Reader> {
       _pages = 0;
       _seek = null;
       _inking = false;
-      _showControls = true;
+      _showControls = !_followingSpread;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final ink in retiredInk) {
@@ -1925,6 +1928,10 @@ class _ReaderState extends State<Reader> {
 
   void _turn(int step) {
     if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (_ensemble?.leading == true && _leadingSpread) {
+      _go(_page - (_page - _firstPage) % 2 + step * 2);
+      return;
+    }
     if (_spreadStep > 0) {
       _go(_page + step * _spreadStep);
       return;
@@ -1947,7 +1954,11 @@ class _ReaderState extends State<Reader> {
   }
 
   int get _spreadStep =>
-      _inking || _itemBookmark != null || _preferences.halfPageTurns
+      _inking ||
+          _itemBookmark != null ||
+          _preferences.halfPageTurns ||
+          _ensemble?.leading == true && _leadingSpread ||
+          _followingSpread
       ? 0
       : _preferences.spreadStep;
 
@@ -2224,6 +2235,11 @@ class _ReaderState extends State<Reader> {
         barrierDismissible: false,
         builder: (_) => EnsembleDialog(
           session: session,
+          leadingSpread: () => _leadingSpread,
+          setLeadingSpread: (value) {
+            setState(() => _leadingSpread = value);
+            if (value && (_page - _firstPage).isOdd) _jumpToPage(_page - 1);
+          },
           lead: () => session.lead(
             () => (
               id: _entry?.id,
@@ -2232,22 +2248,33 @@ class _ReaderState extends State<Reader> {
               page: _page,
             ),
           ),
-          follow: (address, code, mode) => session.follow(
-            address: address,
-            code: code,
-            onPosition: (position) => _followEnsemble(position, mode),
-            onDisconnect: () {
-              if (mounted)
+          follow: (address, code, mode) async {
+            await session.follow(
+              address: address,
+              code: code,
+              onPosition: (position) => _followEnsemble(position, mode),
+              onDisconnect: () {
+                if (!mounted) return;
+                setState(() => _followingSpread = _missingFacingPage = false);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Ensemble session disconnected.'),
                   ),
                 );
-            },
-          ),
+              },
+            );
+            if (mounted)
+              setState(() {
+                _followingSpread = mode == EnsembleFollowMode.facing;
+                if (_followingSpread) _showControls = false;
+              });
+          },
         ),
       );
     } finally {
+      if (mounted && !session.following) {
+        setState(() => _followingSpread = _missingFacingPage = false);
+      }
       _finishPicking();
     }
   }
@@ -2264,6 +2291,8 @@ class _ReaderState extends State<Reader> {
     final current = _entry;
     final sameScore = current == null ? position.id == null : matches(current);
     final acceptPage = mode != EnsembleFollowMode.scores;
+    final facing = mode == EnsembleFollowMode.facing;
+    final targetPage = position.page + (facing ? 1 : 0);
     if (!sameScore && mode != EnsembleFollowMode.pages) {
       final exact = position.id == null ? null : _library.lookup(position.id!);
       final options = _library.recent.where(matches).take(2).toList();
@@ -2287,11 +2316,15 @@ class _ReaderState extends State<Reader> {
         local,
         null,
         annotations: annotations,
-        startPage: acceptPage ? position.page : null,
+        startPage: acceptPage && !facing ? targetPage : null,
       );
       _remember(target.id, _page, opened: true);
     } else if (acceptPage && (sameScore || mode == EnsembleFollowMode.pages)) {
-      _jumpToPage(position.page);
+      final missing = facing && _pages > 0 && targetPage > _lastPage;
+      if (_missingFacingPage != missing) {
+        setState(() => _missingFacingPage = missing);
+      }
+      if (!missing) _jumpToPage(targetPage);
     }
   }
 
@@ -3432,7 +3465,22 @@ class _ReaderState extends State<Reader> {
                 _scoreTabs(),
               Expanded(
                 key: const ValueKey('score-viewport'),
-                child: _deskewedScore(),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _deskewedScore(),
+                    if (_missingFacingPage)
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            setState(() => _showControls = !_showControls),
+                        child: ColoredBox(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          child: const Center(child: Text('No facing page')),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               if (_metronome case final meter?) MetronomeBeat(metronome: meter),
               if (_nextTitle case final title?)

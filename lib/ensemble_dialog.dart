@@ -5,7 +5,8 @@ import 'ensemble_session.dart';
 enum EnsembleFollowMode {
   pages('Page turns'),
   scores('Score changes'),
-  both('Scores and page turns');
+  both('Scores and page turns'),
+  facing('Right page of a two-device spread');
 
   const EnsembleFollowMode(this.label);
   final String label;
@@ -17,11 +18,15 @@ class EnsembleDialog extends StatefulWidget {
     required this.session,
     required this.lead,
     required this.follow,
+    required this.leadingSpread,
+    required this.setLeadingSpread,
   });
 
   final EnsembleSession session;
   final Future<void> Function() lead;
   final Future<void> Function(String, String, EnsembleFollowMode) follow;
+  final bool Function() leadingSpread;
+  final ValueChanged<bool> setLeadingSpread;
 
   @override
   State<EnsembleDialog> createState() => _EnsembleDialogState();
@@ -79,6 +84,17 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
                 SelectableText(session.address ?? ''),
                 if (session.leading)
                   SelectableText('Group code ${session.code}'),
+                if (session.leading)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show left pages of a two-device spread'),
+                    value: widget.leadingSpread(),
+                    onChanged: _busy
+                        ? null
+                        : (value) {
+                            setState(() => widget.setLeadingSpread(value));
+                          },
+                  ),
               ] else ...[
                 const Text(
                   'Connect both devices to the same Wi-Fi network. Load a copy of the score on each device.',
