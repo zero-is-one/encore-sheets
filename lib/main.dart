@@ -21,6 +21,8 @@ enum _ReaderDisplay {
   fit,
   zoomIn,
   zoomOut,
+  previousPage,
+  previousScore,
   performance,
   hideControls,
   gestures,
@@ -70,6 +72,8 @@ class _ReaderState extends State<Reader> {
   int _revision = 0;
   int _page = 1;
   int _initialPage = 1;
+  int? _previousPage;
+  ({String? id, int page})? _previousItem;
   int _pages = 0;
   double? _seek;
   bool _showControls = true;
@@ -547,6 +551,9 @@ class _ReaderState extends State<Reader> {
     Map<String, dynamic> annotations = const {},
     int? startPage,
   }) {
+    if (_entry?.id != entry?.id) {
+      _previousItem = (id: _entry?.id, page: _page);
+    }
     final restoredInk = {
       for (final MapEntry(key: page, value: strokes) in annotations.entries)
         int.parse(page): PageInk(
@@ -564,6 +571,7 @@ class _ReaderState extends State<Reader> {
       _ink.clear();
       _ink.addAll(restoredInk);
       _page = _initialPage = startPage ?? entry?.page ?? 1;
+      _previousPage = null;
       _pages = 0;
       _seek = null;
       _inking = false;
@@ -585,9 +593,46 @@ class _ReaderState extends State<Reader> {
     final target = page.clamp(1, _pages);
     if (target == _page) return;
     _ink[_page]?.finish(commit: false);
+    _previousPage = _page;
     setState(() => _page = target);
     _viewer.goToPage(pageNumber: target, duration: Duration.zero);
     _remember(_entry?.id, target);
+  }
+
+  Future<void> _returnToPreviousScore() async {
+    final previous = _previousItem;
+    if (previous == null || _picking) return;
+    setState(() => _picking = true);
+    try {
+      final id = previous.id;
+      if (id == null) {
+        _playing = null;
+        _load(null, null, null, startPage: previous.page);
+        return;
+      }
+      final score = _library.lookup(id);
+      if (score == null) return;
+      final local = await _library.storage.openScore(id);
+      final bytes = kIsWeb ? await local.readAsBytes() : null;
+      final annotations = await _library.readInk(id);
+      if (!mounted) return;
+      _playing = null;
+      _load(
+        score,
+        local,
+        bytes,
+        annotations: annotations,
+        startPage: previous.page,
+      );
+      _remember(id, _page, opened: true);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not reopen the previous score.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -721,6 +766,7 @@ class _ReaderState extends State<Reader> {
             page == _page) {
           return;
         }
+        _previousPage = _page;
         setState(() => _page = page);
         _remember(_entry?.id, page);
       },
@@ -807,6 +853,7 @@ class _ReaderState extends State<Reader> {
     if (file == null) {
       return PdfViewer.asset(
         'assets/first_light.pdf',
+        initialPageNumber: _initialPage,
         key: key,
         controller: _viewer,
         params: params,
@@ -928,6 +975,10 @@ class _ReaderState extends State<Reader> {
                         if (_viewer.isReady) _viewer.zoomUp();
                       case _ReaderDisplay.zoomOut:
                         if (_viewer.isReady) _viewer.zoomDown();
+                      case _ReaderDisplay.previousPage:
+                        if (_previousPage case final page?) _go(page);
+                      case _ReaderDisplay.previousScore:
+                        _returnToPreviousScore();
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -968,6 +1019,16 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.zoomOut,
                       child: Text('Zoom out'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.previousPage,
+                      enabled: _previousPage != null,
+                      child: const Text('Jump back to previous page'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.previousScore,
+                      enabled: _previousItem != null,
+                      child: const Text('Return to previous score'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
