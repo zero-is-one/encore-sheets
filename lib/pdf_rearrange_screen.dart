@@ -11,11 +11,18 @@ class PdfRearrangeScreen extends StatefulWidget {
   const PdfRearrangeScreen({
     super.key,
     required this.library,
-    required this.score,
-  });
+    required ScoreEntry this.score,
+  }) : scan = null;
+
+  const PdfRearrangeScreen.scanned({
+    super.key,
+    required this.library,
+    required XFile this.scan,
+  }) : score = null;
 
   final ScoreLibrary library;
-  final ScoreEntry score;
+  final ScoreEntry? score;
+  final XFile? scan;
 
   @override
   State<PdfRearrangeScreen> createState() => _PdfRearrangeScreenState();
@@ -35,7 +42,9 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
 
   Future<void> _load() async {
     try {
-      final file = await widget.library.storage.openScore(widget.score.id);
+      final file =
+          widget.scan ??
+          await widget.library.storage.openScore(widget.score!.id);
       await _append(file, original: true);
     } catch (_) {
       if (mounted) setState(() => _message = 'Could not open this PDF.');
@@ -131,8 +140,22 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
     try {
       final original = widget.score;
       final pages = _pages.map((row) => row.page).toList();
-      final title = replace ? original.title : '${original.title} (rearranged)';
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .substring(0, 19)
+          .replaceAll(':', '-')
+          .replaceAll('T', ' ');
+      final title = original == null
+          ? 'Scan $stamp'
+          : replace
+          ? original.title
+          : '${original.title} (rearranged)';
       final file = await writeRearrangedPdf('$title.pdf', pages);
+      if (original == null) {
+        final (score, _) = await widget.library.import(file);
+        if (mounted) Navigator.pop(context, score);
+        return;
+      }
       final annotations = await widget.library.readInk(original.id);
       final remapped = remapScorePages(original, annotations, pages);
       final (score, _) = await widget.library.import(
@@ -176,7 +199,11 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy,
     child: Scaffold(
-      appBar: AppBar(title: const Text('Rearrange pages')),
+      appBar: AppBar(
+        title: Text(
+          widget.scan == null ? 'Rearrange pages' : 'Review scanned pages',
+        ),
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -191,14 +218,17 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
                   onPressed: _busy || _pages.isEmpty
                       ? null
                       : () => _save(replace: false),
-                  child: const Text('Save as copy'),
+                  child: Text(
+                    widget.scan == null ? 'Save as copy' : 'Save scanned score',
+                  ),
                 ),
-                TextButton(
-                  onPressed: _busy || _pages.isEmpty
-                      ? null
-                      : () => _save(replace: true),
-                  child: const Text('Replace score'),
-                ),
+                if (widget.scan == null)
+                  TextButton(
+                    onPressed: _busy || _pages.isEmpty
+                        ? null
+                        : () => _save(replace: true),
+                    child: const Text('Replace score'),
+                  ),
               ],
             ),
             if (_busy) const LinearProgressIndicator(),

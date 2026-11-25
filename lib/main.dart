@@ -471,6 +471,7 @@ class _ReaderState extends State<Reader> {
                 scores: _library.recent,
                 setlists: _library.setlists,
                 persistent: _library.storage.persistent,
+                canScan: _supportsSharedImport,
               ),
             );
       if (!mounted) return;
@@ -539,6 +540,30 @@ class _ReaderState extends State<Reader> {
       if (result == 'import') {
         setState(() => _picking = false);
         await _open();
+        return;
+      }
+      if (result == 'scan') {
+        try {
+          final path = await const MethodChannel('encoresheets/scanner')
+              .invokeMethod<String>('scan');
+          if (!mounted || path == null) return;
+          final score = await _openReaderPanel<ScoreEntry>(
+            (_) => PdfRearrangeScreen.scanned(
+              library: _library,
+              scan: XFile(path),
+            ),
+          );
+          if (mounted && score != null) await _openLibraryScore(score);
+        } on PlatformException catch (error) {
+          if (mounted)
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  error.message ?? 'Could not start the document scanner.',
+                ),
+              ),
+            );
+        }
         return;
       }
       if (result == 'sample') {
@@ -2507,12 +2532,14 @@ class _LibraryScreen extends StatefulWidget {
     required this.scores,
     required this.setlists,
     required this.persistent,
+    required this.canScan,
   });
 
   final List<ScoreEntry> scores;
   final ScoreLibrary library;
   final List<Setlist> setlists;
   final bool persistent;
+  final bool canScan;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -2855,6 +2882,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         icon: const Icon(Icons.add),
                         label: const Text('Import PDF'),
                       ),
+                      if (widget.canScan)
+                        TextButton.icon(
+                          onPressed: () => Navigator.pop(context, 'scan'),
+                          icon: const Icon(Icons.document_scanner_outlined),
+                          label: const Text('Scan sheet music'),
+                        ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),
                         icon: const Icon(Icons.queue_music),

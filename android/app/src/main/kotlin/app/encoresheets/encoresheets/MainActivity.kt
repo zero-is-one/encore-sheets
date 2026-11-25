@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -11,6 +14,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private var pendingBackup: Pair<File, MethodChannel.Result>? = null
+    private var pendingScan: MethodChannel.Result? = null
     private var importChannel: MethodChannel? = null
     private val sharedPdfs = mutableListOf<Uri>()
 
@@ -36,8 +40,72 @@ class MainActivity : FlutterActivity() {
         collectPdfs(intent)
     }
 
+    @Suppress("DEPRECATION")
+    private fun beginScan(result: MethodChannel.Result) {
+        if (pendingScan != null) {
+            result.error("scan_pending", "A scan is already open.", null)
+            return
+        }
+        pendingScan = result
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(50)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options).getStartScanIntent(this)
+            .addOnSuccessListener { sender ->
+                try {
+                    startIntentSenderForResult(sender, SCAN_REQUEST, null, 0, 0, 0)
+                } catch (error: Exception) {
+                    pendingScan = null
+                    result.error("scan_start", error.message, null)
+                }
+            }
+            .addOnFailureListener { error ->
+                pendingScan = null
+                result.error("scan_unavailable", error.message, null)
+            }
+    }
+
+    private fun finishScan(resultCode: Int, data: Intent?) {
+        val result = pendingScan ?: return
+        if (resultCode == Activity.RESULT_CANCELED) {
+            pendingScan = null
+            result.success(null)
+            return
+        }
+        val pdf = GmsDocumentScanningResult.fromActivityResultIntent(data)?.pdf
+        if (resultCode != Activity.RESULT_OK || pdf == null) {
+            pendingScan = null
+            result.error("scan_result", "The scanner did not return a PDF.", null)
+            return
+        }
+        Thread {
+            try {
+                val file = File.createTempFile("score-scan-", ".pdf", cacheDir)
+                val input = contentResolver.openInputStream(pdf.uri)
+                    ?: error("Could not open the scanned PDF.")
+                input.use { source -> file.outputStream().use { source.copyTo(it) } }
+                runOnUiThread {
+                    pendingScan = null
+                    result.success(file.path)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    pendingScan = null
+                    result.error("scan_copy", error.message, null)
+                }
+            }
+        }.start()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/scanner")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "scan") beginScan(result) else result.notImplemented()
+            }
         importChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/import")
         importChannel?.setMethodCallHandler { call, result ->
             if (call.method != "take") {
@@ -97,6 +165,10 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Uses FlutterActivity's existing activity result callback")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SCAN_REQUEST) {
+            finishScan(resultCode, data)
+            return
+        }
         if (requestCode != BACKUP_REQUEST) return
         val (file, result) = pendingBackup ?: return
         val uri = data?.data
@@ -127,5 +199,6 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val BACKUP_REQUEST = 8041
+        const val SCAN_REQUEST = 8042
     }
 }
