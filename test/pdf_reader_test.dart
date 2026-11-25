@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:encoresheets/bookmark_import.dart';
 import 'package:encoresheets/pdf_assembly.dart';
 import 'package:encoresheets/page_crop.dart';
 import 'package:encoresheets/pdf_export.dart';
@@ -13,6 +14,32 @@ import 'package:pdfrx/pdfrx.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   Pdfrx.cacheDirectoryPath = Directory.systemTemp.path;
+
+  test(
+    'imports bookmark tables with quoted fields, ranges, and matched pages',
+    () async {
+      final document = await openRearrangeDocument(
+        XFile('assets/first_light.pdf'),
+      );
+      addTearDown(document.dispose);
+      final index = BookmarkPageIndex(document);
+      final result = await index.importTable(
+        'Title,Start page,End page\r\n"Part, one",2,3\r\nFirst Light,,\r\nInvalid,99,',
+        ',',
+      );
+      expect(result.skipped, 1);
+      expect(result.candidates.first, (
+        title: 'Part, one',
+        page: 2,
+        endPage: 3,
+      ));
+      expect(result.candidates.last.page, 1);
+      expect(
+        parseBookmarkTable('Page\tTitle\n1\t"Second ""piece"""\n', '\t').last,
+        ['1', 'Second "piece"'],
+      );
+    },
+  );
 
   test('finds PDF text, annotation text, and page notes by page', () async {
     final document = await openRearrangeDocument(

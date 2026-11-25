@@ -847,6 +847,7 @@ class _ReaderState extends State<Reader> {
           scoreId: entry.id,
           page: _page,
           pageCount: _pages,
+          document: _viewer.document,
         ),
       );
       if (!mounted || destination == null) return;

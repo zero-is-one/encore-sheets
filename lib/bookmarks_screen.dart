@@ -1,5 +1,8 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:pdfrx/pdfrx.dart';
 
+import 'bookmark_import.dart';
 import 'score_library.dart';
 
 typedef BookmarkDestination = ({String scoreId, int page, ScoreBookmark? item});
@@ -11,12 +14,14 @@ class BookmarksScreen extends StatefulWidget {
     required this.scoreId,
     required this.page,
     required this.pageCount,
+    required this.document,
   });
 
   final ScoreLibrary library;
   final String scoreId;
   final int page;
   final int pageCount;
+  final PdfDocument document;
 
   @override
   State<BookmarksScreen> createState() => _BookmarksScreenState();
@@ -26,6 +31,142 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   bool _saving = false;
   bool _showFlags = false;
   bool _allScores = false;
+  late final _index = BookmarkPageIndex(widget.document);
+
+  Future<void> _importBookmarks(bool outline) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    var candidates = <BookmarkCandidate>[];
+    var skipped = 0;
+    try {
+      if (outline) {
+        candidates = outlineBookmarks(
+          await widget.document.loadOutline(),
+          widget.pageCount,
+        );
+      } else {
+        final file = await openFile(
+          acceptedTypeGroups: const [
+            XTypeGroup(
+              label: 'Bookmark tables',
+              extensions: ['csv', 'tsv'],
+              mimeTypes: ['text/csv', 'text/tab-separated-values'],
+              uniformTypeIdentifiers: [
+                'public.comma-separated-values-text',
+                'public.tab-separated-values-text',
+              ],
+            ),
+          ],
+        );
+        if (file == null || !mounted) return;
+        final result = await _index.importTable(
+          await file.readAsString(),
+          file.name.toLowerCase().endsWith('.tsv') ? '\t' : ',',
+        );
+        candidates = result.candidates;
+        skipped = result.skipped;
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read the bookmark source.')),
+        );
+      return;
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+    if (!mounted) return;
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No valid bookmarks were found.')),
+      );
+      return;
+    }
+    final selected = candidates.toSet();
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, refresh) => AlertDialog(
+          title: const Text('Review bookmarks'),
+          content: SizedBox(
+            width: 420,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                if (skipped > 0)
+                  Text('$skipped rows could not be matched to valid pages.'),
+                for (final item in candidates.toSet())
+                  CheckboxListTile(
+                    title: Text(item.title),
+                    subtitle: Text(
+                      item.endPage == null
+                          ? 'Page ${item.page}'
+                          : 'Pages ${item.page}–${item.endPage}',
+                    ),
+                    value: selected.contains(item),
+                    onChanged: (checked) => refresh(() {
+                      if (checked == true) {
+                        selected.add(item);
+                      } else {
+                        selected.remove(item);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.pop(dialog, true),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    await _change((existing) {
+      final keys = existing
+          .map(
+            (item) => (
+              title: item.title.toLowerCase(),
+              page: item.page,
+              endPage: item.endPage,
+            ),
+          )
+          .toSet();
+      final ids = existing.map((item) => item.id).toSet();
+      var next = DateTime.now().microsecondsSinceEpoch;
+      String newId() {
+        while (!ids.add('$next')) {
+          next++;
+        }
+        return '${next++}';
+      }
+
+      return [
+        ...existing,
+        for (final item in selected)
+          if (keys.add((
+            title: item.title.toLowerCase(),
+            page: item.page,
+            endPage: item.endPage,
+          )))
+            ScoreBookmark(
+              newId(),
+              item.title,
+              item.page,
+              endPage: item.endPage,
+            ),
+      ];
+    });
+  }
 
   Future<void> _toggleFlag(String scoreId, int page) async {
     if (_saving) return;
@@ -50,6 +191,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     var title = bookmark?.title ?? '';
     var page = bookmark?.page ?? widget.page;
     var end = bookmark?.endPage?.toString() ?? '';
+    var pageFieldVersion = 0;
+    var lookingUp = false;
     final usedInSetlist =
         bookmark != null &&
         widget.library.isInSetlist(bookmark.selectionId(widget.scoreId));
@@ -58,6 +201,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, refresh) => AlertDialog(
           title: Text(bookmark == null ? 'New bookmark' : 'Edit bookmark'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -68,11 +212,55 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 onChanged: (value) => refresh(() => title = value),
               ),
               TextFormField(
+                key: ValueKey(pageFieldVersion),
                 initialValue: '$page',
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Page'),
                 onChanged: (value) =>
                     refresh(() => page = int.tryParse(value) ?? 0),
+              ),
+              TextButton(
+                onPressed: lookingUp || title.trim().isEmpty
+                    ? null
+                    : () async {
+                        refresh(() => lookingUp = true);
+                        List<int> matches;
+                        try {
+                          matches = await _index.find(title);
+                        } catch (_) {
+                          matches = [];
+                        }
+                        if (!context.mounted) return;
+                        refresh(() => lookingUp = false);
+                        if (matches.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('No matching PDF text found.'),
+                            ),
+                          );
+                          return;
+                        }
+                        final selected = await showDialog<int>(
+                          context: context,
+                          builder: (choices) => SimpleDialog(
+                            title: const Text('Matching pages'),
+                            children: [
+                              for (final match in matches)
+                                SimpleDialogOption(
+                                  onPressed: () =>
+                                      Navigator.pop(choices, match),
+                                  child: Text('Page $match'),
+                                ),
+                            ],
+                          ),
+                        );
+                        if (!context.mounted || selected == null) return;
+                        refresh(() {
+                          page = selected;
+                          pageFieldVersion++;
+                        });
+                      },
+                child: Text(lookingUp ? 'Searching…' : 'Find page by title'),
               ),
               TextFormField(
                 initialValue: end,
@@ -154,6 +342,17 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       appBar: AppBar(
         title: Text(_showFlags ? 'Flags' : 'Bookmarks'),
         actions: [
+          if (!_showFlags)
+            PopupMenuButton<bool>(
+              tooltip: 'Import bookmarks',
+              enabled: !_saving,
+              icon: const Icon(Icons.playlist_add),
+              onSelected: _importBookmarks,
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: true, child: Text('From PDF outline')),
+                PopupMenuItem(value: false, child: Text('From CSV or TSV')),
+              ],
+            ),
           IconButton(
             tooltip: _showFlags ? 'Show bookmarks' : 'Show flags',
             onPressed: _saving
