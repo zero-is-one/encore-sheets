@@ -189,6 +189,14 @@ void _validateInk(Map<String, dynamic> pages) {
           (stroke['points'] as List).isEmpty) {
         throw const FormatException('Invalid annotation stroke');
       }
+      final width = stroke['width'];
+      final color = stroke['color'];
+      if ((width != null &&
+              (width is! num || !width.isFinite || width <= 0 || width > .1)) ||
+          (color != null &&
+              (color is! int || color < 0 || color > 0xffffffff))) {
+        throw const FormatException('Invalid annotation style');
+      }
       for (final point in stroke['points'] as List) {
         if (point is! List ||
             point.length != 2 ||

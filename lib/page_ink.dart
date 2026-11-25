@@ -5,19 +5,27 @@ import 'package:flutter/widgets.dart';
 enum InkTool { pen, highlighter, eraser }
 
 class _Stroke {
-  _Stroke(this.tool, this.points);
+  _Stroke(this.tool, this.points, {this.width, this.color});
 
-  factory _Stroke.fromJson(Map<String, dynamic> data) =>
-      _Stroke(InkTool.values.byName(data['tool'] as String), [
-        for (final [num x, num y] in data['points'] as List<dynamic>)
-          Offset(x.toDouble(), y.toDouble()),
-      ]);
+  factory _Stroke.fromJson(Map<String, dynamic> data) => _Stroke(
+    InkTool.values.byName(data['tool'] as String),
+    [
+      for (final [num x, num y] in data['points'] as List<dynamic>)
+        Offset(x.toDouble(), y.toDouble()),
+    ],
+    width: (data['width'] as num?)?.toDouble(),
+    color: data['color'] as int?,
+  );
 
   final InkTool tool;
   final List<Offset> points;
+  final double? width;
+  final int? color;
 
   Map<String, dynamic> toJson() => {
     'tool': tool.name,
+    if (width != null) 'width': width,
+    if (color != null) 'color': color,
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
@@ -40,8 +48,13 @@ class PageInk extends ChangeNotifier {
     for (final stroke in _strokes) stroke.toJson(),
   ];
 
-  void begin(Offset point, {InkTool tool = InkTool.pen}) {
-    _active = _Stroke(tool, [point]);
+  void begin(
+    Offset point, {
+    InkTool tool = InkTool.pen,
+    double? width,
+    int? color,
+  }) {
+    _active = _Stroke(tool, [point], width: width, color: color);
     notifyListeners();
   }
 
@@ -115,12 +128,16 @@ class InkSurface extends StatefulWidget {
     required this.enabled,
     required this.allowFinger,
     required this.tool,
+    this.width,
+    this.color,
   });
 
   final PageInk ink;
   final bool enabled;
   final bool allowFinger;
   final InkTool tool;
+  final double? width;
+  final int? color;
 
   @override
   State<InkSurface> createState() => _InkSurfaceState();
@@ -174,7 +191,12 @@ class _InkSurfaceState extends State<InkSurface> {
             };
             if (!accepted) return;
             _pointer = event.pointer;
-            widget.ink.begin(_point(event, size), tool: widget.tool);
+            widget.ink.begin(
+              _point(event, size),
+              tool: widget.tool,
+              width: widget.width,
+              color: widget.color,
+            );
           },
           onPointerMove: (event) {
             if (event.pointer == _pointer && !size.isEmpty) {
@@ -216,10 +238,13 @@ class _InkPainter extends CustomPainter {
     for (final mark in strokes) {
       final highlighted = mark.tool == InkTool.highlighter;
       paint
-        ..color = highlighted
+        ..color = mark.color != null
+            ? Color(mark.color!)
+            : highlighted
             ? const Color(0x66ffbe00)
             : const Color(0xff9b352e)
-        ..strokeWidth = size.width * (highlighted ? .023 : .003);
+        ..strokeWidth =
+            size.width * (mark.width ?? (highlighted ? .023 : .003));
       final stroke = mark.points;
       final start = position(stroke.first);
       if (stroke.length == 1) {

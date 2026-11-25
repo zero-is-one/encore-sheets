@@ -70,6 +70,8 @@ class _ReaderState extends State<Reader> {
   bool _saveWarning = false;
   bool _inkSaveWarning = false;
   InkTool _tool = InkTool.pen;
+  double? _penWidth;
+  int? _penColor;
   final _edgeTaps = _EdgeTapTracker();
   bool _dispatchingEdgeLink = false;
   Setlist? _playing;
@@ -730,6 +732,8 @@ class _ReaderState extends State<Reader> {
             enabled: _inking,
             allowFinger: _allowFinger,
             tool: _tool,
+            width: _tool == InkTool.pen ? _penWidth : null,
+            color: _tool == InkTool.pen ? _penColor : null,
           ),
         ),
       ],
@@ -974,6 +978,32 @@ class _ReaderState extends State<Reader> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
+                if (_tool == InkTool.pen)
+                  PopupMenuButton<(double, int)>(
+                    tooltip: 'Pen style',
+                    icon: const Icon(Icons.color_lens_outlined),
+                    onSelected: (style) => setState(() {
+                      (_penWidth, _penColor) = style;
+                    }),
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: (.003, 0xff9b352e),
+                        child: Text('Fine red'),
+                      ),
+                      PopupMenuItem(
+                        value: (.006, 0xff9b352e),
+                        child: Text('Broad red'),
+                      ),
+                      PopupMenuItem(
+                        value: (.003, 0xff244a91),
+                        child: Text('Fine blue'),
+                      ),
+                      PopupMenuItem(
+                        value: (.006, 0xff262626),
+                        child: Text('Broad black'),
+                      ),
+                    ],
+                  ),
                 _toolButton(
                   InkTool.highlighter,
                   Icons.highlight,
