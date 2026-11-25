@@ -46,6 +46,7 @@ import 'embedded_pdf_info.dart';
 import 'midi_devices_dialog.dart';
 import 'turn_touch.dart';
 import 'audio_page_cues.dart';
+import 'midi_automation_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -75,6 +76,7 @@ enum _ReaderDisplay {
   tuner,
   inputShortcuts,
   midiDevices,
+  midiAutomation,
   appearance,
   accessibility,
   reflow,
@@ -1790,6 +1792,7 @@ class _ReaderState extends State<Reader> {
     int? startPage,
     ScoreBookmark? item,
   }) {
+    final scoreChanged = _entry?.id != entry?.id;
     final audio = _scoreAudio;
     _stopAudioCues();
     _meterPage = null;
@@ -1866,6 +1869,9 @@ class _ReaderState extends State<Reader> {
         ink.dispose();
       }
     });
+    if (scoreChanged && entry != null && ScoreAudioSession.supported) {
+      unawaited(_sendScoreMidi(entry).catchError((Object _) {}));
+    }
   }
 
   PageInk _newPageInk() => PageInk(
@@ -2087,9 +2093,120 @@ class _ReaderState extends State<Reader> {
     if (!ScoreAudioSession.supported || _midiInput != null) return;
     final stream = _midi.onMidiPacketReceived;
     _midiInput = stream?.listen((packet) {
+      if (!mounted) return;
+      if (!_picking && !_inking) {
+        final command = midiCommandKey(packet.data);
+        final target = _library.recent
+            .where((score) => score.metadata['midiOpen'] == command)
+            .firstOrNull;
+        if (target != null) {
+          if (target.id != _entry?.id) unawaited(_openMidiScore(target));
+          return;
+        }
+      }
       final key = shortcutMidi(packet.data);
       if (key != null) _handleControllerShortcut(key);
     }, onError: (Object _) {});
+  }
+
+  Future<void> _openMidiScore(ScoreEntry score) async {
+    setState(() => _picking = true);
+    try {
+      await _openLibraryScore(score);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open the MIDI-linked score.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _sendScoreMidi(ScoreEntry score) async {
+    final commands = score.metadata['midiSend'];
+    if (commands == null || commands.isEmpty) return;
+    final devices = await _midi.devices ?? [];
+    if (!mounted || _entry?.id != score.id) return;
+    final targets = devices.where((device) => device.connected).toList();
+    for (final command in commands.split('\n')) {
+      final bytes = ScoreAction.midiBytes(command);
+      if (bytes == null) continue;
+      final packet = Uint8List.fromList(bytes);
+      for (final device in targets) {
+        _midi.sendData(packet, deviceId: device.id);
+      }
+    }
+  }
+
+  Future<void> _showMidiAutomation() async {
+    final score = _entry;
+    if (score == null || _picking) return;
+    setState(() => _picking = true);
+    try {
+      final prefs = await _library.storage.readPreferences();
+      if (!mounted) return;
+      final presets = <String, String>{
+        if (prefs['midiCommandPresets'] case final Map values)
+          for (final item in values.entries)
+            if (item.key is String && item.value is String)
+              item.key as String: item.value as String,
+      };
+      final result = await showDialog<MidiAutomation>(
+        context: context,
+        builder: (_) => MidiAutomationDialog(
+          initial: (
+            trigger: score.metadata['midiOpen'] ?? '',
+            commands: score.metadata['midiSend'] ?? '',
+          ),
+          presets: presets,
+          savePresets: (value) =>
+              _library.updatePreferences({'midiCommandPresets': value}),
+        ),
+      );
+      if (result == null || !mounted) return;
+      final duplicate = result.trigger.isEmpty
+          ? null
+          : _library.recent
+                .where(
+                  (entry) =>
+                      entry.id != score.id &&
+                      entry.metadata['midiOpen'] == result.trigger,
+                )
+                .firstOrNull;
+      if (duplicate != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('That MIDI message opens ${duplicate.title}.'),
+          ),
+        );
+        return;
+      }
+      await _library.updateScore(
+        score.id,
+        (old) => old.copyWith(
+          metadata: {
+            ...Map.of(old.metadata)
+              ..remove('midiOpen')
+              ..remove('midiSend'),
+            if (result.trigger.isNotEmpty) 'midiOpen': result.trigger,
+            if (result.commands.isNotEmpty) 'midiSend': result.commands,
+          },
+        ),
+      );
+      if (mounted && _entry?.id == score.id) {
+        setState(() => _entry = _library.lookup(score.id));
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save MIDI automation.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   void _handleControllerShortcut(String key) {
@@ -3370,6 +3487,8 @@ class _ReaderState extends State<Reader> {
                         _showInputShortcuts();
                       case _ReaderDisplay.midiDevices:
                         _showMidiDevices();
+                      case _ReaderDisplay.midiAutomation:
+                        _showMidiAutomation();
                       case _ReaderDisplay.appearance:
                         _showAppearance();
                       case _ReaderDisplay.accessibility:
@@ -3538,6 +3657,12 @@ class _ReaderState extends State<Reader> {
                       const PopupMenuItem(
                         value: _ReaderDisplay.midiDevices,
                         child: Text('Pedals and MIDI devices'),
+                      ),
+                    if (ScoreAudioSession.supported)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.midiAutomation,
+                        enabled: _entry != null,
+                        child: const Text('MIDI score automation'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.appearance,
