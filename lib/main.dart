@@ -41,6 +41,7 @@ import 'practice_recordings.dart';
 import 'practice_recordings_dialog.dart';
 import 'metronome_dialog.dart';
 import 'metadata_csv_screen.dart';
+import 'cloud_files_screen.dart';
 import 'midi_devices_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
@@ -734,6 +735,13 @@ class _ReaderState extends State<Reader> {
         if (_entry case final score? when mounted) {
           setState(() => _entry = _library.lookup(score.id));
         }
+        return;
+      }
+      if (result == 'cloud-files') {
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => CloudFilesScreen(library: _library),
+        );
+        if (mounted && score != null) await _openLibraryScore(score);
         return;
       }
       if (result == 'sync') {
@@ -4268,6 +4276,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         onPressed: () => Navigator.pop(context, 'metadata-csv'),
                         icon: const Icon(Icons.table_chart_outlined),
                         label: const Text('CSV metadata'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => Navigator.pop(context, 'cloud-files'),
+                        icon: const Icon(Icons.cloud_outlined),
+                        label: const Text('Cloud files'),
                       ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),
