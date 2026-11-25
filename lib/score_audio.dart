@@ -3,16 +3,21 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'score_library.dart';
+
+typedef LinkedAudio = ({String? file, String? musicId, String name});
 
 class ScoreAudioSession {
   ScoreAudioSession(this.library);
   final ScoreLibrary library;
   final player = AudioPlayer();
   String? _loaded;
+  String? _playingMusicId;
+  static const _music = MethodChannel('encoresheets/music');
   String? pinnedSelection;
   Duration? loopStart;
   Duration? loopEnd;
@@ -28,6 +33,8 @@ class ScoreAudioSession {
 
   static bool get supportsPitch =>
       supported && defaultTargetPlatform == TargetPlatform.android;
+  static bool get supportsMusic =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<String> _folder() async =>
       (await getApplicationDocumentsDirectory()).path;
@@ -38,14 +45,39 @@ class ScoreAudioSession {
         {};
   }
 
-  Future<({String file, String name})?> track(String selection) async {
+  Future<LinkedAudio?> track(String selection) async {
     final data = (await _attachments())[selection];
     if (data case {'file': final String file, 'name': final String name}
         when RegExp(r'^score-audio-[0-9]+\.[a-z0-9]+$').hasMatch(file)) {
-      return (file: file, name: name);
+      return (file: file, name: name, musicId: null);
+    }
+    if (data case {'musicId': final String id, 'name': final String name}
+        when supportsMusic && RegExp(r'^\d{1,20}$').hasMatch(id)) {
+      return (file: null, name: name, musicId: id);
     }
     return null;
   }
+
+  Future<bool> attachMusic(String selection) async {
+    if (!supportsMusic) return false;
+    final picked = await _music.invokeMapMethod<String, String>('pick');
+    if (picked == null) return false;
+    final previous = await track(selection);
+    final attachments = await _attachments();
+    await stop();
+    await library.updatePreferences({
+      'localScoreAudio': {
+        ...attachments,
+        selection: {'musicId': picked['id'], 'name': picked['title']},
+      },
+    });
+    if (previous?.file case final file?)
+      await _discard('${await _folder()}/$file');
+    return true;
+  }
+
+  Future<bool> musicPlaying(String id) async =>
+      await _music.invokeMethod<bool>('isPlaying', id) ?? false;
 
   Future<void> attach(String selection, XFile source) async {
     final extension = source.name.split('.').last.toLowerCase();
@@ -60,6 +92,7 @@ class ScoreAudioSession {
     final path = '$folder/$file';
     try {
       await source.saveTo(path);
+      await _stopMusic();
       await player.setLoopMode(LoopMode.off);
       await player.setFilePath(path);
       loopStart = loopEnd = null;
@@ -75,7 +108,7 @@ class ScoreAudioSession {
       await _discard(path);
       rethrow;
     }
-    if (previous != null) await _discard('$folder/${previous.file}');
+    if (previous?.file case final old?) await _discard('$folder/$old');
   }
 
   Future<void> unlink(String selection) async {
@@ -84,7 +117,8 @@ class ScoreAudioSession {
     attachments.remove(selection);
     await library.updatePreferences({'localScoreAudio': attachments});
     await stop();
-    if (previous != null) await _discard('${await _folder()}/${previous.file}');
+    if (previous?.file case final old?)
+      await _discard('${await _folder()}/$old');
   }
 
   Future<void> _discard(String path) async {
@@ -99,10 +133,18 @@ class ScoreAudioSession {
   Future<bool> open(String selection) async {
     final found = await track(selection);
     if (found == null) return false;
-    if (_loaded != found.file) {
+    final file = found.file;
+    if (file == null) {
+      if (_loaded != null) await player.stop();
+      _loaded = null;
+      if (_playingMusicId != found.musicId) await _stopMusic();
+      return true;
+    }
+    await _stopMusic();
+    if (_loaded != file) {
       await player.setLoopMode(LoopMode.off);
-      await player.setFilePath('${await _folder()}/${found.file}');
-      _loaded = found.file;
+      await player.setFilePath('${await _folder()}/$file');
+      _loaded = file;
       loopStart = loopEnd = null;
       if (pinnedSelection != selection) pinnedSelection = null;
     }
@@ -137,6 +179,12 @@ class ScoreAudioSession {
 
   Future<bool> toggle(String selection) async {
     if (!await open(selection)) return false;
+    final musicId = (await track(selection))?.musicId;
+    if (musicId != null) {
+      await _music.invokeMethod<bool>('toggle', musicId);
+      _playingMusicId = musicId;
+      return true;
+    }
     if (player.processingState == ProcessingState.completed) {
       await player.pause();
       await player.seek(Duration.zero);
@@ -154,6 +202,18 @@ class ScoreAudioSession {
     pinnedSelection = null;
     loopStart = loopEnd = null;
     await player.stop();
+    await _stopMusic();
+  }
+
+  Future<void> _stopMusic() async {
+    if (_playingMusicId == null) return;
+    await _music.invokeMethod<void>('stop');
+    _playingMusicId = null;
+  }
+
+  Future<void> pause() async {
+    await player.pause();
+    if (_playingMusicId != null) await _music.invokeMethod<void>('pause');
   }
 
   Future<void> playTake(String path) async {
@@ -165,5 +225,5 @@ class ScoreAudioSession {
     unawaited(player.play().catchError((Object _) {}));
   }
 
-  Future<void> dispose() => player.dispose();
+  Future<void> dispose() => player.dispose().whenComplete(_stopMusic);
 }

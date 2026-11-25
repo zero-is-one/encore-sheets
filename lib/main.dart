@@ -1287,7 +1287,7 @@ class _ReaderState extends State<Reader> {
     setState(() => _picking = true);
     try {
       await _metronome?.stop();
-      await _scoreAudio?.player.pause();
+      await _scoreAudio?.pause();
       if (!mounted) return;
       final tone = _referenceTone ??= ReferenceTone();
       await showDialog<void>(

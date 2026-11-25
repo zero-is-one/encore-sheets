@@ -47,6 +47,8 @@
 	<string>Choose sheet music images to turn into a PDF.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record practice takes and tune your instrument.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Link music from your library to a score or bookmark.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connect to Bluetooth MIDI pedals and controllers.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -26,6 +26,8 @@ class ScoreAudioDialog extends StatefulWidget {
 class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
   bool _busy = false;
   String? _track;
+  String? _musicId;
+  bool _musicPlaying = false;
   String? _error;
   late double _speed = widget.audio.player.speed;
   late double _pitch = 12 * math.log(widget.audio.player.pitch) / math.ln2;
@@ -38,8 +40,12 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
   }
 
   Future<void> _loadTrack() async {
-    _track = (await widget.audio.track(_selection))?.name;
+    final track = await widget.audio.track(_selection);
+    _track = track?.name;
+    _musicId = track?.musicId;
     await widget.audio.open(_selection);
+    _musicPlaying =
+        _musicId != null && await widget.audio.musicPlaying(_musicId!);
   }
 
   Future<void> _run(Future<void> Function() work) async {
@@ -84,7 +90,11 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
     );
     if (file == null || !mounted) return;
     await widget.audio.attach(_selection, file);
-    _track = file.name;
+    await _loadTrack();
+  });
+
+  Future<void> _attachMusic() => _run(() async {
+    if (await widget.audio.attachMusic(_selection)) await _loadTrack();
   });
 
   @override
@@ -103,10 +113,27 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_track ?? 'No linked audio'),
+            Text(
+              _musicId == null
+                  ? _track ?? 'No linked audio'
+                  : 'Music · $_track',
+            ),
             if (_busy) const LinearProgressIndicator(),
             if (_error case final error?) Text(error),
-            if (_track != null) ...[
+            if (_musicId != null)
+              TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _run(() async {
+                        await widget.audio.toggle(_selection);
+                        _musicPlaying = await widget.audio.musicPlaying(
+                          _musicId!,
+                        );
+                      }),
+                icon: Icon(_musicPlaying ? Icons.pause : Icons.play_arrow),
+                label: Text(_musicPlaying ? 'Pause' : 'Play'),
+              ),
+            if (_track != null && _musicId == null) ...[
               StreamBuilder<Duration?>(
                 stream: player.durationStream,
                 initialData: player.duration,
@@ -217,6 +244,8 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
                   'A ${formatProgramDuration(start)}'
                   '${widget.audio.loopEnd == null ? '' : ' · B ${formatProgramDuration(widget.audio.loopEnd!)}'}',
                 ),
+            ],
+            if (_track != null)
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Keep playing across scores'),
@@ -234,7 +263,6 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
                         }
                       }),
               ),
-            ],
           ],
         ),
       ),
@@ -245,6 +273,11 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
             _track == null ? 'Link audio file' : 'Replace audio file',
           ),
         ),
+        if (ScoreAudioSession.supportsMusic)
+          TextButton(
+            onPressed: _busy ? null : _attachMusic,
+            child: const Text('Choose from Music'),
+          ),
         if (_track != null)
           TextButton(
             onPressed: _busy

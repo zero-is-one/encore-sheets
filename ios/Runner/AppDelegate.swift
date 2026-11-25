@@ -2,15 +2,18 @@ import Flutter
 import UIKit
 import VisionKit
 import UniformTypeIdentifiers
+import MediaPlayer
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
-  VNDocumentCameraViewControllerDelegate, UIDocumentPickerDelegate {
+  VNDocumentCameraViewControllerDelegate, UIDocumentPickerDelegate, MPMediaPickerControllerDelegate {
   private var importChannel: FlutterMethodChannel?
   private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
   private var scanResult: FlutterResult?
   private var folderResult: FlutterResult?
+  private var musicPickerResult: FlutterResult?
+  private var musicTrackID: MPMediaEntityPersistentID?
   nonisolated private let syncBookmark = "librarySyncFolder"
   private let syncQueue = DispatchQueue(label: "app.encoresheets.library-sync")
   override func application(
@@ -59,6 +62,99 @@ import UniformTypeIdentifiers
       guard let self else { return }
       self.handleSync(call, result: result)
     }
+    let music = FlutterMethodChannel(
+      name: "encoresheets/music",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    music.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      self.handleMusic(call, result: result)
+    }
+  }
+
+  private func handleMusic(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let player = MPMusicPlayerController.applicationMusicPlayer
+    switch call.method {
+    case "pick":
+      guard musicPickerResult == nil else {
+        result(FlutterError(code: "music_busy", message: "The Music picker is already open.", details: nil))
+        return
+      }
+      musicPickerResult = result
+      MPMediaLibrary.requestAuthorization { [weak self] status in
+        DispatchQueue.main.async {
+          guard let self else { return }
+          guard status == .authorized, let presenter = self.frontController else {
+            self.musicPickerResult = nil
+            result(FlutterError(code: "music_permission", message: "Allow access to your Music library.", details: nil))
+            return
+          }
+          let picker = MPMediaPickerController(mediaTypes: .music)
+          picker.delegate = self
+          picker.allowsPickingMultipleItems = false
+          picker.showsCloudItems = true
+          presenter.present(picker, animated: true)
+        }
+      }
+    case "toggle":
+      guard let idText = call.arguments as? String, let id = UInt64(idText),
+            MPMediaLibrary.authorizationStatus() == .authorized else {
+        result(FlutterError(code: "music_permission", message: "The linked Music track is unavailable.", details: nil))
+        return
+      }
+      if musicTrackID == id && player.playbackState == .playing {
+        player.pause()
+        result(false)
+        return
+      }
+      if musicTrackID != id || player.nowPlayingItem?.persistentID != id {
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(
+          value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID
+        ))
+        guard let item = query.items?.first else {
+          result(FlutterError(code: "music_missing", message: "This track is no longer in your Music library.", details: nil))
+          return
+        }
+        player.setQueue(with: MPMediaItemCollection(items: [item]))
+        musicTrackID = id
+      }
+      player.play()
+      result(true)
+    case "pause":
+      player.pause()
+      result(nil)
+    case "stop":
+      player.stop()
+      musicTrackID = nil
+      result(nil)
+    case "isPlaying":
+      let selected = (call.arguments as? String).flatMap { UInt64($0) }
+      result(selected != nil && selected == musicTrackID && player.playbackState == .playing)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func mediaPicker(_ mediaPicker: MPMediaPickerController,
+                   didPickMediaItems mediaItemCollection: MPMediaItemCollection) {
+    let selected = mediaItemCollection.items.first.map {
+      ["id": String($0.persistentID), "title": $0.title ?? "Music track"]
+    }
+    finishMusicPicker(mediaPicker, value: selected)
+  }
+
+  func mediaPickerDidCancel(_ mediaPicker: MPMediaPickerController) {
+    finishMusicPicker(mediaPicker, value: nil)
+  }
+
+  private func finishMusicPicker(_ picker: MPMediaPickerController, value: [String: String]?) {
+    let result = musicPickerResult
+    musicPickerResult = nil
+    picker.dismiss(animated: true) { result?(value) }
   }
 
   func notifyPencilTap() {
