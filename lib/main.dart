@@ -1005,6 +1005,59 @@ class _ReaderState extends State<Reader> {
     ),
   );
 
+  Future<void> _showThumbnails() async {
+    if (_picking || _pages == 0 || !_viewer.isReady) return;
+    final document = _viewer.document;
+    final count = _pages;
+    setState(() => _picking = true);
+    int? destination;
+    try {
+      destination = await _openReaderPanel<int>(
+        (context) => Scaffold(
+          appBar: AppBar(title: const Text('Pages')),
+          body: GridView.builder(
+            padding: const EdgeInsets.all(12),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 142,
+              childAspectRatio: .68,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: count,
+            itemBuilder: (context, index) {
+              final page = index + 1;
+              return OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.all(6),
+                  side: BorderSide(color: page == _page ? _brass : _rail),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context, page),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: PdfPageView(
+                        document: document,
+                        pageNumber: page,
+                        maximumDpi: 54,
+                      ),
+                    ),
+                    Text('Page $page'),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    } finally {
+      _finishPicking();
+    }
+    if (mounted && destination != null) _go(destination);
+  }
+
   Widget _footer() => Padding(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
     child: Material(
@@ -1106,7 +1159,12 @@ class _ReaderState extends State<Reader> {
                   },
                 ),
               ),
-              Text(_pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages'),
+              TextButton(
+                onPressed: _pages == 0 ? null : _showThumbnails,
+                child: Text(
+                  _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
+                ),
+              ),
               IconButton(
                 tooltip: _page == _pages && _hasNextScore
                     ? 'Next score'
