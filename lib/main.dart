@@ -589,7 +589,7 @@ class _ReaderState extends State<Reader> {
         offset: Offset(0, 6),
       ),
       panEnabled: !_inking,
-      scaleEnabled: !_inking,
+      scaleEnabled: !_inking && !_performance,
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
       maxImageBytesCachedOnMemory: 72 * 1024 * 1024,
@@ -679,6 +679,9 @@ class _ReaderState extends State<Reader> {
       },
       onGeneralTap: (context, controller, details) {
         if (_inking) return true;
+        if (_performance && details.type == PdfViewerGeneralTapType.doubleTap) {
+          return true;
+        }
         if (details.type == PdfViewerGeneralTapType.longPress) {
           if (!_performance) _toggleInk();
           return true;
@@ -772,20 +775,26 @@ class _ReaderState extends State<Reader> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Focus(
-        focusNode: _focus,
-        autofocus: true,
-        onKeyEvent: _onKey,
-        child: Column(
-          children: [
-            if (_showControls && !_performance) _header(),
-            Expanded(key: const ValueKey('score-viewport'), child: _score()),
-            if (_performance)
-              _performanceBar()
-            else if (_showControls)
-              _footer(),
-          ],
+    body: PopScope(
+      canPop: !_performance,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _performance) _togglePerformance();
+      },
+      child: SafeArea(
+        child: Focus(
+          focusNode: _focus,
+          autofocus: true,
+          onKeyEvent: _onKey,
+          child: Column(
+            children: [
+              if (_showControls && !_performance) _header(),
+              Expanded(key: const ValueKey('score-viewport'), child: _score()),
+              if (_performance)
+                _performanceBar()
+              else if (_showControls)
+                _footer(),
+            ],
+          ),
         ),
       ),
     ),
