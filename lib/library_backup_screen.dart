@@ -117,7 +117,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             const Text(
-              'A backup includes your PDFs, annotations, setlists, and saved reading positions.',
+              'A backup includes your PDFs, annotations, setlists, libraries, and reader settings.',
             ),
             const SizedBox(height: 16),
             FilledButton.icon(

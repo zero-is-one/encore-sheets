@@ -35,6 +35,11 @@ void main() {
       );
       await original.createCollection('Choir');
       await original.createCollection('Empty library');
+      await original.updatePreferences({
+        'landscapeWidth': true,
+        'scoreTabs': [first.id],
+        'personalStamps': ['dolce'],
+      });
       await original.assignCollections(second.id, ['Choir']);
       final annotation = {
         'layers': [
@@ -102,6 +107,11 @@ void main() {
       expect(reopened.lookupSelection(ids.last)?.$2?.endPage, 3);
       final score = reopened.lookup(ids.first)!;
       expect(score.collections, ['Choir']);
+      expect(reopened.collections, ['Choir', 'Empty library']);
+      final preferences = await reopened.storage.readPreferences();
+      expect(preferences['landscapeWidth'], isTrue);
+      expect(preferences['scoreTabs'], [ids[1]]);
+      expect(preferences['personalStamps'], ['dolce']);
       expect(score.flags, [3]);
       expect(score.jumps.single.target.page, 2);
       expect(score.halfSplits, {2: .6});

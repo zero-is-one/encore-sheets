@@ -2,10 +2,12 @@ part of 'library_storage_native.dart';
 
 Map<String, dynamic> _catalog(
   List<ScoreEntry> scores,
-  List<Setlist> setlists,
-) => {
+  List<Setlist> setlists, {
+  Map<String, dynamic>? preferences,
+}) => {
   'scores': [for (final score in scores) score.toJson()],
   'setlists': [for (final setlist in setlists) setlist.toJson()],
+  if (preferences != null) 'preferences': preferences,
 };
 
 void _exportBackup(
@@ -14,6 +16,7 @@ void _exportBackup(
   List<ScoreEntry> scores,
   List<Setlist> setlists, {
   bool scorePackage = false,
+  Map<String, dynamic>? preferences,
 }) {
   final zip = ZipFileEncoder()..create(path);
   try {
@@ -23,7 +26,7 @@ void _exportBackup(
         jsonEncode({
           'format': scorePackage ? 'EncoreSheetsScore' : 'EncoreSheetsLibrary',
           'version': 1,
-          ..._catalog(scores, setlists),
+          ..._catalog(scores, setlists, preferences: preferences),
         }),
       ),
     );
@@ -47,6 +50,7 @@ void _exportBackup(
   List<ScoreEntry> existingScores,
   List<Setlist> existingSetlists, {
   bool scorePackage = false,
+  required Map<String, dynamic> existingPreferences,
 }) {
   final input = InputFileStream(path);
   final written = <File>[];
@@ -65,6 +69,10 @@ void _exportBackup(
       for (final row in manifest['setlists'] as List)
         Setlist.fromJson(row as Map<String, dynamic>),
     ];
+    final savedPreferences = manifest['preferences'];
+    if (savedPreferences != null && savedPreferences is! Map<String, dynamic>) {
+      throw const FormatException('Invalid backup preferences');
+    }
     if (scorePackage &&
         (sourceScores.length != 1 ||
             sourceSetlists.isNotEmpty ||
@@ -150,12 +158,34 @@ void _exportBackup(
     }
 
     final staged = File('$root/catalog.json.tmp');
+    final preferences = {
+      if (!scorePackage && existingScores.isEmpty && savedPreferences is Map)
+        ...savedPreferences.cast<String, dynamic>(),
+      ...existingPreferences,
+    };
+    if (!scorePackage && savedPreferences is Map) {
+      Iterable<String> values(Object? value) =>
+          value is List ? value.whereType<String>() : const [];
+      for (final key in ['scoreCollections', 'personalStamps']) {
+        preferences[key] = {
+          ...values(existingPreferences[key]),
+          ...values(savedPreferences[key]),
+        }.toList();
+      }
+      preferences['scoreTabs'] = {
+        ...values(existingPreferences['scoreTabs']),
+        ...values(savedPreferences['scoreTabs'])
+            .map((id) => mapped[id])
+            .whereType<String>(),
+      }.toList();
+    }
     written.add(staged);
     staged.writeAsStringSync(
       jsonEncode(
         _catalog(
           [...existingScores, ...scores],
           [...existingSetlists, ...setlists],
+          preferences: preferences,
         ),
       ),
       flush: true,

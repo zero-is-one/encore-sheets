@@ -405,6 +405,10 @@ class ScoreLibrary {
         for (final setlist in restored.setlists) {
           _setlists[setlist.id] = setlist;
         }
+        final preferences = await storage.readPreferences();
+        if (preferences['scoreCollections'] case final List names) {
+          _collections.addAll(names.whereType<String>());
+        }
         return (
           scores: restored.scores.length,
           setlists: restored.setlists.length,

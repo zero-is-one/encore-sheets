@@ -557,6 +557,7 @@ class _ReaderState extends State<Reader> {
         await _openReaderPanel<void>(
           (_) => LibraryBackupScreen(library: _library),
         );
+        if (mounted) await _restorePreferences();
         return;
       }
       if (result == 'import-package') {

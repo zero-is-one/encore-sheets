@@ -23,6 +23,10 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<Map<String, dynamic>> readPreferences() async {
+    final catalog = await _readCatalog();
+    if (catalog?['preferences'] case final Map<String, dynamic> preferred) {
+      return preferred;
+    }
     final file = await _file('reader-preferences.json');
     return await file.exists()
         ? jsonDecode(await file.readAsString()) as Map<String, dynamic>
@@ -30,8 +34,15 @@ class NativeLibraryStorage implements LibraryStorage {
   }
 
   @override
-  Future<void> writePreferences(Map<String, dynamic> preferences) =>
-      _writeJson('reader-preferences.json', preferences);
+  Future<void> writePreferences(Map<String, dynamic> preferences) async =>
+      _writeJson(
+        'catalog.json',
+        _catalog(
+          await readIndex(),
+          await readSetlists(),
+          preferences: preferences,
+        ),
+      );
 
   Future<Directory> _prepare() async {
     final documents = _override ?? await getApplicationDocumentsDirectory();
@@ -66,8 +77,13 @@ class NativeLibraryStorage implements LibraryStorage {
   }
 
   @override
-  Future<void> writeCatalog(List<ScoreEntry> scores, List<Setlist> setlists) =>
-      _writeJson('catalog.json', _catalog(scores, setlists));
+  Future<void> writeCatalog(
+    List<ScoreEntry> scores,
+    List<Setlist> setlists,
+  ) async => _writeJson(
+    'catalog.json',
+    _catalog(scores, setlists, preferences: await readPreferences()),
+  );
 
   Future<void> _writeJson(String name, Object value) async {
     final file = await _file(name);
@@ -115,7 +131,11 @@ class NativeLibraryStorage implements LibraryStorage {
     final path =
         '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
-    await Isolate.run(() => _exportBackup(root, path, scores, setlists));
+    final preferences = await readPreferences();
+    await Isolate.run(
+      () =>
+          _exportBackup(root, path, scores, setlists, preferences: preferences),
+    );
     final staged = await File(path).copy('$root/latest-backup.zip.tmp');
     await staged.rename('$root/latest-backup.zip');
     return XFile(path, mimeType: 'application/zip');
@@ -176,6 +196,7 @@ class NativeLibraryStorage implements LibraryStorage {
   }) async {
     final root = (await _root).path;
     final path = source.path;
+    final existingPreferences = await readPreferences();
     return Isolate.run(
       () => _restoreBackup(
         root,
@@ -183,6 +204,7 @@ class NativeLibraryStorage implements LibraryStorage {
         scores,
         setlists,
         scorePackage: scorePackage,
+        existingPreferences: existingPreferences,
       ),
     );
   }
