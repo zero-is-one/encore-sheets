@@ -10,6 +10,7 @@ import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'score_library.dart';
+import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
 
 const _stand = Color(0xff202a28);
@@ -404,6 +405,11 @@ class _ReaderState extends State<Reader> {
               ),
             );
       if (result == null || !mounted) return;
+      if (result.startsWith('edit:')) {
+        final score = _library.lookup(result.substring(5));
+        if (score != null) await _editScore(score);
+        return;
+      }
       if (result.startsWith('set:')) {
         final match = _library.setlists.firstWhere(
           (list) => list.id == result.substring(4),
@@ -469,6 +475,22 @@ class _ReaderState extends State<Reader> {
       _setIndex = index;
     });
     _remember(entry.id, 1, opened: true);
+  }
+
+  Future<void> _editScore(ScoreEntry score) async {
+    final updated = await editScoreMetadata(context, score);
+    if (updated == null || !mounted) return;
+    try {
+      await _library.editMetadata(score.id, updated.title, updated.fields);
+      if (mounted && _entry?.id == score.id) {
+        setState(() => _entry = _library.lookup(score.id));
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save score details.')),
+        );
+    }
   }
 
   Future<void> _nextScore() async {
@@ -937,18 +959,23 @@ class _ReaderState extends State<Reader> {
             ),
           ),
           Expanded(
-            child: Semantics(
-              header: true,
-              child: Text(
-                _title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontFamily: 'serif',
-                  color: _paper,
+            child: GestureDetector(
+              onTap: _entry == null || _picking
+                  ? null
+                  : () => _editScore(_entry!),
+              child: Semantics(
+                header: true,
+                child: Text(
+                  _title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontFamily: 'serif',
+                    color: _paper,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
               ),
             ),
           ),
@@ -1540,7 +1567,14 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                 leading: const Icon(Icons.description_outlined),
                                 title: Text(score.title),
                                 subtitle: Text('Resume at page ${score.page}'),
-                                trailing: const Icon(Icons.chevron_right),
+                                trailing: IconButton(
+                                  tooltip: 'Edit ${score.title} details',
+                                  icon: const Icon(Icons.info_outline),
+                                  onPressed: () => Navigator.pop(
+                                    context,
+                                    'edit:${score.id}',
+                                  ),
+                                ),
                                 onTap: () => Navigator.pop(context, score.id),
                               );
                             },

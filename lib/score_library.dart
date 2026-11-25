@@ -88,6 +88,34 @@ class ScoreLibrary {
       _scores.values.toList()..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
   ScoreEntry? lookup(String id) => _scores[id];
+
+  Future<void> editMetadata(
+    String id,
+    String title,
+    Map<String, String> fields,
+  ) => _serialize(() async {
+    final old = _scores[id];
+    if (old == null) return;
+    final metadata = {...old.metadata};
+    for (final MapEntry(key: key, value: value) in fields.entries) {
+      if (value.isEmpty) {
+        metadata.remove(key);
+      } else {
+        metadata[key] = value;
+      }
+    }
+    final updated = ScoreEntry(
+      id: id,
+      title: title,
+      page: old.page,
+      openedAt: old.openedAt,
+      metadata: metadata,
+    );
+    await storage.writeIndex([
+      for (final score in _scores.values) score.id == id ? updated : score,
+    ]);
+    _scores[id] = updated;
+  });
   List<Setlist> get setlists => List.unmodifiable(_setlists.values);
 
   Future<void> saveSetlist(Setlist setlist) => _serialize(() async {
