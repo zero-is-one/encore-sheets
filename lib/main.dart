@@ -36,6 +36,8 @@ import 'score_audio.dart';
 import 'score_audio_dialog.dart';
 import 'practice_recordings.dart';
 import 'practice_recordings_dialog.dart';
+import 'metronome_dialog.dart';
+import 'rehearsal_metronome.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
@@ -56,6 +58,7 @@ enum _ReaderDisplay {
   pageActions,
   scoreAudio,
   practiceRecordings,
+  metronome,
   fit,
   zoomIn,
   zoomOut,
@@ -150,6 +153,7 @@ class _ReaderState extends State<Reader> {
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
+  RehearsalMetronome? _metronome;
   List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
@@ -377,6 +381,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
     _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
@@ -1091,6 +1096,53 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showMetronome() async {
+    if (_picking || !ScoreAudioSession.supported) return;
+    final score = _entry;
+    final meter = _metronome ??= RehearsalMetronome();
+    if (!meter.running && score != null) {
+      final tempo = int.tryParse(score.metadata['tempo'] ?? '');
+      if (tempo != null) meter.bpm = tempo.clamp(25, 280);
+      final signature = score.metadata['time']?.split('/');
+      if (signature != null && signature.length == 2) {
+        final beats = int.tryParse(signature.first.trim());
+        final unit = int.tryParse(signature.last.trim());
+        if (beats != null) meter.beats = beats.clamp(1, 16);
+        if (const [2, 4, 8, 16].contains(unit)) meter.unit = unit!;
+      }
+    }
+    setState(() => _picking = true);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => MetronomeDialog(metronome: meter),
+      );
+      if (!mounted || score == null || _entry?.id != score.id) return;
+      await _library.updateScore(
+        score.id,
+        (old) => old.copyWith(
+          metadata: {
+            ...old.metadata,
+            'tempo': '${meter.bpm}',
+            'time': '${meter.beats}/${meter.unit}',
+          },
+        ),
+      );
+      if (mounted && _entry?.id == score.id)
+        setState(() => _entry = _library.lookup(score.id));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save the metronome settings.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
   void _followJump(JumpPoint target) {
     if (_picking || !_viewer.isReady) return;
     _jumpToPage(target.page);
@@ -1436,6 +1488,10 @@ class _ReaderState extends State<Reader> {
     final audio = _scoreAudio;
     if (audio != null && audio.pinnedSelection == null) {
       unawaited(audio.stop().catchError((Object _) {}));
+    }
+    final meter = _metronome;
+    if (meter != null && meter.running && _entry?.id != entry?.id) {
+      unawaited(meter.stop().catchError((Object _) {}));
     }
     if (_entry?.id != entry?.id) {
       _previousItem = (id: _entry?.id, page: _page);
@@ -2467,6 +2523,7 @@ class _ReaderState extends State<Reader> {
                 key: const ValueKey('score-viewport'),
                 child: _deskewedScore(),
               ),
+              if (_metronome case final meter?) MetronomeBeat(metronome: meter),
               if (_nextTitle case final title?)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2597,6 +2654,8 @@ class _ReaderState extends State<Reader> {
                         _showScoreAudio();
                       case _ReaderDisplay.practiceRecordings:
                         _showPracticeRecordings();
+                      case _ReaderDisplay.metronome:
+                        _showMetronome();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2736,6 +2795,11 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.practiceRecordings,
                         enabled: _entry != null,
                         child: const Text('Practice recordings'),
+                      ),
+                    if (ScoreAudioSession.supported)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.metronome,
+                        child: Text('Metronome'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
