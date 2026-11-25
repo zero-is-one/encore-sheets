@@ -20,6 +20,8 @@ class ReaderPreferences {
     this.halfPageIndicator = true,
     this.landscapeWidth = false,
     this.spreadStep = 0,
+    this.sepia = false,
+    this.pageDimming = 0,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -42,6 +44,11 @@ class ReaderPreferences {
         2 => 2,
         _ => 0,
       },
+      sepia: json['sepia'] == true,
+      pageDimming: switch (json['pageDimming']) {
+        final num value when value.isFinite => value.toDouble().clamp(0.0, .75),
+        _ => 0,
+      },
     );
   }
 
@@ -54,6 +61,8 @@ class ReaderPreferences {
   final bool halfPageIndicator;
   final bool landscapeWidth;
   final int spreadStep;
+  final bool sepia;
+  final double pageDimming;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -65,6 +74,8 @@ class ReaderPreferences {
     bool? halfPageIndicator,
     bool? landscapeWidth,
     int? spreadStep,
+    bool? sepia,
+    double? pageDimming,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -75,6 +86,8 @@ class ReaderPreferences {
     halfPageIndicator: halfPageIndicator ?? this.halfPageIndicator,
     landscapeWidth: landscapeWidth ?? this.landscapeWidth,
     spreadStep: spreadStep ?? this.spreadStep,
+    sepia: sepia ?? this.sepia,
+    pageDimming: pageDimming ?? this.pageDimming,
   );
 
   Map<String, dynamic> toJson() => {
@@ -87,5 +100,7 @@ class ReaderPreferences {
     'halfPageIndicator': halfPageIndicator,
     'landscapeWidth': landscapeWidth,
     'spreadStep': spreadStep,
+    'sepia': sepia,
+    'pageDimming': pageDimming,
   };
 }

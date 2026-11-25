@@ -28,6 +28,8 @@ class HalfPageBand extends StatelessWidget {
     required this.fullSize,
     required this.indicator,
     this.overlay,
+    this.tint = Colors.white,
+    this.dimming = 0,
   });
 
   final PdfDocument document;
@@ -35,6 +37,8 @@ class HalfPageBand extends StatelessWidget {
   final Size fullSize;
   final bool indicator;
   final Widget? overlay;
+  final Color tint;
+  final double dimming;
 
   @override
   Widget build(BuildContext context) => ClipRect(
@@ -52,12 +56,17 @@ class HalfPageBand extends StatelessWidget {
             children: [
               ColoredBox(
                 color: Colors.white,
-                child: PdfPageView(
-                  document: document,
-                  pageNumber: page,
-                  decoration: const BoxDecoration(color: Colors.white),
+                child: ColorFiltered(
+                  colorFilter: ColorFilter.mode(tint, BlendMode.multiply),
+                  child: PdfPageView(
+                    document: document,
+                    pageNumber: page,
+                    decoration: const BoxDecoration(color: Colors.white),
+                  ),
                 ),
               ),
+              if (dimming > 0)
+                ColoredBox(color: Colors.black.withValues(alpha: dimming)),
               if (overlay != null) overlay!,
             ],
           ),

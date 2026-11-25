@@ -68,6 +68,7 @@ enum _ReaderDisplay {
   tuner,
   inputShortcuts,
   midiDevices,
+  appearance,
   fit,
   zoomIn,
   zoomOut,
@@ -1915,6 +1916,56 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  static const _sepiaTint = Color(0xffffedd1);
+
+  Future<void> _showAppearance() async {
+    var sepia = _preferences.sepia;
+    var dimming = _preferences.pageDimming;
+    final result = await showDialog<(bool, double)>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: const Text('Reading appearance'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: const Text('Sepia pages'),
+                  value: sepia,
+                  onChanged: (value) => refresh(() => sepia = value),
+                ),
+                Text('Page dimming · ${(dimming * 100).round()}%'),
+                Slider(
+                  value: dimming,
+                  max: .75,
+                  divisions: 15,
+                  onChanged: (value) => refresh(() => dimming = value),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, (sepia, dimming)),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mounted && result != null) {
+      await _savePreferences(
+        _preferences.copyWith(sepia: result.$1, pageDimming: result.$2),
+      );
+    }
+  }
+
   Future<void> _editText(int page, Offset position, Size pageSize) async {
     if (_editingText || !_inking) return;
     final ink = _ink[page];
@@ -2216,6 +2267,8 @@ class _ReaderState extends State<Reader> {
             page: next,
             fullSize: size,
             indicator: _preferences.halfPageIndicator,
+            tint: _preferences.sepia ? _sepiaTint : Colors.white,
+            dimming: _preferences.pageDimming,
             overlay: InkSurface(
               ink: _ink.putIfAbsent(next, _newPageInk),
               enabled: false,
@@ -2279,9 +2332,29 @@ class _ReaderState extends State<Reader> {
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
       maxImageBytesCachedOnMemory: 72 * 1024 * 1024,
-      pagePaintCallbacks: _entry?.crops.isNotEmpty == true
+      pagePaintCallbacks:
+          _entry?.crops.isNotEmpty == true ||
+              _preferences.sepia ||
+              _preferences.pageDimming > 0
           ? [
               (canvas, rect, page) {
+                if (_preferences.sepia) {
+                  canvas.drawRect(
+                    rect,
+                    Paint()
+                      ..color = _sepiaTint
+                      ..blendMode = BlendMode.multiply,
+                  );
+                }
+                if (_preferences.pageDimming > 0) {
+                  canvas.drawRect(
+                    rect,
+                    Paint()
+                      ..color = Colors.black.withValues(
+                        alpha: _preferences.pageDimming,
+                      ),
+                  );
+                }
                 final crop = _cropFor(page.pageNumber);
                 if (crop == null) return;
                 final mask = Path()
@@ -2807,6 +2880,8 @@ class _ReaderState extends State<Reader> {
                         _showInputShortcuts();
                       case _ReaderDisplay.midiDevices:
                         _showMidiDevices();
+                      case _ReaderDisplay.appearance:
+                        _showAppearance();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2966,6 +3041,10 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.midiDevices,
                         child: Text('Pedals and MIDI devices'),
                       ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.appearance,
+                      child: Text('Reading appearance'),
+                    ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
