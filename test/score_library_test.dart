@@ -18,8 +18,13 @@ void main() {
 
     final library = ScoreLibrary(NativeLibraryStorage(directory: directory));
     await library.load();
-    final (a, _) = await library.import(XFile(first.path));
-    final (b, _) = await library.import(XFile(second.path));
+    final [(a, aCopy), (b, bCopy)] = await Future.wait([
+      library.import(XFile(first.path)),
+      library.import(XFile(second.path)),
+    ]);
+    expect(a.id, isNot(b.id));
+    expect(aCopy.path, isNot(first.path));
+    expect(bCopy.path, isNot(second.path));
     await first.delete();
     await second.delete();
     await Future.wait([
