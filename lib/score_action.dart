@@ -1,6 +1,7 @@
 enum ScoreActionKind {
   score('Open score'),
-  note('Open page note');
+  note('Open page note'),
+  audio('Play or pause linked audio');
 
   const ScoreActionKind(this.label);
   final String label;

@@ -971,6 +971,29 @@ class _ReaderState extends State<Reader> {
       await _editPageNote(action.page);
       return;
     }
+    if (action.kind == ScoreActionKind.audio) {
+      final score = _entry;
+      if (score == null) return;
+      final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
+      try {
+        if (ScoreAudioSession.supported) {
+          final audio = _scoreAudio ??= ScoreAudioSession(_library);
+          if (await audio.toggle(selection)) return;
+        }
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No playable audio is linked to this score.'),
+            ),
+          );
+      } catch (_) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not play the linked audio.')),
+          );
+      }
+      return;
+    }
     final destination = _library.lookupSelection(action.selection ?? '');
     if (destination == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2244,9 +2267,11 @@ class _ReaderState extends State<Reader> {
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
                       child: Icon(
-                        action.kind == ScoreActionKind.note
-                            ? Icons.sticky_note_2_outlined
-                            : Icons.open_in_new,
+                        switch (action.kind) {
+                          ScoreActionKind.note => Icons.sticky_note_2_outlined,
+                          ScoreActionKind.score => Icons.open_in_new,
+                          ScoreActionKind.audio => Icons.play_arrow,
+                        },
                         color: Colors.white,
                         size: 19,
                       ),
