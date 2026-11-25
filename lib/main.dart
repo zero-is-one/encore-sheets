@@ -47,6 +47,8 @@ import 'midi_devices_dialog.dart';
 import 'turn_touch.dart';
 import 'audio_page_cues.dart';
 import 'midi_automation_dialog.dart';
+import 'ensemble_dialog.dart';
+import 'ensemble_session.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -77,6 +79,7 @@ enum _ReaderDisplay {
   inputShortcuts,
   midiDevices,
   midiAutomation,
+  ensemble,
   appearance,
   accessibility,
   reflow,
@@ -177,6 +180,7 @@ class _ReaderState extends State<Reader> {
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
+  EnsembleSession? _ensemble;
   AudioPageCueMode _audioCueMode = AudioPageCueMode.off;
   StreamSubscription<Duration>? _audioCuePlayback;
   String? _audioCueFile;
@@ -440,6 +444,7 @@ class _ReaderState extends State<Reader> {
     unawaited(_referenceTone?.dispose());
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
+    unawaited(_ensemble?.close());
     unawaited(_audioCuePlayback?.cancel());
     _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
@@ -2209,6 +2214,87 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showEnsemble() async {
+    if (_picking || kIsWeb) return;
+    final session = _ensemble ??= EnsembleSession();
+    setState(() => _picking = true);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => EnsembleDialog(
+          session: session,
+          lead: () => session.lead(
+            () => (
+              id: _entry?.id,
+              title: _entry?.title ?? _title,
+              composer: _entry?.metadata['composer'] ?? '',
+              page: _page,
+            ),
+          ),
+          follow: (address, code, mode) => session.follow(
+            address: address,
+            code: code,
+            onPosition: (position) => _followEnsemble(position, mode),
+            onDisconnect: () {
+              if (mounted)
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Ensemble session disconnected.'),
+                  ),
+                );
+            },
+          ),
+        ),
+      );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _followEnsemble(
+    EnsemblePosition position,
+    EnsembleFollowMode mode,
+  ) async {
+    if (!mounted || _picking || _inking) return;
+    bool matches(ScoreEntry score) =>
+        score.title.toLowerCase() == position.title.toLowerCase() &&
+        (score.metadata['composer'] ?? '').toLowerCase() ==
+            position.composer.toLowerCase();
+    final current = _entry;
+    final sameScore = current == null ? position.id == null : matches(current);
+    final acceptPage = mode != EnsembleFollowMode.scores;
+    if (!sameScore && mode != EnsembleFollowMode.pages) {
+      final exact = position.id == null ? null : _library.lookup(position.id!);
+      final options = _library.recent.where(matches).take(2).toList();
+      final target = exact != null && matches(exact)
+          ? exact
+          : options.length == 1
+          ? options.single
+          : null;
+      if (target == null) return;
+      final revision = _revision;
+      final local = await _library.storage.openScore(target.id);
+      final annotations = await _library.readInk(target.id);
+      if (!mounted ||
+          _picking ||
+          _inking ||
+          revision != _revision ||
+          _ensemble?.following != true)
+        return;
+      _load(
+        target,
+        local,
+        null,
+        annotations: annotations,
+        startPage: acceptPage ? position.page : null,
+      );
+      _remember(target.id, _page, opened: true);
+    } else if (acceptPage && (sameScore || mode == EnsembleFollowMode.pages)) {
+      _jumpToPage(position.page);
+    }
+  }
+
   void _handleControllerShortcut(String key) {
     if (!mounted) return;
     _midiShortcuts.add(key);
@@ -3489,6 +3575,8 @@ class _ReaderState extends State<Reader> {
                         _showMidiDevices();
                       case _ReaderDisplay.midiAutomation:
                         _showMidiAutomation();
+                      case _ReaderDisplay.ensemble:
+                        _showEnsemble();
                       case _ReaderDisplay.appearance:
                         _showAppearance();
                       case _ReaderDisplay.accessibility:
@@ -3663,6 +3751,11 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.midiAutomation,
                         enabled: _entry != null,
                         child: const Text('MIDI score automation'),
+                      ),
+                    if (!kIsWeb)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.ensemble,
+                        child: Text('Ensemble sync'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.appearance,

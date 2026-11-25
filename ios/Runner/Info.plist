@@ -51,6 +51,8 @@
 	<string>Link music from your library to a score or bookmark.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connect to Bluetooth MIDI pedals and controllers.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Share score and page changes with musicians on your local network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
