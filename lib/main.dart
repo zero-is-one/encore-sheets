@@ -38,6 +38,8 @@ import 'practice_recordings.dart';
 import 'practice_recordings_dialog.dart';
 import 'metronome_dialog.dart';
 import 'rehearsal_metronome.dart';
+import 'reference_tone.dart';
+import 'tuner_dialog.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
@@ -59,6 +61,7 @@ enum _ReaderDisplay {
   scoreAudio,
   practiceRecordings,
   metronome,
+  tuner,
   fit,
   zoomIn,
   zoomOut,
@@ -154,6 +157,7 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
   RehearsalMetronome? _metronome;
+  ReferenceTone? _referenceTone;
   List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
@@ -381,6 +385,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    unawaited(_referenceTone?.dispose());
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
     _syncTimer?.cancel();
@@ -1137,6 +1142,31 @@ class _ReaderState extends State<Reader> {
           const SnackBar(
             content: Text('Could not save the metronome settings.'),
           ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showTuner() async {
+    if (_picking || !ScoreAudioSession.supported) return;
+    setState(() => _picking = true);
+    try {
+      await _metronome?.stop();
+      await _scoreAudio?.player.pause();
+      if (!mounted) return;
+      final tone = _referenceTone ??= ReferenceTone();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) =>
+            TunerDialog(tone: tone, microphone: _supportsSharedImport),
+      );
+      await tone.stop();
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the tuner.')),
         );
     } finally {
       _finishPicking();
@@ -2656,6 +2686,8 @@ class _ReaderState extends State<Reader> {
                         _showPracticeRecordings();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
+                      case _ReaderDisplay.tuner:
+                        _showTuner();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2800,6 +2832,11 @@ class _ReaderState extends State<Reader> {
                       const PopupMenuItem(
                         value: _ReaderDisplay.metronome,
                         child: Text('Metronome'),
+                      ),
+                    if (ScoreAudioSession.supported)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.tuner,
+                        child: Text('Pitch pipe & tuner'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
