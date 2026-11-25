@@ -101,6 +101,9 @@ class _ReaderState extends State<Reader> {
   bool _inkSaveWarning = false;
   bool _editingText = false;
   InkTool _tool = InkTool.pen;
+  InkShape? _shape;
+  String? _stamp;
+  List<String> _personalStamps = [];
   double? _penWidth;
   int? _penColor;
   final _edgeTaps = _EdgeTapTracker();
@@ -178,6 +181,12 @@ class _ReaderState extends State<Reader> {
           _scoreTabIds = ids
               .where((id) => _library.lookup(id) != null)
               .toList();
+          if (data['personalStamps'] case final List stamps) {
+            _personalStamps = stamps
+                .whereType<String>()
+                .where((stamp) => stamp.isNotEmpty)
+                .toList();
+          }
         });
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
@@ -1024,6 +1033,17 @@ class _ReaderState extends State<Reader> {
     if (_editingText || !_inking) return;
     final ink = _ink[page];
     if (ink == null) return;
+    if (_stamp case final stamp?) {
+      ink.setText(null, (
+        value: stamp,
+        position: Offset(
+          position.dx.clamp(0.0, .9),
+          position.dy.clamp(0.0, .94),
+        ),
+        size: .048,
+      ));
+      return;
+    }
     final selected = ink.textAt(position, pageSize);
     _editingText = true;
     try {
@@ -1041,6 +1061,59 @@ class _ReaderState extends State<Reader> {
     } finally {
       _editingText = false;
     }
+  }
+
+  Future<void> _selectStamp(String stamp) async {
+    if (stamp.isEmpty) {
+      var draft = '';
+      final value = await showDialog<String>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Personal stamp'),
+          content: TextField(
+            autofocus: true,
+            maxLength: 24,
+            decoration: const InputDecoration(
+              labelText: 'Symbol or short text',
+            ),
+            onChanged: (value) => draft = value.trim(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, draft),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || value == null || value.isEmpty) return;
+      stamp = value;
+      if (!_personalStamps.contains(stamp)) {
+        final next = [..._personalStamps, stamp];
+        try {
+          await _library.updatePreferences({'personalStamps': next});
+          if (!mounted) return;
+          _personalStamps = next;
+        } catch (_) {
+          if (mounted)
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not save the personal stamp.'),
+              ),
+            );
+          return;
+        }
+      }
+    }
+    setState(() {
+      _stamp = stamp;
+      _shape = null;
+      _tool = InkTool.text;
+    });
   }
 
   void _toggleInk() {
@@ -1370,11 +1443,12 @@ class _ReaderState extends State<Reader> {
               () => PageInk(onChanged: _saveInk),
             ),
             enabled: _inking,
-            allowFinger: _allowFinger,
+            allowFinger: _allowFinger || _shape != null,
             tool: _tool,
             width: _tool == InkTool.pen ? _penWidth : null,
             color: _tool == InkTool.pen ? _penColor : null,
             onTextTap: (point, size) => _editText(page.pageNumber, point, size),
+            shape: _shape,
           ),
         ),
         if (!_inking)
@@ -1929,6 +2003,61 @@ class _ReaderState extends State<Reader> {
                   'Erase strokes',
                 ),
                 _toolButton(InkTool.text, Icons.text_fields, 'Text annotation'),
+                PopupMenuButton<String>(
+                  tooltip: 'Notation stamps',
+                  icon: Icon(
+                    Icons.music_note,
+                    color: _stamp == null ? null : _brass,
+                  ),
+                  onSelected: _selectStamp,
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: '',
+                      child: Text('Create personal stamp'),
+                    ),
+                    for (final stamp in _personalStamps)
+                      PopupMenuItem(value: stamp, child: Text(stamp)),
+                    for (final entry in const {
+                      '𝄐': 'Fermata',
+                      '♯': 'Sharp',
+                      '♭': 'Flat',
+                      '♮': 'Natural',
+                      'pp': 'Pianissimo',
+                      'p': 'Piano',
+                      'mf': 'Mezzo-forte',
+                      'f': 'Forte',
+                      'ff': 'Fortissimo',
+                      '>': 'Accent',
+                      '𝄋': 'Segno',
+                      '𝄌': 'Coda',
+                    }.entries)
+                      PopupMenuItem(
+                        value: entry.key,
+                        child: Text('${entry.key}   ${entry.value}'),
+                      ),
+                  ],
+                ),
+                PopupMenuButton<InkShape>(
+                  tooltip: 'Draw shape',
+                  icon: Icon(
+                    Icons.interests_outlined,
+                    color: _shape == null ? null : _brass,
+                  ),
+                  onSelected: (shape) => setState(() {
+                    _shape = shape;
+                    _stamp = null;
+                    _tool = InkTool.pen;
+                  }),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: InkShape.line, child: Text('Line')),
+                    PopupMenuItem(
+                      value: InkShape.rectangle,
+                      child: Text('Rectangle'),
+                    ),
+                    PopupMenuItem(value: InkShape.oval, child: Text('Oval')),
+                    PopupMenuItem(value: InkShape.arrow, child: Text('Arrow')),
+                  ],
+                ),
                 Semantics(
                   label: 'Allow finger drawing',
                   child: ChoiceChip(
@@ -2010,9 +2139,13 @@ class _ReaderState extends State<Reader> {
 
   Widget _toolButton(InkTool tool, IconData icon, String label) => IconButton(
     tooltip: label,
-    isSelected: _tool == tool,
-    color: _tool == tool ? _brass : null,
-    onPressed: () => setState(() => _tool = tool),
+    isSelected: _tool == tool && _stamp == null && _shape == null,
+    color: _tool == tool && _stamp == null && _shape == null ? _brass : null,
+    onPressed: () => setState(() {
+      _tool = tool;
+      _stamp = null;
+      _shape = null;
+    }),
     icon: Icon(icon),
   );
 }

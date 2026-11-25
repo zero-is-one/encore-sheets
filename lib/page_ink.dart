@@ -1,8 +1,11 @@
+import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/widgets.dart';
 
 enum InkTool { pen, highlighter, eraser, text }
+
+enum InkShape { line, rectangle, oval, arrow }
 
 typedef PageText = ({String value, Offset position, double size});
 
@@ -50,6 +53,7 @@ class PageInk extends ChangeNotifier {
   final _undo = <List<_Stroke>>[];
   final _redo = <List<_Stroke>>[];
   _Stroke? _active;
+  Offset? _activeStart;
 
   List<Map<String, dynamic>> snapshot() => [
     for (final stroke in _strokes) stroke.toJson(),
@@ -103,6 +107,7 @@ class PageInk extends ChangeNotifier {
     double? width,
     int? color,
   }) {
+    _activeStart = point;
     _active = _Stroke(tool, [point], width: width, color: color);
     notifyListeners();
   }
@@ -112,10 +117,54 @@ class PageInk extends ChangeNotifier {
     notifyListeners();
   }
 
+  void extendShape(InkShape shape, Offset end, Size size) {
+    final points = _active?.points;
+    if (points == null) return;
+    final start = _activeStart!;
+    final bounds = Rect.fromPoints(start, end);
+    final outlined = switch (shape) {
+      InkShape.line => [start, end],
+      InkShape.rectangle => [
+        start,
+        Offset(end.dx, start.dy),
+        end,
+        Offset(start.dx, end.dy),
+        start,
+      ],
+      InkShape.oval => [
+        for (var i = 0; i <= 48; i++)
+          Offset(
+            bounds.center.dx + bounds.width / 2 * math.cos(i * math.pi / 24),
+            bounds.center.dy + bounds.height / 2 * math.sin(i * math.pi / 24),
+          ),
+      ],
+      InkShape.arrow => _arrow(start, end, size),
+    };
+    points
+      ..clear()
+      ..addAll(outlined);
+    notifyListeners();
+  }
+
+  List<Offset> _arrow(Offset start, Offset end, Size size) {
+    final vector = Offset(
+      (end.dx - start.dx) * size.width,
+      (end.dy - start.dy) * size.height,
+    );
+    final length = math.min(vector.distance * .32, 24);
+    final angle = vector.direction;
+    Offset tip(double delta) => Offset(
+      (end.dx - math.cos(angle + delta) * length / size.width).clamp(0.0, 1.0),
+      (end.dy - math.sin(angle + delta) * length / size.height).clamp(0.0, 1.0),
+    );
+    return [start, end, tip(.45), end, tip(-.45)];
+  }
+
   void finish({required bool commit}) {
     final stroke = _active;
     if (stroke == null) return;
     _active = null;
+    _activeStart = null;
     if (commit) {
       final next = stroke.tool == InkTool.eraser
           ? _strokes.where((mark) => !_touches(mark, stroke)).toList()
@@ -193,6 +242,7 @@ class InkSurface extends StatefulWidget {
     this.width,
     this.color,
     this.onTextTap,
+    this.shape,
   });
 
   final PageInk ink;
@@ -202,6 +252,7 @@ class InkSurface extends StatefulWidget {
   final double? width;
   final int? color;
   final void Function(Offset point, Size pageSize)? onTextTap;
+  final InkShape? shape;
 
   @override
   State<InkSurface> createState() => _InkSurfaceState();
@@ -268,11 +319,21 @@ class _InkSurfaceState extends State<InkSurface> {
           },
           onPointerMove: (event) {
             if (event.pointer == _pointer && !size.isEmpty) {
-              widget.ink.extend(_point(event, size));
+              final point = _point(event, size);
+              if (widget.shape case final shape?) {
+                widget.ink.extendShape(shape, point, size);
+              } else {
+                widget.ink.extend(point);
+              }
             }
           },
           onPointerUp: (event) {
-            if (event.pointer == _pointer) _end(true);
+            if (event.pointer == _pointer) {
+              if (widget.shape case final shape? when !size.isEmpty) {
+                widget.ink.extendShape(shape, _point(event, size), size);
+              }
+              _end(true);
+            }
           },
           onPointerCancel: (event) {
             if (event.pointer == _pointer) _end(false);
