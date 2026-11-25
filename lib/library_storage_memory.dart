@@ -20,10 +20,13 @@ class _MemoryLibraryStorage implements LibraryStorage {
   }
 
   @override
-  Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists) =>
-      Future.error(
-        UnsupportedError('Library backup requires the installed app'),
-      );
+  Future<XFile> createBackup(
+    List<ScoreEntry> scores,
+    List<Setlist> setlists, {
+    bool includeScores = true,
+  }) => Future.error(
+    UnsupportedError('Library backup requires the installed app'),
+  );
 
   @override
   Future<XFile> createScorePackage(

@@ -309,7 +309,11 @@ abstract class LibraryStorage {
   Future<void> writeInk(String id, Map<String, dynamic> pages);
   Future<List<Setlist>> readSetlists();
   Future<void> writeSetlists(List<Setlist> setlists);
-  Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists);
+  Future<XFile> createBackup(
+    List<ScoreEntry> scores,
+    List<Setlist> setlists, {
+    bool includeScores = true,
+  });
   Future<XFile?> latestBackup();
   Future<XFile> createScorePackage(
     ScoreEntry score, {
@@ -778,8 +782,13 @@ class ScoreLibrary {
     return updated;
   });
 
-  Future<XFile> createBackup() =>
-      _serialize(() => storage.createBackup(_scores.values.toList(), setlists));
+  Future<XFile> createBackup({bool includeScores = true}) => _serialize(
+    () => storage.createBackup(
+      _scores.values.toList(),
+      setlists,
+      includeScores: includeScores,
+    ),
+  );
 
   Future<XFile> createScorePackage(
     ScoreEntry score, {

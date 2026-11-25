@@ -126,23 +126,32 @@ class NativeLibraryStorage implements LibraryStorage {
   @override
   Future<XFile> createBackup(
     List<ScoreEntry> scores,
-    List<Setlist> setlists,
-  ) async {
+    List<Setlist> setlists, {
+    bool includeScores = true,
+  }) async {
     final temp = _override ?? await getTemporaryDirectory();
     final folder = await temp.createTemp('encoresheets-backup-');
     final path =
-        '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
+        '${folder.path}/EncoreSheets-${includeScores ? 'library' : 'metadata'}-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
     final preferences = (await readPreferences())
       ..remove('librarySyncState')
       ..remove('localScoreAudio')
       ..remove('practiceRecordings');
     await Isolate.run(
-      () =>
-          _exportBackup(root, path, scores, setlists, preferences: preferences),
+      () => _exportBackup(
+        root,
+        path,
+        scores,
+        setlists,
+        preferences: preferences,
+        includeScores: includeScores,
+      ),
     );
-    final staged = await File(path).copy('$root/latest-backup.zip.tmp');
-    await staged.rename('$root/latest-backup.zip');
+    if (includeScores) {
+      final staged = await File(path).copy('$root/latest-backup.zip.tmp');
+      await staged.rename('$root/latest-backup.zip');
+    }
     return XFile(path, mimeType: 'application/zip');
   }
 

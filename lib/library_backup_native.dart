@@ -92,7 +92,8 @@ void _exportBackup(
       throw const FormatException('Invalid editable setlist package');
     }
     final referencesOnly =
-        kind == LibraryArchive.setlist && manifest['referencesOnly'] == true;
+        kind != LibraryArchive.score && manifest['referencesOnly'] == true;
+    final metadataOnly = kind == LibraryArchive.library && referencesOnly;
     final sourceIds = sourceScores.map((score) => score.id).toSet();
     final validSelections = {
       ...sourceIds,
@@ -130,6 +131,7 @@ void _exportBackup(
     var sequence = DateTime.now().microsecondsSinceEpoch;
     for (final (index, old) in sourceScores.indexed) {
       if (referencesOnly) {
+        if (metadataOnly && old.deletedAt != null) continue;
         final matching = existingScores
             .where(
               (score) =>
@@ -146,6 +148,12 @@ void _exportBackup(
         if (target == null) continue;
         mapped[old.id] = target.id;
         for (final bookmark in old.bookmarks.where((item) => item.isItem)) {
+          if (metadataOnly) {
+            mapped[bookmark.selectionId(old.id)] = bookmark.selectionId(
+              target.id,
+            );
+            continue;
+          }
           final match = target.bookmarks
               .where(
                 (item) =>
@@ -158,6 +166,15 @@ void _exportBackup(
           if (match != null) {
             mapped[bookmark.selectionId(old.id)] = match.selectionId(target.id);
           }
+        }
+        if (metadataOnly && !scores.any((score) => score.id == target.id)) {
+          scores.add(
+            old.copyWith(
+              id: target.id,
+              pdfSourceId: target.pdfSourceId,
+              detachPdf: target.pdfSourceId == null,
+            ),
+          );
         }
         continue;
       }
@@ -252,6 +269,17 @@ void _exportBackup(
           savedPreferences is Map)
         ...savedPreferences.cast<String, dynamic>(),
       ...existingPreferences,
+      if (metadataOnly && savedPreferences is Map)
+        for (final key in savedPreferences.keys.whereType<String>())
+          if (!const {
+            'scoreTabs',
+            'scoreCollections',
+            'personalStamps',
+            'librarySyncState',
+            'localScoreAudio',
+            'practiceRecordings',
+          }.contains(key))
+            key: savedPreferences[key],
     };
     if (kind == LibraryArchive.library && savedPreferences is Map) {
       Iterable<String> values(Object? value) =>
@@ -269,11 +297,17 @@ void _exportBackup(
             .whereType<String>(),
       }.toList();
     }
+    final replacing = metadataOnly
+        ? scores.map((score) => score.id).toSet()
+        : const <String>{};
     written.add(staged);
     staged.writeAsStringSync(
       jsonEncode(
         _catalog(
-          [...existingScores, ...scores],
+          [
+            ...existingScores.where((score) => !replacing.contains(score.id)),
+            ...scores,
+          ],
           [...existingSetlists, ...setlists],
           preferences: preferences,
         ),

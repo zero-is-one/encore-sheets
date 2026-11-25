@@ -44,10 +44,10 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
     }
   }
 
-  Future<String?> _export() async {
+  Future<String?> _export({bool includeScores = true}) async {
     final box = context.findRenderObject() as RenderBox;
     final origin = box.localToGlobal(Offset.zero) & box.size;
-    final zip = await widget.library.createBackup();
+    final zip = await widget.library.createBackup(includeScores: includeScores);
     if (!mounted) return null;
     if (defaultTargetPlatform == TargetPlatform.android) {
       final saved = await const MethodChannel('encoresheets/backup')
@@ -75,7 +75,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
     final source = await openFile(acceptedTypeGroups: const [_zip]);
     if (source == null) return null;
     final result = await widget.library.restoreBackup(source);
-    return 'Restored ${result.scores} scores and ${result.setlists} setlists.';
+    return 'Restored data for ${result.scores} scores and ${result.setlists} setlists.';
   }
 
   Future<String?> _recoverSnapshot() async {
@@ -136,6 +136,19 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
               label: const Text('Restore backup'),
             ),
             const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _operation == null && widget.library.storage.persistent
+                  ? () => _run(
+                      'Create metadata backup',
+                      () => _export(includeScores: false),
+                    )
+                  : null,
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: const Text('Create metadata-only backup'),
+            ),
+            const Text(
+              'Metadata-only restore updates matching scores without copying PDFs.',
+            ),
             const Text(
               'Restore adds copies to your library and preserves existing items.',
             ),
