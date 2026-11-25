@@ -154,6 +154,18 @@ Future<XFile> writeRearrangedPdf(String name, List<EditedPdfPage> pages) async {
                 case final position)
               action.reposition(page, position.dx, position.dy),
       ],
+      reflowZones: [
+        for (final zone in source.reflowZones)
+          for (final page in destination[zone.page] ?? const <int>[])
+            if (pages[page - 1].rotation.isEven)
+              (
+                page: page,
+                top: pages[page - 1].rotation == 2 ? 1 - zone.bottom : zone.top,
+                bottom: pages[page - 1].rotation == 2
+                    ? 1 - zone.top
+                    : zone.bottom,
+              ),
+      ],
       crops: {
         for (final (index, page) in pages.indexed)
           if (source.crops[page.originalPage] case final crop?)

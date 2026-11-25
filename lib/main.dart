@@ -44,6 +44,8 @@ import 'metadata_csv_screen.dart';
 import 'midi_devices_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
+import 'reflow_screen.dart';
+import 'reflow_zones.dart';
 import 'tuner_dialog.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
@@ -71,6 +73,7 @@ enum _ReaderDisplay {
   midiDevices,
   appearance,
   accessibility,
+  reflow,
   fit,
   zoomIn,
   zoomOut,
@@ -2066,6 +2069,46 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showReflow() async {
+    if (_picking || !_viewer.isReady || _pages == 0) return;
+    final score = _entry;
+    final first = _firstPage, last = _lastPage;
+    setState(() => _picking = true);
+    try {
+      final zones = await Navigator.of(context).push<List<ReflowZone>>(
+        MaterialPageRoute(
+          builder: (_) => ReflowScreen(
+            document: _viewer.document,
+            first: first,
+            last: last,
+            initialPage: _page,
+            saved: score?.reflowZones ?? const [],
+          ),
+        ),
+      );
+      if (!mounted || zones == null || score == null) return;
+      await _library.updateScore(
+        score.id,
+        (old) => old.copyWith(
+          reflowZones: [
+            for (final zone in old.reflowZones)
+              if (zone.page < first || zone.page > last) zone,
+            ...zones,
+          ],
+        ),
+      );
+      if (mounted && _entry?.id == score.id)
+        setState(() => _entry = _library.lookup(score.id));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open or save score reflow.')),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
   Future<void> _showAppearance() async {
     var sepia = _preferences.sepia;
     var dimming = _preferences.pageDimming;
@@ -3037,6 +3080,8 @@ class _ReaderState extends State<Reader> {
                         _showAppearance();
                       case _ReaderDisplay.accessibility:
                         _showAccessibility();
+                      case _ReaderDisplay.reflow:
+                        _showReflow();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -3203,6 +3248,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.accessibility,
                       child: Text('Accessible reader controls'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.reflow,
+                      child: Text('Score reflow'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,

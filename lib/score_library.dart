@@ -8,6 +8,7 @@ import 'library_sync.dart';
 import 'page_crop.dart';
 import 'program_duration.dart';
 import 'score_action.dart';
+import 'reflow_zones.dart';
 import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
     as platform;
@@ -82,6 +83,7 @@ class ScoreEntry {
     this.crops = const {},
     this.pageNotes = const {},
     this.actions = const [],
+    this.reflowZones = const [],
     this.pdfSourceId,
     this.deletedAt,
   });
@@ -130,6 +132,12 @@ class ScoreEntry {
       for (final raw in (json['actions'] as List? ?? const []))
         if (ScoreAction.fromJson(raw) case final action?) action,
     ],
+    reflowZones: [
+      for (final raw in (json['reflowZones'] as List? ?? const []))
+        if (raw case [int page, num top, num bottom]
+            when page > 0 && top >= 0 && bottom <= 1 && bottom > top)
+          (page: page, top: top.toDouble(), bottom: bottom.toDouble()),
+    ],
   );
 
   final String id;
@@ -146,6 +154,7 @@ class ScoreEntry {
   final Map<int, PageCrop> crops;
   final Map<int, String> pageNotes;
   final List<ScoreAction> actions;
+  final List<ReflowZone> reflowZones;
   final String? pdfSourceId;
   String get storedPdfId => pdfSourceId ?? id;
 
@@ -163,6 +172,7 @@ class ScoreEntry {
     Map<int, PageCrop>? crops,
     Map<int, String>? pageNotes,
     List<ScoreAction>? actions,
+    List<ReflowZone>? reflowZones,
     String? pdfSourceId,
     bool detachPdf = false,
     DateTime? deletedAt,
@@ -181,6 +191,7 @@ class ScoreEntry {
     crops: crops ?? this.crops,
     pageNotes: pageNotes ?? this.pageNotes,
     actions: actions ?? this.actions,
+    reflowZones: reflowZones ?? this.reflowZones,
     pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
@@ -213,6 +224,10 @@ class ScoreEntry {
       },
     if (actions.isNotEmpty)
       'actions': [for (final action in actions) action.toJson()],
+    if (reflowZones.isNotEmpty)
+      'reflowZones': [
+        for (final zone in reflowZones) [zone.page, zone.top, zone.bottom],
+      ],
   };
 }
 
