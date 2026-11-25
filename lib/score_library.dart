@@ -574,6 +574,18 @@ class ScoreLibrary {
     _setlists[setlist.id] = setlist;
   });
 
+  Future<void> appendToSetlist(String id, String scoreId) =>
+      _serialize(() async {
+        final target = _setlists[id];
+        if (target == null || lookup(scoreId) == null) {
+          throw StateError('The setlist or score is no longer available.');
+        }
+        final amended = target.copyWith(scores: [...target.scores, scoreId]);
+        final updated = {..._setlists, id: amended};
+        await storage.writeSetlists(updated.values.toList());
+        _setlists[id] = amended;
+      });
+
   Future<void> duplicateSetlist(Setlist setlist) => _serialize(() async {
     var sequence = DateTime.now().microsecondsSinceEpoch;
     while (_setlists.containsKey('$sequence')) {

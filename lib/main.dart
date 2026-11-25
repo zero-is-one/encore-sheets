@@ -706,6 +706,10 @@ class _ReaderState extends State<Reader> {
                 canScan: _supportsSharedImport,
                 canSync: _isAppleMobile,
                 onScoreQueue: (ids) => selectedQueue = ids,
+                onPinScore: (id) => _updateScoreTabs([
+                  ..._scoreTabIds.where((value) => value != id),
+                  id,
+                ]),
                 compact: _preferences.compactLibrary,
               ),
             );
@@ -4625,6 +4629,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.canScan,
     required this.canSync,
     required this.onScoreQueue,
+    required this.onPinScore,
     required this.compact,
   });
 
@@ -4635,6 +4640,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool canScan;
   final bool canSync;
   final ValueChanged<List<String>> onScoreQueue;
+  final Future<void> Function(String) onPinScore;
   final bool compact;
 
   @override
@@ -4648,6 +4654,73 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   String? _collection;
   bool _excludeCollection = false;
   bool _unassigned = false;
+  bool _draggingScore = false;
+
+  void _showDragTargets(bool visible) {
+    if (mounted && _draggingScore != visible) {
+      setState(() => _draggingScore = visible);
+    }
+  }
+
+  Widget _scoreDrop(String label, IconData icon, ValueChanged<String> drop) =>
+      Expanded(
+        child: DragTarget<String>(
+          onWillAcceptWithDetails: (details) =>
+              widget.library.lookup(details.data) != null,
+          onAcceptWithDetails: (details) => drop(details.data),
+          builder: (context, hovering, _) => Container(
+            margin: const EdgeInsetsDirectional.only(end: 6),
+            height: 44,
+            decoration: BoxDecoration(
+              color: hovering.isEmpty
+                  ? Theme.of(context).colorScheme.surfaceContainerHighest
+                  : Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(label, style: const TextStyle(fontSize: 13)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Future<void> _dropIntoSetlist(String scoreId) async {
+    final listId = await showDialog<String>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Add score to setlist'),
+        children: [
+          for (final list in widget.library.setlists)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, list.id),
+              child: Text(list.name),
+            ),
+        ],
+      ),
+    );
+    if (listId == null || !mounted) return;
+    try {
+      await widget.library.appendToSetlist(listId, scoreId);
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Score added to setlist.')),
+        );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not add the score to the setlist.'),
+          ),
+        );
+    }
+  }
 
   Future<void> _chooseCollection() => showDialog<void>(
     context: context,
@@ -4897,15 +4970,23 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _unassigned
-              ? 'Unassigned scores'
-              : _collection == null
-              ? 'Score library'
-              : _excludeCollection
-              ? 'Outside $_collection'
-              : _collection!,
-        ),
+        title: _draggingScore
+            ? Row(
+                children: [
+                  _scoreDrop('Pin tab', Icons.tab, widget.onPinScore),
+                  if (widget.setlists.isNotEmpty)
+                    _scoreDrop('Setlist', Icons.queue_music, _dropIntoSetlist),
+                ],
+              )
+            : Text(
+                _unassigned
+                    ? 'Unassigned scores'
+                    : _collection == null
+                    ? 'Score library'
+                    : _excludeCollection
+                    ? 'Outside $_collection'
+                    : _collection!,
+              ),
         actions: [
           IconButton(
             tooltip: 'Libraries',
@@ -5127,7 +5208,32 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               }
                               final score = visible[index];
                               return ListTile(
-                                leading: const Icon(Icons.description_outlined),
+                                leading: LongPressDraggable<String>(
+                                  data: score.id,
+                                  onDragStarted: () => _showDragTargets(true),
+                                  onDragEnd: (_) => _showDragTargets(false),
+                                  feedback: Material(
+                                    elevation: 5,
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(10),
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 220,
+                                        ),
+                                        child: Text(
+                                          score.title,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  child: const Tooltip(
+                                    message:
+                                        'Hold and drag to a tab or setlist',
+                                    child: Icon(Icons.drag_indicator),
+                                  ),
+                                ),
                                 title: Text(score.title),
                                 dense: widget.compact,
                                 subtitle: widget.compact
