@@ -55,6 +55,7 @@ import 'text_score_pdf.dart';
 import 'practice_activity.dart';
 import 'practice_dashboard.dart';
 import 'reader_restrictions.dart';
+import 'support_screen.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -82,6 +83,7 @@ enum _ReaderDisplay {
   practiceRecordings,
   practiceActivity,
   restrictions,
+  support,
   metronome,
   tuner,
   piano,
@@ -931,6 +933,10 @@ class _ReaderState extends State<Reader> {
         if (setlist != null && mounted) await _playScore(setlist, 0);
         return;
       }
+      if (result == 'support') {
+        await _openReaderPanel<void>((_) => SupportScreen(library: _library));
+        return;
+      }
       if (result == 'backup') {
         await _openReaderPanel<void>(
           (_) => LibraryBackupScreen(library: _library),
@@ -1583,6 +1589,18 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not apply the restrictions.')),
         );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showSupport() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await _libraryReady;
+      if (mounted)
+        await _openReaderPanel<void>((_) => SupportScreen(library: _library));
     } finally {
       _finishPicking();
     }
@@ -3990,6 +4008,8 @@ class _ReaderState extends State<Reader> {
                         _showPracticeActivity();
                       case _ReaderDisplay.restrictions:
                         _showRestrictions();
+                      case _ReaderDisplay.support:
+                        _showSupport();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4165,6 +4185,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.restrictions,
                       child: Text('Shared-device restrictions'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.support,
+                      child: Text('Help and diagnostics'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
@@ -5135,6 +5159,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
               'create-template': 'Create from template',
               'import-text': 'Import text or Word document',
               'setlists': 'Setlists',
+              'support': 'Help and diagnostics',
               if (widget.persistent) 'backup': 'Backup & restore',
               'sample': 'Open sample score',
             }.entries
@@ -5178,6 +5203,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                     : _collection!,
               ),
         actions: [
+          IconButton(
+            tooltip: 'Help and diagnostics',
+            onPressed: () => Navigator.pop(context, 'support'),
+            icon: const Icon(Icons.help_outline),
+          ),
           IconButton(
             tooltip: 'Libraries',
             onPressed: _chooseCollection,
