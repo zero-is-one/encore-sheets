@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 
 import 'score_library.dart';
 import 'app_localization.dart';
+import 'score_clipboard.dart';
 import 'program_duration.dart';
 import 'setlist_order.dart';
 import 'setlist_share.dart';
@@ -332,6 +333,48 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   ];
   bool _saving = false;
 
+  void _clipboardStatus(String message) {
+    if (mounted)
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _copySelection(({Object key, String id}) row, bool move) async {
+    final selected = widget.library.lookupSelection(row.id);
+    if (selected == null) return;
+    try {
+      await writeScoreClipboard((
+        scope: 'library',
+        id: row.id,
+        name: selected.$2?.title ?? selected.$1.title,
+        move: move,
+      ));
+      if (!mounted) return;
+      if (move)
+        setState(() => _scores.removeWhere((item) => item.key == row.key));
+      _clipboardStatus(move ? 'Score cut from this draft.' : 'Score copied.');
+    } catch (_) {
+      _clipboardStatus('Could not copy this selection.');
+    }
+  }
+
+  Future<void> _pasteSelection() async {
+    try {
+      final selected = await readScoreClipboard();
+      if (selected == null ||
+          selected.scope != 'library' ||
+          widget.library.lookupSelection(selected.id) == null) {
+        _clipboardStatus('Copy a score or setlist item first.');
+        return;
+      }
+      if (!mounted || _saving) return;
+      setState(() => _scores.add((key: Object(), id: selected.id)));
+      _clipboardStatus('Score pasted into this draft.');
+    } catch (_) {
+      _clipboardStatus('Could not paste this selection.');
+    }
+  }
+
   @override
   void dispose() {
     _name.dispose();
@@ -507,22 +550,54 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                     ? const Text('Tap to choose a score')
                     : null,
                 onTap: _saving ? null : () => _add(index),
-                trailing: IconButton(
-                  tooltip: 'Remove score',
-                  onPressed: _saving
-                      ? null
-                      : () => setState(() => _scores.removeAt(index)),
-                  icon: const Icon(Icons.remove_circle_outline),
+                trailing: PopupMenuButton<String>(
+                  enabled: !_saving,
+                  tooltip: 'Setlist item actions',
+                  onSelected: (action) {
+                    final row = _scores[index];
+                    if (action == 'remove') {
+                      setState(() => _scores.removeAt(index));
+                    } else {
+                      _copySelection(row, action == 'cut');
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (widget.library.lookupSelection(_scores[index].id) !=
+                        null) ...[
+                      const PopupMenuItem(
+                        value: 'copy',
+                        child: Text('Copy score'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'cut',
+                        child: Text('Cut from setlist'),
+                      ),
+                    ],
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove score'),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: FilledButton.icon(
-              onPressed: _saving ? null : _add,
-              icon: const Icon(Icons.add),
-              label: const Text('Add score'),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _saving ? null : _add,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add score'),
+                ),
+                TextButton.icon(
+                  onPressed: _saving ? null : _pasteSelection,
+                  icon: const Icon(Icons.content_paste),
+                  label: const Text('Paste score'),
+                ),
+              ],
             ),
           ),
         ],

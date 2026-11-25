@@ -58,6 +58,7 @@ import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
 import 'reader_deep_link.dart';
+import 'score_clipboard.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -5115,6 +5116,26 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     }
   }
 
+  Future<void> _copyLibraryScore(ScoreEntry score) async {
+    try {
+      await writeScoreClipboard((
+        scope: 'library',
+        id: score.id,
+        name: score.title,
+        move: false,
+      ));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Score copied. Paste it in a setlist.')),
+        );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not copy this score.')),
+        );
+    }
+  }
+
   Future<void> _chooseCollection() => showDialog<void>(
     context: context,
     builder: (dialog) => SimpleDialog(
@@ -5659,6 +5680,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                   onSelected: (action) {
                                     if (action == 'libraries') {
                                       _assignCollections(score);
+                                    } else if (action == 'copy') {
+                                      _copyLibraryScore(score);
                                     } else if (action == 'trash') {
                                       _trashScore(score);
                                     } else if (action == 'extract') {
@@ -5684,6 +5707,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     }
                                   },
                                   itemBuilder: (_) => [
+                                    const PopupMenuItem(
+                                      value: 'copy',
+                                      child: Text('Copy to clipboard'),
+                                    ),
                                     const PopupMenuItem(
                                       value: 'details',
                                       child: Text('Rename or edit details'),

@@ -7,6 +7,32 @@ import 'package:http/testing.dart';
 
 void main() {
   test(
+    'pasting a cut Dropbox PDF uses a remote move without overwriting',
+    () async {
+      final session = CloudProviderSession(
+        DirectCloudProvider.dropbox,
+        'test-token',
+        client: MockClient((request) async {
+          expect(request.url.path, '/2/files/move_v2');
+          expect(jsonDecode(request.body), {
+            'from_path': '/old/sonata.pdf',
+            'to_path': '/new/Sonata.pdf',
+            'autorename': true,
+          });
+          return http.Response('{}', 200);
+        }),
+      );
+      addTearDown(session.close);
+      await session.transfer(
+        sourceId: '/old/sonata.pdf',
+        filename: 'Sonata.pdf',
+        folderId: '/new',
+        move: true,
+      );
+    },
+  );
+
+  test(
     'Dropbox follows folder cursors and escapes PDF download paths',
     () async {
       final session = CloudProviderSession(

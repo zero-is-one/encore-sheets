@@ -231,4 +231,54 @@ class CloudProviderSession {
     await result.stream.drain<void>().timeout(_timeout);
     _check(http.Response('', result.statusCode));
   }
+
+  Future<void> transfer({
+    required String sourceId,
+    required String filename,
+    required String folderId,
+    required bool move,
+  }) async {
+    if (!filename.toLowerCase().endsWith('.pdf') ||
+        filename.contains(RegExp(r'[/\\\x00-\x1f]'))) {
+      throw const CloudTransferError('The clipboard file name is invalid.');
+    }
+    if (provider == DirectCloudProvider.dropbox) {
+      if (!sourceId.startsWith('/') ||
+          !sourceId.toLowerCase().endsWith('.pdf') ||
+          '$folderId/$filename'.toLowerCase() == sourceId.toLowerCase()) {
+        throw const CloudTransferError(
+          'Open a different folder before pasting this PDF.',
+        );
+      }
+      await _dropboxJson(move ? 'move_v2' : 'copy_v2', {
+        'from_path': sourceId,
+        'to_path': '$folderId/$filename',
+        'autorename': true,
+      });
+      return;
+    }
+    if (!RegExp(r'^\d+$').hasMatch(sourceId) ||
+        !RegExp(r'^\d+$').hasMatch(folderId)) {
+      throw const CloudTransferError(
+        'The clipboard file or folder is invalid.',
+      );
+    }
+    final request =
+        http.Request(
+            move ? 'PUT' : 'POST',
+            Uri.https(
+              'api.box.com',
+              '/2.0/files/$sourceId${move ? '' : '/copy'}',
+            ),
+          )
+          ..headers.addAll({..._auth, 'Content-Type': 'application/json'})
+          ..body = jsonEncode({
+            'parent': {'id': folderId},
+          });
+    _check(
+      await http.Response.fromStream(
+        await _client.send(request).timeout(_timeout),
+      ).timeout(_timeout),
+    );
+  }
 }

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'cloud_provider.dart';
 import 'score_library.dart';
+import 'score_clipboard.dart';
 
 class DirectCloudScreen extends StatefulWidget {
   const DirectCloudScreen({
@@ -119,6 +120,41 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
     _status = 'Uploaded $name.';
   });
 
+  Future<void> _copyFile(CloudItem item, {required bool move}) =>
+      _run(() async {
+        await writeScoreClipboard((
+          scope: widget.provider.name,
+          id: item.id,
+          name: item.name,
+          move: move,
+        ));
+        _status = move
+            ? 'Choose a folder and paste to move this PDF.'
+            : 'PDF copied.';
+      });
+
+  Future<void> _pasteFile() => _run(() async {
+    final item = await readScoreClipboard();
+    if (item == null || item.scope != widget.provider.name) {
+      throw CloudTransferError(
+        'Copy or cut a PDF from ${widget.provider.label} first.',
+      );
+    }
+    await _session!.transfer(
+      sourceId: item.id,
+      filename: item.name,
+      folderId: _path.last.id,
+      move: item.move,
+    );
+    try {
+      await clearMovedScoreClipboard(item);
+    } catch (_) {
+      // The remote transfer has already completed.
+    }
+    _items = await _session!.folder(_path.last.id);
+    _status = item.move ? 'Moved ${item.name}.' : 'Copied ${item.name}.';
+  });
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_busy,
@@ -163,6 +199,10 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
                         : _upload,
                     child: const Text('Upload score'),
                   ),
+                  TextButton(
+                    onPressed: _busy ? null : _pasteFile,
+                    child: const Text('Paste PDF'),
+                  ),
                   if (_latest case final score?)
                     TextButton(
                       onPressed: _busy
@@ -180,9 +220,20 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
                         : Icons.picture_as_pdf_outlined,
                   ),
                   title: Text(item.name),
-                  trailing: Icon(
-                    item.folder ? Icons.chevron_right : Icons.download_outlined,
-                  ),
+                  trailing: item.folder
+                      ? const Icon(Icons.chevron_right)
+                      : PopupMenuButton<bool>(
+                          enabled: !_busy,
+                          tooltip: 'PDF clipboard actions',
+                          onSelected: (move) => _copyFile(item, move: move),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: false,
+                              child: Text('Copy PDF'),
+                            ),
+                            PopupMenuItem(value: true, child: Text('Cut PDF')),
+                          ],
+                        ),
                   onTap: _busy ? null : () => _open(item),
                 ),
               if (_items.isEmpty && !_busy)
