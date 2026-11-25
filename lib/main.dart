@@ -1008,6 +1008,14 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _runScoreAction(ScoreAction action) async {
     if (_picking || _inking) return;
+    if (const {
+      ScoreActionKind.tempo,
+      ScoreActionKind.pitch,
+      ScoreActionKind.midi,
+    }.contains(action.kind)) {
+      await _runRehearsalAction(action);
+      return;
+    }
     if (action.kind == ScoreActionKind.note) {
       await _editPageNote(action.page);
       return;
@@ -1054,6 +1062,67 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Could not open the destination score.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _runRehearsalAction(ScoreAction action) async {
+    if (!ScoreAudioSession.supported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This action is unavailable on this device.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _picking = true);
+    try {
+      switch (action.kind) {
+        case ScoreActionKind.tempo:
+          final tempo = int.parse(action.parameter!);
+          final meter = _metronome ??= RehearsalMetronome();
+          final wasRunning = meter.running;
+          if (wasRunning) await meter.stop();
+          meter.bpm = tempo;
+          if (wasRunning) await meter.start();
+          if (_entry case final score?) {
+            await _library.updateScore(
+              score.id,
+              (old) =>
+                  old.copyWith(metadata: {...old.metadata, 'tempo': '$tempo'}),
+            );
+            if (mounted && _entry?.id == score.id)
+              setState(() => _entry = _library.lookup(score.id));
+          }
+        case ScoreActionKind.pitch:
+          await (_referenceTone ??= ReferenceTone()).play(
+            int.parse(action.parameter!),
+          );
+        case ScoreActionKind.midi:
+          final devices = await _midi.devices ?? [];
+          final targets = devices.where((device) => device.connected).toList();
+          if (targets.isEmpty) throw StateError('Connect a MIDI device first.');
+          final bytes = Uint8List.fromList(
+            ScoreAction.midiBytes(action.parameter!)!,
+          );
+          for (final device in targets) {
+            _midi.sendData(bytes, deviceId: device.id);
+          }
+        default:
+          break;
+      }
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is StateError
+                  ? error.message
+                  : 'Could not run this action.',
+            ),
           ),
         );
     } finally {
@@ -2570,6 +2639,10 @@ class _ReaderState extends State<Reader> {
                           ScoreActionKind.note => Icons.sticky_note_2_outlined,
                           ScoreActionKind.score => Icons.open_in_new,
                           ScoreActionKind.audio => Icons.play_arrow,
+                          ScoreActionKind.tempo => Icons.speed,
+                          ScoreActionKind.pitch => Icons.music_note,
+                          ScoreActionKind.midi =>
+                            Icons.settings_input_component,
                         },
                         color: Colors.white,
                         size: 19,

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import 'score_action.dart';
+import 'pitch_detection.dart';
 import 'score_library.dart';
 
 class ScoreActionsScreen extends StatefulWidget {
@@ -39,6 +40,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
     var x = current?.x ?? .5;
     var y = current?.y ?? .25;
     var selection = current?.selection;
+    var parameter = current?.parameter ?? '';
     final choices = {
       for (final score in widget.library.recent) ...{
         score.id: score.title,
@@ -73,7 +75,14 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                     for (final item in ScoreActionKind.values)
                       DropdownMenuItem(value: item, child: Text(item.label)),
                   ],
-                  onChanged: (value) => refresh(() => kind = value!),
+                  onChanged: (value) => refresh(() {
+                    kind = value!;
+                    parameter = switch (kind) {
+                      ScoreActionKind.tempo => '96',
+                      ScoreActionKind.pitch => '69',
+                      _ => '',
+                    };
+                  }),
                 ),
                 if (kind == ScoreActionKind.score)
                   DropdownButton<String>(
@@ -91,6 +100,37 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                         ),
                     ],
                     onChanged: (value) => refresh(() => selection = value),
+                  ),
+                if (kind == ScoreActionKind.pitch)
+                  DropdownButton<int>(
+                    value: int.tryParse(parameter) ?? 69,
+                    items: [
+                      for (var note = 48; note <= 84; note++)
+                        DropdownMenuItem(
+                          value: note,
+                          child: Text(noteLabel(note)),
+                        ),
+                    ],
+                    onChanged: (value) => refresh(() => parameter = '$value'),
+                  ),
+                if (kind == ScoreActionKind.tempo ||
+                    kind == ScoreActionKind.midi)
+                  TextFormField(
+                    key: ValueKey(kind),
+                    initialValue: parameter,
+                    keyboardType: kind == ScoreActionKind.tempo
+                        ? TextInputType.number
+                        : TextInputType.text,
+                    decoration: InputDecoration(
+                      labelText: kind == ScoreActionKind.tempo
+                          ? 'Tempo (BPM)'
+                          : 'MIDI message (hex)',
+                      hintText: kind == ScoreActionKind.tempo
+                          ? '25–280'
+                          : 'Example: C0 05',
+                    ),
+                    onChanged: (value) =>
+                        refresh(() => parameter = value.trim()),
                   ),
                 DropdownButton<int>(
                   isExpanded: true,
@@ -169,6 +209,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
             FilledButton(
               onPressed:
                   title.trim().isEmpty ||
+                      !ScoreAction.validParameter(kind, parameter) ||
                       kind == ScoreActionKind.score &&
                           !choices.containsKey(selection)
                   ? null
@@ -184,6 +225,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                         selection: kind == ScoreActionKind.score
                             ? selection
                             : null,
+                        parameter: parameter.isEmpty ? null : parameter,
                       ),
                     ),
               child: const Text('Save'),
