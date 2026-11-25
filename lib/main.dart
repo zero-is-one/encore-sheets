@@ -49,6 +49,7 @@ import 'audio_page_cues.dart';
 import 'midi_automation_dialog.dart';
 import 'ensemble_dialog.dart';
 import 'ensemble_session.dart';
+import 'rehearsal_piano.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -76,6 +77,7 @@ enum _ReaderDisplay {
   practiceRecordings,
   metronome,
   tuner,
+  piano,
   inputShortcuts,
   midiDevices,
   midiAutomation,
@@ -201,6 +203,8 @@ class _ReaderState extends State<Reader> {
   int _meterPageStart = 0;
   int? _meterPage;
   ReferenceTone? _referenceTone;
+  RehearsalPiano? _piano;
+  bool _midiPiano = false;
   Map<String, ReaderShortcut> _shortcuts = {};
   final _midiShortcuts = StreamController<String>.broadcast();
   TurnTouch? _turnTouch;
@@ -297,6 +301,7 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          _midiPiano = data['midiPiano'] == true;
           if (data['readerShortcuts'] case final Map saved) {
             _shortcuts = {
               for (final entry in saved.entries)
@@ -319,8 +324,7 @@ class _ReaderState extends State<Reader> {
                 .toList();
           }
         });
-        if (_shortcuts.keys.any((key) => key.startsWith('midi:')))
-          _listenToMidi();
+        _listenToMidi();
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
@@ -452,6 +456,7 @@ class _ReaderState extends State<Reader> {
     unawaited(_turnTouch?.dispose().catchError((Object _) {}));
     unawaited(_midiShortcuts.close());
     unawaited(_referenceTone?.dispose());
+    unawaited(_piano?.dispose().catchError((Object _) {}));
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
     unawaited(_ensemble?.close());
@@ -1467,6 +1472,37 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showPiano() async {
+    if (_picking || !ScoreAudioSession.supported) return;
+    setState(() => _picking = true);
+    final before = _midiPiano;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => RehearsalPianoDialog(
+          piano: _piano ??= RehearsalPiano(),
+          midiSound: _midiPiano,
+          onMidiSound: (enabled) {
+            _midiPiano = enabled;
+            if (enabled) _listenToMidi();
+          },
+        ),
+      );
+      if (before != _midiPiano) {
+        await _library.updatePreferences({'midiPiano': _midiPiano});
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save the MIDI piano setting.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
   void _followJump(JumpPoint target) {
     if (_picking || !_viewer.isReady) return;
     _jumpToPage(target.page);
@@ -2126,6 +2162,16 @@ class _ReaderState extends State<Reader> {
     final stream = _midi.onMidiPacketReceived;
     _midiInput = stream?.listen((packet) {
       if (!mounted) return;
+      final bytes = packet.data;
+      if (_midiPiano &&
+          bytes.length == 3 &&
+          bytes[0] & 0xf0 == 0x90 &&
+          bytes[2] > 0) {
+        final piano = _piano ??= RehearsalPiano();
+        unawaited(
+          piano.play(bytes[1], velocity: bytes[2]).catchError((Object _) {}),
+        );
+      }
       if (!_picking && !_inking) {
         final command = midiCommandKey(packet.data);
         final target = _library.recent
@@ -3679,6 +3725,8 @@ class _ReaderState extends State<Reader> {
                         _showMetronome();
                       case _ReaderDisplay.tuner:
                         _showTuner();
+                      case _ReaderDisplay.piano:
+                        _showPiano();
                       case _ReaderDisplay.inputShortcuts:
                         _showInputShortcuts();
                       case _ReaderDisplay.midiDevices:
@@ -3850,6 +3898,11 @@ class _ReaderState extends State<Reader> {
                       const PopupMenuItem(
                         value: _ReaderDisplay.tuner,
                         child: Text('Pitch pipe & tuner'),
+                      ),
+                    if (ScoreAudioSession.supported)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.piano,
+                        child: Text('Piano and MIDI synthesizer'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.inputShortcuts,

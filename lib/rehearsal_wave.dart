@@ -71,3 +71,20 @@ Uint8List referenceToneWave(double frequency) {
     return math.sin(seconds * frequency * 2 * math.pi) * fade * .4;
   }, RehearsalChannel.both);
 }
+
+Uint8List pianoNoteWave(int midiNote) {
+  final frequency = 440 * math.pow(2, (midiNote - 69) / 12);
+  const duration = 1.2;
+  return _wave((rehearsalSampleRate * duration).round(), (frame) {
+    final time = frame / rehearsalSampleRate;
+    final phase = time * frequency * 2 * math.pi;
+    final attack = math.min(1.0, time * 220);
+    final release = math.min(1.0, (duration - time) * 12);
+    return (math.sin(phase) * math.exp(-3 * time) +
+            math.sin(phase * 2.003) * .30 * math.exp(-7 * time) +
+            math.sin(phase * 3.008) * .15 * math.exp(-11 * time)) *
+        attack *
+        release *
+        .27;
+  }, RehearsalChannel.both);
+}
