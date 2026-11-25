@@ -40,6 +40,7 @@ import 'score_audio_dialog.dart';
 import 'practice_recordings.dart';
 import 'practice_recordings_dialog.dart';
 import 'metronome_dialog.dart';
+import 'metadata_csv_screen.dart';
 import 'midi_devices_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
@@ -711,6 +712,15 @@ class _ReaderState extends State<Reader> {
           (_) => LibraryBackupScreen(library: _library),
         );
         if (mounted) await _restorePreferences();
+        return;
+      }
+      if (result == 'metadata-csv') {
+        await _openReaderPanel<void>(
+          (_) => MetadataCsvScreen(library: _library),
+        );
+        if (_entry case final score? when mounted) {
+          setState(() => _entry = _library.lookup(score.id));
+        }
         return;
       }
       if (result == 'sync') {
@@ -4134,6 +4144,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                           icon: const Icon(Icons.cloud_sync_outlined),
                           label: const Text('Device sync'),
                         ),
+                      TextButton.icon(
+                        onPressed: () => Navigator.pop(context, 'metadata-csv'),
+                        icon: const Icon(Icons.table_chart_outlined),
+                        label: const Text('CSV metadata'),
+                      ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),
                         icon: const Icon(Icons.queue_music),

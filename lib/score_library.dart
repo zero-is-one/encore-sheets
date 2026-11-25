@@ -394,6 +394,30 @@ class ScoreLibrary {
         (old) => old.copyWith(collections: List.unmodifiable(names.toSet())),
       );
 
+  Future<void> applyMetadataTable(
+    Map<String, ({String? title, Map<String, String> fields})> edits,
+  ) => _serialize(() async {
+    final updated = Map.of(_scores);
+    for (final row in edits.entries) {
+      final score = lookup(row.key);
+      if (score == null) continue;
+      final metadata = Map.of(score.metadata);
+      for (final field in row.value.fields.entries) {
+        if (field.value.isEmpty) {
+          metadata.remove(field.key);
+        } else {
+          metadata[field.key] = field.value;
+        }
+      }
+      updated[row.key] = score.copyWith(
+        title: row.value.title,
+        metadata: metadata,
+      );
+    }
+    await storage.writeIndex(updated.values.toList());
+    _scores.addAll(updated);
+  });
+
   Future<void> savePageNote(String id, int page, String text) {
     if (page < 1) throw ArgumentError.value(page, 'page');
     return updateScore(id, (score) {
