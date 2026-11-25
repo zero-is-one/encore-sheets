@@ -1,8 +1,57 @@
 import Flutter
+import AppIntents
 import UIKit
 import VisionKit
 import UniformTypeIdentifiers
 import MediaPlayer
+
+@available(iOS 16.0, *)
+enum EncoreShortcutTarget: String, AppEnum {
+  case score, bookmark, setlist
+
+  static var typeDisplayRepresentation: TypeDisplayRepresentation = "Library Item"
+  static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+    .score: "Score", .bookmark: "Bookmark", .setlist: "Setlist"
+  ]
+}
+
+@available(iOS 16.0, *)
+struct OpenEncoreLibraryItem: AppIntent {
+  static var title: LocalizedStringResource = "Open Library Item"
+  static var description = IntentDescription("Open a score, bookmark, or setlist by its exact title.")
+  static var openAppWhenRun = true
+
+  @Parameter(title: "Item type")
+  var target: EncoreShortcutTarget
+
+  @Parameter(title: "Title")
+  var name: String
+
+  @MainActor
+  func perform() async throws -> some IntentResult {
+    var url = URLComponents()
+    url.scheme = "encoresheets"
+    url.host = target.rawValue
+    url.queryItems = [URLQueryItem(name: "name", value: name)]
+    if let link = url.string, link.count <= 2048 {
+      UserDefaults.standard.set(link, forKey: "pendingScoreShortcut")
+      (UIApplication.shared.delegate as? AppDelegate)?.notifyScoreShortcut()
+    }
+    return .result()
+  }
+}
+
+@available(iOS 16.0, *)
+struct EncoreAppShortcuts: AppShortcutsProvider {
+  static var appShortcuts: [AppShortcut] {
+    AppShortcut(
+      intent: OpenEncoreLibraryItem(),
+      phrases: ["Open a library item in \(.applicationName)"],
+      shortTitle: "Open Library Item",
+      systemImageName: "music.note.list"
+    )
+  }
+}
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
@@ -10,6 +59,8 @@ import MediaPlayer
   private var importChannel: FlutterMethodChannel?
   private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
+  private var pendingScoreLinks: [String] = []
+  private var linksChannel: FlutterMethodChannel?
   private var scanResult: FlutterResult?
   private var folderResult: FlutterResult?
   private var musicPickerResult: FlutterResult?
@@ -21,11 +72,32 @@ import MediaPlayer
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    if #available(iOS 16.0, *) {
+      EncoreAppShortcuts.updateAppShortcutParameters()
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let links = FlutterMethodChannel(
+      name: "encoresheets/links",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    linksChannel = links
+    links.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "take", let self else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      var links = self.pendingScoreLinks
+      self.pendingScoreLinks.removeAll()
+      if let shortcut = UserDefaults.standard.string(forKey: "pendingScoreShortcut") {
+        UserDefaults.standard.removeObject(forKey: "pendingScoreShortcut")
+        links.append(shortcut)
+      }
+      result(links)
+    }
     stylusChannel = FlutterMethodChannel(
       name: "encoresheets/stylus",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -126,12 +198,24 @@ import MediaPlayer
     }
   }
 
-  func application(
+  func receiveScoreLink(_ url: URL) {
+    guard url.scheme == "encoresheets", url.absoluteString.count <= 2048 else { return }
+    if pendingScoreLinks.count >= 8 { pendingScoreLinks.removeFirst() }
+    pendingScoreLinks.append(url.absoluteString)
+    linksChannel?.invokeMethod("available", arguments: nil)
+  }
+
+  func notifyScoreShortcut() {
+    linksChannel?.invokeMethod("available", arguments: nil)
+  }
+
+  @objc func application(
     _ application: UIApplication,
     configurationForConnecting connectingSceneSession: UISceneSession,
     options: UIScene.ConnectionOptions
   ) -> UISceneConfiguration {
-    if connectingSceneSession.role == .windowExternalDisplayNonInteractive {
+    if #available(iOS 16.0, *),
+       connectingSceneSession.role == .windowExternalDisplayNonInteractive {
       let configuration = UISceneConfiguration(name: "Score presentation", sessionRole: connectingSceneSession.role)
       configuration.delegateClass = ScorePresentationSceneDelegate.self
       return configuration

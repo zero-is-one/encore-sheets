@@ -42,7 +42,13 @@ class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate {
 
   private func receive(_ contexts: Set<UIOpenURLContext>) {
     guard let delegate = UIApplication.shared.delegate as? AppDelegate else { return }
-    for context in contexts { delegate.receivePDF(context.url) }
+    for context in contexts {
+      if context.url.scheme == "encoresheets" {
+        delegate.receiveScoreLink(context.url)
+      } else {
+        delegate.receivePDF(context.url)
+      }
+    }
   }
 }
 

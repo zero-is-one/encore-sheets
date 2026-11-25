@@ -17,6 +17,8 @@ class MainActivity : FlutterActivity() {
     private var pendingBackup: Pair<File, MethodChannel.Result>? = null
     private var pendingScan: MethodChannel.Result? = null
     private var importChannel: MethodChannel? = null
+    private var linksChannel: MethodChannel? = null
+    private val pendingLinks = mutableListOf<String>()
     private var scorePresentation: ScorePresentation? = null
     private val sharedPdfs = mutableListOf<Uri>()
 
@@ -40,6 +42,16 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         collectPdfs(intent)
+        collectScoreLink(intent)
+    }
+
+    private fun collectScoreLink(intent: Intent) {
+        if (intent.action != Intent.ACTION_VIEW || intent.data?.scheme != "encoresheets") return
+        val link = intent.dataString?.takeIf { it.length <= 2048 } ?: return
+        if (pendingLinks.size >= 8) pendingLinks.removeAt(0)
+        pendingLinks.add(link)
+        intent.action = null
+        linksChannel?.invokeMethod("available", null)
     }
 
     override fun onDestroy() {
@@ -110,6 +122,16 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        linksChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/links")
+        linksChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "take") {
+                result.success(pendingLinks.toList())
+                pendingLinks.clear()
+            } else {
+                result.notImplemented()
+            }
+        }
+        collectScoreLink(intent)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/presentation")
             .setMethodCallHandler { call, result ->
                 try {

@@ -57,6 +57,7 @@ import 'practice_dashboard.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
+import 'reader_deep_link.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -215,6 +216,8 @@ class _ReaderState extends State<Reader> {
   ReaderRestrictions? _restrictions;
   String? _language;
   late final Future<void> _startupPreferences;
+  static const _linksChannel = MethodChannel('encoresheets/links');
+  bool _linksWaiting = false;
   EnsembleSession? _ensemble;
   bool _leadingSpread = false;
   bool _followingSpread = false;
@@ -333,6 +336,7 @@ class _ReaderState extends State<Reader> {
     _lifecycle = AppLifecycleListener(
       onResume: () {
         _focusPractice();
+        if (_supportsSharedImport) _requestScoreLinks();
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
         if (_isAppleMobile) _syncIfReady();
       },
@@ -343,7 +347,13 @@ class _ReaderState extends State<Reader> {
         if (call.method == 'available') _requestSharedImport();
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _requestSharedImport();
+        if (mounted) {
+          _requestSharedImport();
+          _requestScoreLinks();
+        }
+      });
+      _linksChannel.setMethodCallHandler((call) async {
+        if (call.method == 'available') _requestScoreLinks();
       });
     }
   }
@@ -543,6 +553,7 @@ class _ReaderState extends State<Reader> {
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler(null);
+      _linksChannel.setMethodCallHandler(null);
     }
     _lifecycle.dispose();
     if (_performance || _preferences.keepAwake) _keepScreenAwake(false);
@@ -585,6 +596,105 @@ class _ReaderState extends State<Reader> {
     setState(() => _picking = false);
     _focus.requestFocus();
     if (_sharedWaiting) _drainSharedImports();
+    if (_linksWaiting) _drainScoreLinks();
+  }
+
+  void _requestScoreLinks() {
+    _linksWaiting = true;
+    unawaited(_drainScoreLinks());
+  }
+
+  Future<void> _drainScoreLinks() async {
+    if (!mounted || _picking || !_linksWaiting) return;
+    _linksWaiting = false;
+    setState(() => _picking = true);
+    var showLibrary = false;
+    try {
+      final received =
+          await _linksChannel.invokeListMethod<String>('take') ?? [];
+      if (received.isEmpty || !mounted) return;
+      await _startupPreferences;
+      if (!mounted || _restricted(RestrictedTool.connections)) return;
+      final link = received.reversed
+          .map(parseReaderLink)
+          .whereType<ReaderDeepLink>()
+          .firstOrNull;
+      if (link == null) return;
+      showLibrary = link.target == ReaderLinkTarget.library;
+      if (showLibrary) return;
+      await _libraryReady;
+      if (!mounted) return;
+      if (link.target == ReaderLinkTarget.cloud) {
+        if (_restricted(RestrictedTool.transfers)) return;
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => CloudFilesScreen(library: _library),
+        );
+        if (mounted && score != null) await _openLibraryScore(score);
+        return;
+      }
+      final name = link.name?.toLowerCase();
+      if (link.target == ReaderLinkTarget.setlist) {
+        final matches = _library.setlists
+            .where(
+              (list) => link.id == null
+                  ? list.name.toLowerCase() == name
+                  : list.id == link.id,
+            )
+            .take(2)
+            .toList();
+        if (matches.length != 1 || matches.single.scores.isEmpty) {
+          throw StateError('The linked setlist is unavailable or ambiguous.');
+        }
+        await _playScore(matches.single, 0);
+        return;
+      }
+      if (link.target == ReaderLinkTarget.score) {
+        final matches = _library.recent
+            .where(
+              (score) => link.id == null
+                  ? score.title.toLowerCase() == name
+                  : score.id == link.id,
+            )
+            .take(2)
+            .toList();
+        if (matches.length != 1) {
+          throw StateError('The linked score is unavailable or ambiguous.');
+        }
+        await _openLibraryScore(matches.single, startPage: link.page);
+        return;
+      }
+      final matches = [
+        for (final score in _library.recent)
+          for (final bookmark in score.bookmarks)
+            if (link.id == null
+                ? bookmark.title.toLowerCase() == name
+                : bookmark.selectionId(score.id) == link.id)
+              (score, bookmark),
+      ];
+      if (matches.length != 1) {
+        throw StateError('The linked bookmark is unavailable or ambiguous.');
+      }
+      final (score, bookmark) = matches.single;
+      await _openLibraryScore(
+        score,
+        startPage: bookmark.page,
+        item: bookmark.isItem ? bookmark : null,
+      );
+    } on MissingPluginException {
+      return;
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not find a unique library item for this link.',
+            ),
+          ),
+        );
+    } finally {
+      _finishPicking();
+      if (showLibrary && mounted) unawaited(_showLibrary());
+    }
   }
 
   Future<void> _open() async {

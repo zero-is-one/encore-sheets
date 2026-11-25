@@ -6,6 +6,15 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key><string>app.encoresheets.links</string>
+			<key>CFBundleURLSchemes</key><array><string>encoresheets</string></array>
+		</dict>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>EncoreSheets</string>
 	<key>CFBundleDocumentTypes</key>
@@ -84,8 +93,6 @@
 		</dict>
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
