@@ -156,5 +156,14 @@ class ScoreAudioSession {
     await player.stop();
   }
 
+  Future<void> playTake(String path) async {
+    await stop();
+    await player.setLoopMode(LoopMode.off);
+    await player.setSpeed(1);
+    if (supportsPitch) await player.setPitch(1);
+    await player.setFilePath(path);
+    unawaited(player.play().catchError((Object _) {}));
+  }
+
   Future<void> dispose() => player.dispose();
 }

@@ -135,7 +135,8 @@ class NativeLibraryStorage implements LibraryStorage {
     final root = (await _root).path;
     final preferences = (await readPreferences())
       ..remove('librarySyncState')
-      ..remove('localScoreAudio');
+      ..remove('localScoreAudio')
+      ..remove('practiceRecordings');
     await Isolate.run(
       () =>
           _exportBackup(root, path, scores, setlists, preferences: preferences),

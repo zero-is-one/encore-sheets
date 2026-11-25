@@ -34,6 +34,8 @@ import 'score_action.dart';
 import 'score_actions_screen.dart';
 import 'score_audio.dart';
 import 'score_audio_dialog.dart';
+import 'practice_recordings.dart';
+import 'practice_recordings_dialog.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
@@ -53,6 +55,7 @@ enum _ReaderDisplay {
   pageNote,
   pageActions,
   scoreAudio,
+  practiceRecordings,
   fit,
   zoomIn,
   zoomOut,
@@ -1062,6 +1065,26 @@ class _ReaderState extends State<Reader> {
         barrierDismissible: false,
         builder: (_) =>
             ScoreAudioDialog(audio: audio, selection: selection, title: _title),
+      );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showPracticeRecordings() async {
+    final score = _entry;
+    if (!_supportsSharedImport || _picking || score == null) return;
+    final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
+    final audio = _scoreAudio ??= ScoreAudioSession(_library);
+    setState(() => _picking = true);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PracticeRecordingsDialog(
+          takes: PracticeRecordings(_library, selection),
+          audio: audio,
+        ),
       );
     } finally {
       _finishPicking();
@@ -2572,6 +2595,8 @@ class _ReaderState extends State<Reader> {
                         _editScoreActions();
                       case _ReaderDisplay.scoreAudio:
                         _showScoreAudio();
+                      case _ReaderDisplay.practiceRecordings:
+                        _showPracticeRecordings();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2705,6 +2730,12 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.scoreAudio,
                         enabled: _entry != null,
                         child: const Text('Linked audio'),
+                      ),
+                    if (_supportsSharedImport)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.practiceRecordings,
+                        enabled: _entry != null,
+                        child: const Text('Practice recordings'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
