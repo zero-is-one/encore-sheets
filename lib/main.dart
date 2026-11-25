@@ -41,6 +41,7 @@ const _paper = Color(0xfff0eddf);
 const _brass = Color(0xffe9bd75);
 
 enum _ReaderDisplay {
+  nowPlaying,
   fit,
   zoomIn,
   zoomOut,
@@ -134,6 +135,7 @@ class _ReaderState extends State<Reader> {
   bool _dispatchingEdgeLink = false;
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
+  List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
   bool _halfPreview = false;
@@ -499,6 +501,7 @@ class _ReaderState extends State<Reader> {
       await _libraryReady;
       await _library.flush();
       if (!mounted) return;
+      var selectedQueue = const <String>[];
       final result = setlists
           ? 'setlists'
           : await _openReaderPanel<String>(
@@ -509,6 +512,7 @@ class _ReaderState extends State<Reader> {
                 persistent: _library.storage.persistent,
                 canScan: _supportsSharedImport,
                 canSync: _isAppleMobile,
+                onScoreQueue: (ids) => selectedQueue = ids,
               ),
             );
       if (!mounted) return;
@@ -686,9 +690,10 @@ class _ReaderState extends State<Reader> {
           entry,
           startPage: bookmark.page,
           item: bookmark.isItem ? bookmark : null,
+          queue: selectedQueue,
         );
       } else {
-        await _openLibraryScore(_library.lookup(result)!);
+        await _openLibraryScore(_library.lookup(result)!, queue: selectedQueue);
       }
     } catch (_) {
       if (mounted) {
@@ -705,6 +710,7 @@ class _ReaderState extends State<Reader> {
     ScoreEntry entry, {
     int? startPage,
     ScoreBookmark? item,
+    List<String> queue = const [],
   }) async {
     if (_entry?.id != entry.id || _itemBookmark?.id != item?.id) {
       final local = await _library.storage.openScore(entry.id);
@@ -722,7 +728,10 @@ class _ReaderState extends State<Reader> {
     } else if (startPage != null) {
       _jumpToPage(startPage);
     }
-    setState(() => _playing = null);
+    setState(() {
+      _playing = null;
+      _libraryQueue = queue;
+    });
     _remember(entry.id, _page, opened: true);
   }
 
@@ -998,6 +1007,73 @@ class _ReaderState extends State<Reader> {
           const SnackBar(content: Text('Could not open the next score.')),
         );
       }
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showNowPlaying() async {
+    final current = _entry;
+    if (_picking || current == null) return;
+    final setlist = _playing;
+    final active = _itemBookmark?.selectionId(current.id) ?? current.id;
+    final queue =
+        setlist?.scores ??
+        (_libraryQueue.contains(active) ? _libraryQueue : [active]);
+    final index = setlist == null ? queue.indexOf(active) : _setIndex;
+    setState(() => _picking = true);
+    try {
+      final destination = await _openReaderPanel<int>(
+        (context) => Scaffold(
+          appBar: AppBar(title: const Text('Now playing')),
+          body: SafeArea(
+            child: ListView(
+              children: [
+                if (setlist != null)
+                  ListTile(
+                    title: Text(setlist.name),
+                    subtitle: Text('${queue.length} scores'),
+                  ),
+                for (final (position, id) in queue.indexed)
+                  ListTile(
+                    leading: position == index
+                        ? const Icon(Icons.play_arrow)
+                        : Text('${position + 1}'),
+                    selected: position == index,
+                    title: Text(switch (_library.lookupSelection(id)) {
+                      (final score, final item) => item?.title ?? score.title,
+                      null => setlist?.placeholders[id] ?? 'Missing score',
+                    }),
+                    subtitle: position == index
+                        ? const Text('Current score')
+                        : null,
+                    enabled: _library.lookupSelection(id) != null,
+                    onTap: () => Navigator.pop(context, position),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (!mounted || destination == null || destination == index) return;
+      if (setlist != null) {
+        await _playScore(setlist, destination);
+      } else if (_library.lookupSelection(queue[destination]) case (
+        final score,
+        final item,
+      )) {
+        await _openLibraryScore(
+          score,
+          startPage: item?.page,
+          item: item,
+          queue: queue,
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the selected score.')),
+        );
     } finally {
       _finishPicking();
     }
@@ -2243,6 +2319,8 @@ class _ReaderState extends State<Reader> {
                   icon: const Icon(Icons.tune),
                   onSelected: (action) async {
                     switch (action) {
+                      case _ReaderDisplay.nowPlaying:
+                        _showNowPlaying();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2348,6 +2426,11 @@ class _ReaderState extends State<Reader> {
                     }
                   },
                   itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: _ReaderDisplay.nowPlaying,
+                      enabled: _entry != null,
+                      child: const Text('Now playing'),
+                    ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
@@ -2488,6 +2571,12 @@ class _ReaderState extends State<Reader> {
           ),
         ),
         Text(_pages == 0 ? '–' : '$_page / $_pages'),
+        if (_entry != null)
+          IconButton(
+            tooltip: 'Now playing',
+            onPressed: _picking ? null : _showNowPlaying,
+            icon: const Icon(Icons.queue_music),
+          ),
         IconButton(
           tooltip: 'Exit performance mode',
           onPressed: _togglePerformance,
@@ -2912,6 +3001,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.persistent,
     required this.canScan,
     required this.canSync,
+    required this.onScoreQueue,
   });
 
   final List<ScoreEntry> scores;
@@ -2920,6 +3010,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool persistent;
   final bool canScan;
   final bool canSync;
+  final ValueChanged<List<String>> onScoreQueue;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -3344,10 +3435,18 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                   subtitle: Text(
                                     '${score.title} · Page ${bookmark.page}',
                                   ),
-                                  onTap: () => Navigator.pop(
-                                    context,
-                                    'bookmark:${score.id}:${bookmark.id}',
-                                  ),
+                                  onTap: () {
+                                    widget.onScoreQueue([
+                                      for (final (parent, item)
+                                          in matchingBookmarks)
+                                        if (item.isItem)
+                                          item.selectionId(parent.id),
+                                    ]);
+                                    Navigator.pop(
+                                      context,
+                                      'bookmark:${score.id}:${bookmark.id}',
+                                    );
+                                  },
                                 );
                               }
                               if (index >= visible.length)
@@ -3430,7 +3529,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     ),
                                   ],
                                 ),
-                                onTap: () => Navigator.pop(context, score.id),
+                                onTap: () {
+                                  widget.onScoreQueue([
+                                    for (final item in visible) item.id,
+                                  ]);
+                                  Navigator.pop(context, score.id);
+                                },
                               );
                             },
                           ),
