@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/services.dart';
+import 'package:flutter_midi_command/flutter_midi_command.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
@@ -22,6 +23,7 @@ import 'pdf_export_screen.dart';
 import 'pdf_rearrange.dart';
 import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
+import 'reader_shortcuts_dialog.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'library_sync.dart';
@@ -62,6 +64,7 @@ enum _ReaderDisplay {
   practiceRecordings,
   metronome,
   tuner,
+  inputShortcuts,
   fit,
   zoomIn,
   zoomOut,
@@ -158,6 +161,9 @@ class _ReaderState extends State<Reader> {
   ScoreAudioSession? _scoreAudio;
   RehearsalMetronome? _metronome;
   ReferenceTone? _referenceTone;
+  Map<String, ReaderShortcut> _shortcuts = {};
+  final _midiShortcuts = StreamController<String>.broadcast();
+  StreamSubscription<MidiPacket>? _midiInput;
   List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
@@ -247,6 +253,17 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          if (data['readerShortcuts'] case final Map saved) {
+            _shortcuts = {
+              for (final entry in saved.entries)
+                if (entry.key is String)
+                  if (ReaderShortcut.values
+                          .where((item) => item.name == entry.value)
+                          .firstOrNull
+                      case final shortcut?)
+                    entry.key as String: shortcut,
+            };
+          }
           _drawing = DrawingSettings.fromJson(data['drawingSettings']);
           _scoreTabIds = ids
               .where((id) => _library.lookup(id) != null)
@@ -258,6 +275,8 @@ class _ReaderState extends State<Reader> {
                 .toList();
           }
         });
+        if (_shortcuts.keys.any((key) => key.startsWith('midi:')))
+          _listenToMidi();
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
@@ -385,6 +404,8 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    unawaited(_midiInput?.cancel());
+    unawaited(_midiShortcuts.close());
     unawaited(_referenceTone?.dispose());
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
@@ -1794,10 +1815,83 @@ class _ReaderState extends State<Reader> {
       if (event is KeyDownEvent) _togglePerformance();
       return KeyEventResult.handled;
     }
+    final binding = _shortcuts[shortcutKey(key)];
+    if (binding != null && !_picking && _pages > 0) {
+      if (event is KeyDownEvent) _runShortcut(binding);
+      return KeyEventResult.handled;
+    }
     final step = pageTurnForKey(key);
     if (step == 0 || _picking || _pages == 0) return KeyEventResult.ignored;
     if (event is KeyDownEvent) _turn(step);
     return KeyEventResult.handled;
+  }
+
+  void _listenToMidi() {
+    if (!ScoreAudioSession.supported || _midiInput != null) return;
+    final stream = MidiCommand().onMidiPacketReceived;
+    _midiInput = stream?.listen((packet) {
+      if (!mounted) return;
+      final key = shortcutMidi(packet.data);
+      if (key == null) return;
+      _midiShortcuts.add(key);
+      if (_shortcuts[key] case final action? when !_picking && _pages > 0) {
+        _runShortcut(action);
+      }
+    }, onError: (Object _) {});
+  }
+
+  void _runShortcut(ReaderShortcut shortcut) {
+    switch (shortcut) {
+      case ReaderShortcut.next:
+        _turn(1);
+      case ReaderShortcut.previous:
+        _turn(-1);
+      case ReaderShortcut.controls:
+        setState(() => _showControls = !_showControls);
+      case ReaderShortcut.markup:
+        if (!_performance) _toggleInk();
+      case ReaderShortcut.audio:
+        final score = _entry;
+        if (score != null && ScoreAudioSession.supported) {
+          final audio = _scoreAudio ??= ScoreAudioSession(_library);
+          final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
+          unawaited(
+            audio
+                .toggle(selection)
+                .then<void>((_) {})
+                .catchError((Object _) {}),
+          );
+        }
+    }
+  }
+
+  Future<void> _showInputShortcuts() async {
+    if (_picking) return;
+    _listenToMidi();
+    setState(() => _picking = true);
+    try {
+      final bindings = await showDialog<Map<String, ReaderShortcut>>(
+        context: context,
+        builder: (_) => ReaderShortcutsDialog(
+          initial: _shortcuts,
+          midi: _midiShortcuts.stream,
+        ),
+      );
+      if (!mounted || bindings == null) return;
+      await _library.updatePreferences({
+        'readerShortcuts': {
+          for (final entry in bindings.entries) entry.key: entry.value.name,
+        },
+      });
+      if (mounted) setState(() => _shortcuts = bindings);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save input shortcuts.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   Future<void> _editText(int page, Offset position, Size pageSize) async {
@@ -2688,6 +2782,8 @@ class _ReaderState extends State<Reader> {
                         _showMetronome();
                       case _ReaderDisplay.tuner:
                         _showTuner();
+                      case _ReaderDisplay.inputShortcuts:
+                        _showInputShortcuts();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2838,6 +2934,10 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.tuner,
                         child: Text('Pitch pipe & tuner'),
                       ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.inputShortcuts,
+                      child: Text('Input shortcuts'),
+                    ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
