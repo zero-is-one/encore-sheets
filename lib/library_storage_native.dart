@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
+import 'package:archive/archive_io.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'score_library.dart';
+
+part 'library_backup_native.dart';
 
 LibraryStorage createStorage() => NativeLibraryStorage();
 
@@ -26,21 +30,31 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<List<ScoreEntry>> readIndex() async {
+    final catalog = await _readCatalog();
     final file = await _file('library.json');
-    if (!await file.exists()) return [];
-    final rows = jsonDecode(await file.readAsString()) as List<dynamic>;
+    final rows =
+        catalog?['scores'] as List<dynamic>? ??
+        (await file.exists()
+            ? jsonDecode(await file.readAsString()) as List<dynamic>
+            : []);
     return [
       for (final row in rows) ScoreEntry.fromJson(row as Map<String, dynamic>),
     ];
   }
 
   @override
-  Future<void> writeIndex(List<ScoreEntry> entries) async {
-    await _writeJson(
-      'library.json',
-      entries.map((entry) => entry.toJson()).toList(),
-    );
+  Future<void> writeIndex(List<ScoreEntry> entries) async =>
+      _writeCatalog(entries, await readSetlists());
+
+  Future<Map<String, dynamic>?> _readCatalog() async {
+    final file = await _file('catalog.json');
+    return await file.exists()
+        ? jsonDecode(await file.readAsString()) as Map<String, dynamic>
+        : null;
   }
+
+  Future<void> _writeCatalog(List<ScoreEntry> scores, List<Setlist> setlists) =>
+      _writeJson('catalog.json', _catalog(scores, setlists));
 
   Future<void> _writeJson(String name, Object value) async {
     final file = await _file(name);
@@ -62,19 +76,46 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<List<Setlist>> readSetlists() async {
+    final catalog = await _readCatalog();
     final file = await _file('setlists.json');
-    if (!await file.exists()) return [];
-    final rows = jsonDecode(await file.readAsString()) as List<dynamic>;
+    final rows =
+        catalog?['setlists'] as List<dynamic>? ??
+        (await file.exists()
+            ? jsonDecode(await file.readAsString()) as List<dynamic>
+            : []);
     return [
       for (final row in rows) Setlist.fromJson(row as Map<String, dynamic>),
     ];
   }
 
   @override
-  Future<void> writeSetlists(List<Setlist> setlists) => _writeJson(
-    'setlists.json',
-    setlists.map((setlist) => setlist.toJson()).toList(),
-  );
+  Future<void> writeSetlists(List<Setlist> setlists) async =>
+      _writeCatalog(await readIndex(), setlists);
+
+  @override
+  Future<XFile> createBackup(
+    List<ScoreEntry> scores,
+    List<Setlist> setlists,
+  ) async {
+    final temp = _override ?? await getTemporaryDirectory();
+    final folder = await temp.createTemp('encoresheets-backup-');
+    final path =
+        '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
+    final root = (await _root).path;
+    await Isolate.run(() => _exportBackup(root, path, scores, setlists));
+    return XFile(path, mimeType: 'application/zip');
+  }
+
+  @override
+  Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
+    XFile source,
+    List<ScoreEntry> scores,
+    List<Setlist> setlists,
+  ) async {
+    final root = (await _root).path;
+    final path = source.path;
+    return Isolate.run(() => _restoreBackup(root, path, scores, setlists));
+  }
 
   @override
   Future<XFile> copyScore(String id, XFile source) async {

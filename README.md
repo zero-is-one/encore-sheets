@@ -12,9 +12,9 @@ Run `flutter devices` to find a connected Android tablet or iPad. Local iPad
 builds require macOS and Xcode. Use `flutter run -d edge` for a browser preview
 on Windows.
 
-The app opens with a bundled three-page demonstration score. Use the folder icon
-to import a PDF into the offline library. Use the library icon to search by
-title or reopen a score at its last page. The list is ordered by most recently
+The app opens with a bundled three-page demonstration score. Open the score
+library from the top bar to import a PDF, search by title, or reopen a score at
+its last page. The library opens beside the score on a wide screen. The list is ordered by most recently
 opened. Imported PDFs on Android and iPad are copied into app storage so moving
 the original does not affect the library. The browser preview keeps its library
 for the current session.
@@ -41,8 +41,14 @@ reappears on the correct pages after restarting offline.
 Open **Score library → Setlists** to name a setlist, add scores, and drag them
 into performance order. Tap a setlist to start at page one of its first score.
 At the end of a score, turn forward again to start the next score at page one.
-Use the play icon in the reader to enter performance mode. It keeps the screen
+Choose **Display options → Performance mode** in the reader. It keeps the screen
 awake and leaves page turning available with the editing controls hidden.
+
+In the installed app, choose **Score library → Backup & restore** to save a ZIP
+with your imported PDFs, annotations, setlists, and last pages. On Android,
+choose a location in the system file picker, such as Downloads. Restore adds
+copies alongside existing scores and setlists. On a fresh install, restore the
+ZIP, turn on airplane mode, and reopen a setlist to check the scores and ink.
 
 On both tablets, try a large scanned PDF in airplane mode, repeat page turns
 with a pedal, and draw while resting your palm on the screen. Verify that ink

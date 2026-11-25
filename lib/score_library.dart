@@ -62,6 +62,12 @@ abstract class LibraryStorage {
   Future<void> writeInk(String id, Map<String, dynamic> pages);
   Future<List<Setlist>> readSetlists();
   Future<void> writeSetlists(List<Setlist> setlists);
+  Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists);
+  Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
+    XFile source,
+    List<ScoreEntry> scores,
+    List<Setlist> setlists,
+  );
 }
 
 class ScoreLibrary {
@@ -84,6 +90,28 @@ class ScoreLibrary {
     _setlists[setlist.id] = setlist;
   });
   Future<void> flush() => _pending;
+
+  Future<XFile> createBackup() =>
+      _serialize(() => storage.createBackup(_scores.values.toList(), setlists));
+
+  Future<({int scores, int setlists})> restoreBackup(XFile source) =>
+      _serialize(() async {
+        final restored = await storage.restoreBackup(
+          source,
+          _scores.values.toList(),
+          setlists,
+        );
+        for (final score in restored.scores) {
+          _scores[score.id] = score;
+        }
+        for (final setlist in restored.setlists) {
+          _setlists[setlist.id] = setlist;
+        }
+        return (
+          scores: restored.scores.length,
+          setlists: restored.setlists.length,
+        );
+      });
 
   Future<Map<String, dynamic>> readInk(String id) =>
       _serialize(() => storage.readInk(id));

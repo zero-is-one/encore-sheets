@@ -6,6 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'library_backup_screen.dart';
 import 'score_library.dart';
 import 'setlists_screen.dart';
 
@@ -13,6 +14,8 @@ const _stand = Color(0xff202a28);
 const _rail = Color(0xff2e3a36);
 const _paper = Color(0xfff0eddf);
 const _brass = Color(0xffe9bd75);
+
+enum _ReaderDisplay { fit, performance, hideControls }
 
 void main() => runApp(const EncoreSheets());
 
@@ -133,21 +136,51 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _showLibrary() async {
+  Future<T?> _openReaderPanel<T>(WidgetBuilder builder) {
+    if (MediaQuery.sizeOf(context).width < 720) {
+      return Navigator.of(context).push<T>(MaterialPageRoute(builder: builder));
+    }
+    return showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black38,
+      pageBuilder: (context, _, _) => SafeArea(
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: SizedBox(
+            width: 368,
+            height: double.infinity,
+            child: Material(
+              elevation: 12,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: const BorderRadiusDirectional.only(
+                topEnd: Radius.circular(16),
+                bottomEnd: Radius.circular(16),
+              ),
+              child: Builder(builder: builder),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showLibrary({bool setlists = false}) async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
       await _libraryReady;
       await _library.flush();
       if (!mounted) return;
-      final result = await Navigator.of(context).push<String>(
-        MaterialPageRoute(
-          builder: (_) => _LibraryScreen(
-            scores: _library.recent,
-            persistent: _library.storage.persistent,
-          ),
-        ),
-      );
+      final result = setlists
+          ? 'setlists'
+          : await _openReaderPanel<String>(
+              (_) => _LibraryScreen(
+                scores: _library.recent,
+                persistent: _library.storage.persistent,
+              ),
+            );
       if (result == null || !mounted) return;
       if (result == 'import') {
         setState(() => _picking = false);
@@ -160,10 +193,16 @@ class _ReaderState extends State<Reader> {
         return;
       }
       if (result == 'setlists') {
-        final setlist = await Navigator.of(context).push<Setlist>(
-          MaterialPageRoute(builder: (_) => SetlistsScreen(library: _library)),
+        final setlist = await _openReaderPanel<Setlist>(
+          (_) => SetlistsScreen(library: _library),
         );
         if (setlist != null && mounted) await _playScore(setlist, 0);
+        return;
+      }
+      if (result == 'backup') {
+        await _openReaderPanel<void>(
+          (_) => LibraryBackupScreen(library: _library),
+        );
         return;
       }
       final entry = _library.lookup(result)!;
@@ -590,67 +629,95 @@ class _ReaderState extends State<Reader> {
     ),
   );
 
-  Widget _header() => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 8, 12, 4),
-    child: Row(
-      children: [
-        if (MediaQuery.sizeOf(context).width >= 620) ...[
-          const Icon(Icons.library_music_outlined, size: 21, color: _brass),
-          const SizedBox(width: 8),
-          const Text(
-            'EncoreSheets',
-            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: .5),
-          ),
-          const SizedBox(width: 18),
-          const SizedBox(
-            height: 22,
-            child: VerticalDivider(color: Color(0xff63706a)),
-          ),
-          const SizedBox(width: 10),
-        ],
-        Expanded(
-          child: Text(
-            _title,
-            style: const TextStyle(
-              fontSize: 23,
-              fontFamily: 'serif',
-              color: _paper,
+  Widget _header() => Material(
+    color: _rail,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 96,
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Score library',
+                  onPressed: _picking ? null : _showLibrary,
+                  icon: const Icon(Icons.library_music_outlined),
+                ),
+                IconButton(
+                  tooltip: 'Setlists',
+                  onPressed: _picking
+                      ? null
+                      : () => _showLibrary(setlists: true),
+                  icon: const Icon(Icons.queue_music),
+                ),
+              ],
             ),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
           ),
-        ),
-        IconButton(
-          tooltip: 'Score library',
-          onPressed: _picking ? null : _showLibrary,
-          icon: const Icon(Icons.library_music_outlined),
-        ),
-        IconButton(
-          tooltip: 'Open PDF',
-          onPressed: _picking ? null : _open,
-          icon: const Icon(Icons.folder_open_outlined),
-        ),
-        IconButton(
-          tooltip: 'Fit page',
-          onPressed: _pages == 0 ? null : _fit,
-          icon: const Icon(Icons.fit_screen_outlined),
-        ),
-        IconButton(
-          tooltip: 'Performance mode',
-          onPressed: _pages == 0 || _picking ? null : _togglePerformance,
-          icon: const Icon(Icons.play_arrow_outlined),
-        ),
-        IconButton(
-          tooltip: 'Hide controls',
-          onPressed: _pages == 0 || _inking
-              ? null
-              : () => setState(() => _showControls = false),
-          icon: const Icon(Icons.fullscreen),
-        ),
-      ],
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(
+                _title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontFamily: 'serif',
+                  color: _paper,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 96,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                IconButton(
+                  tooltip: _inking ? 'Done marking up' : 'Mark up score',
+                  onPressed: _pages == 0 ? null : _toggleInk,
+                  color: _inking ? _brass : null,
+                  icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
+                ),
+                PopupMenuButton<_ReaderDisplay>(
+                  tooltip: 'Display options',
+                  enabled: _pages > 0 && !_picking,
+                  icon: const Icon(Icons.tune),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _ReaderDisplay.fit:
+                        _fit();
+                      case _ReaderDisplay.performance:
+                        _togglePerformance();
+                      case _ReaderDisplay.hideControls:
+                        setState(() => _showControls = false);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.fit,
+                      child: Text('Fit page'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.performance,
+                      child: Text('Performance mode'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.hideControls,
+                      enabled: !_inking,
+                      child: const Text('Hide controls'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     ),
   );
-
   Widget _performanceBar() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 12),
     child: Row(
@@ -752,12 +819,6 @@ class _ReaderState extends State<Reader> {
                     ? null
                     : () => _go(_page + 1),
                 icon: const Icon(Icons.chevron_right),
-              ),
-              IconButton(
-                tooltip: _inking ? 'Done marking up' : 'Mark up score',
-                onPressed: _pages == 0 ? null : _toggleInk,
-                color: _inking ? _brass : null,
-                icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
               ),
             ],
           ),
@@ -875,18 +936,26 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: FilledButton.icon(
-                      onPressed: () => Navigator.pop(context, 'import'),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Import PDF'),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () => Navigator.pop(context, 'setlists'),
-                    icon: const Icon(Icons.queue_music),
-                    label: const Text('Setlists'),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () => Navigator.pop(context, 'import'),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Import PDF'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => Navigator.pop(context, 'setlists'),
+                        icon: const Icon(Icons.queue_music),
+                        label: const Text('Setlists'),
+                      ),
+                      if (widget.persistent)
+                        TextButton.icon(
+                          onPressed: () => Navigator.pop(context, 'backup'),
+                          icon: const Icon(Icons.settings_backup_restore),
+                          label: const Text('Backup & restore'),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   if (!widget.persistent)
