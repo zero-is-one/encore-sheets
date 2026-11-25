@@ -182,6 +182,8 @@ class _ReaderState extends State<Reader> {
   AudioPageCue? _lastAudioCue;
   Future<void> _audioCueWrite = Future.value();
   RehearsalMetronome? _metronome;
+  int _meterPageStart = 0;
+  int? _meterPage;
   ReferenceTone? _referenceTone;
   Map<String, ReaderShortcut> _shortcuts = {};
   final _midiShortcuts = StreamController<String>.broadcast();
@@ -1129,8 +1131,7 @@ class _ReaderState extends State<Reader> {
       switch (action.kind) {
         case ScoreActionKind.tempo:
           final tempo = int.parse(action.parameter!);
-          final meter = _metronome ??= RehearsalMetronome()
-            ..soft = _preferences.softMetronome;
+          final meter = _rehearsalMeter;
           final wasRunning = meter.running;
           if (wasRunning) await meter.stop();
           meter.bpm = tempo;
@@ -1327,11 +1328,45 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  RehearsalMetronome get _rehearsalMeter => _metronome ??= RehearsalMetronome()
+    ..soft = _preferences.softMetronome
+    ..addListener(_onMetronomeBeat);
+
+  void _onMetronomeBeat() {
+    final meter = _metronome;
+    if (!mounted || meter == null) return;
+    final elapsed = meter.elapsedBeats;
+    if (_meterPage != _page ||
+        _picking ||
+        _inking ||
+        _pages == 0 ||
+        !meter.running ||
+        meter.countingIn ||
+        elapsed < _meterPageStart) {
+      _meterPage = _page;
+      _meterPageStart = elapsed;
+      return;
+    }
+    final count = int.tryParse(
+      _entry?.metadata['metronomePageBeats.$_page'] ?? '',
+    );
+    if (count == null || count <= 0 || elapsed - _meterPageStart < count) {
+      return;
+    }
+    _meterPageStart = elapsed;
+    if (_page < _lastPage && _audioCueMode != AudioPageCueMode.replay) {
+      _jumpToPage(_page + math.max(1, _spreadStep));
+      _meterPage = _page;
+    }
+  }
+
   Future<void> _showMetronome() async {
     if (_picking || !ScoreAudioSession.supported) return;
     final score = _entry;
-    final meter = _metronome ??= RehearsalMetronome()
-      ..soft = _preferences.softMetronome;
+    final meter = _rehearsalMeter;
+    final page = _page;
+    final key = 'metronomePageBeats.$page';
+    var pageBeats = int.tryParse(score?.metadata[key] ?? '') ?? 0;
     if (!meter.running && score != null) {
       final tempo = int.tryParse(score.metadata['tempo'] ?? '');
       if (tempo != null) meter.bpm = tempo.clamp(25, 280);
@@ -1348,16 +1383,22 @@ class _ReaderState extends State<Reader> {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => MetronomeDialog(metronome: meter),
+        builder: (_) => MetronomeDialog(
+          metronome: meter,
+          page: score == null ? null : page,
+          initialPageBeats: pageBeats,
+          onPageBeatsChanged: (count) => pageBeats = count,
+        ),
       );
       if (!mounted || score == null || _entry?.id != score.id) return;
       await _library.updateScore(
         score.id,
         (old) => old.copyWith(
           metadata: {
-            ...old.metadata,
+            ...Map.of(old.metadata)..remove(key),
             'tempo': '${meter.bpm}',
             'time': '${meter.beats}/${meter.unit}',
+            if (pageBeats > 0) key: '$pageBeats',
           },
         ),
       );
@@ -1372,6 +1413,8 @@ class _ReaderState extends State<Reader> {
         );
     } finally {
       _finishPicking();
+      _meterPageStart = meter.elapsedBeats;
+      _meterPage = _page;
     }
   }
 
@@ -1749,6 +1792,7 @@ class _ReaderState extends State<Reader> {
   }) {
     final audio = _scoreAudio;
     _stopAudioCues();
+    _meterPage = null;
     if (audio != null && audio.pinnedSelection == null) {
       unawaited(audio.stop().catchError((Object _) {}));
     }

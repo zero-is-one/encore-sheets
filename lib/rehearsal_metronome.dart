@@ -12,6 +12,7 @@ class RehearsalMetronome extends ChangeNotifier {
   Timer? _timer;
   File? _wave;
   int bpm = 96, beats = 4, unit = 4, beat = 0;
+  int elapsedBeats = 0;
   bool audible = true, visual = true, countIn = false, countingIn = false;
   bool running = false;
   bool soft = false;
@@ -30,6 +31,7 @@ class RehearsalMetronome extends ChangeNotifier {
       await _player.setLoopMode(LoopMode.one);
       await _player.setVolume(audible ? 1 : 0);
       beat = 0;
+      elapsedBeats = 0;
       countingIn = countIn;
       running = true;
       var lastPosition = Duration.zero;
@@ -41,7 +43,12 @@ class RehearsalMetronome extends ChangeNotifier {
         );
         final wrapped = position < lastPosition;
         lastPosition = position;
-        if (current == beat && !(wrapped && countingIn)) return;
+        if (current == beat && !wrapped) return;
+        if (!countingIn) {
+          elapsedBeats += wrapped ? beats - beat + current : current - beat;
+        } else if (wrapped) {
+          elapsedBeats = current;
+        }
         if (wrapped) countingIn = false;
         beat = current;
         notifyListeners();

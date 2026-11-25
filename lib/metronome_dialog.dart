@@ -4,8 +4,17 @@ import 'rehearsal_metronome.dart';
 import 'rehearsal_wave.dart';
 
 class MetronomeDialog extends StatefulWidget {
-  const MetronomeDialog({super.key, required this.metronome});
+  const MetronomeDialog({
+    super.key,
+    required this.metronome,
+    this.page,
+    this.initialPageBeats = 0,
+    this.onPageBeatsChanged,
+  });
   final RehearsalMetronome metronome;
+  final int? page;
+  final int initialPageBeats;
+  final ValueChanged<int>? onPageBeatsChanged;
 
   @override
   State<MetronomeDialog> createState() => _MetronomeDialogState();
@@ -14,8 +23,31 @@ class MetronomeDialog extends StatefulWidget {
 class _MetronomeDialogState extends State<MetronomeDialog> {
   final _clock = Stopwatch()..start();
   final _taps = <int>[];
+  late final _pageBeats = TextEditingController(
+    text: widget.initialPageBeats == 0 ? '' : '${widget.initialPageBeats}',
+  );
   bool _busy = false;
+  bool _measures = false;
   String? _error;
+
+  @override
+  void dispose() {
+    _pageBeats.dispose();
+    super.dispose();
+  }
+
+  void _savePageBeats(String value) {
+    final count = int.tryParse(value.trim());
+    if (value.trim().isEmpty) {
+      widget.onPageBeatsChanged?.call(0);
+    } else if (count != null && count >= 0 && count <= _maximumCount) {
+      widget.onPageBeatsChanged?.call(
+        _measures ? count * widget.metronome.beats : count,
+      );
+    }
+  }
+
+  int get _maximumCount => _measures ? 4096 ~/ widget.metronome.beats : 4096;
 
   void _tap() => setState(() {
     final now = _clock.elapsedMilliseconds;
@@ -53,6 +85,10 @@ class _MetronomeDialogState extends State<MetronomeDialog> {
   Widget build(BuildContext context) {
     final meter = widget.metronome;
     final editable = !_busy && !meter.running;
+    final count = int.tryParse(_pageBeats.text.trim());
+    final invalidCount =
+        _pageBeats.text.trim().isNotEmpty &&
+        (count == null || count < 0 || count > _maximumCount);
     return AlertDialog(
       title: const Text('Metronome'),
       scrollable: true,
@@ -86,7 +122,10 @@ class _MetronomeDialogState extends State<MetronomeDialog> {
                       DropdownMenuItem(value: i, child: Text('$i')),
                   ],
                   onChanged: editable
-                      ? (value) => setState(() => meter.beats = value!)
+                      ? (value) => setState(() {
+                          meter.beats = value!;
+                          _savePageBeats(_pageBeats.text);
+                        })
                       : null,
                 ),
                 const Text(' / '),
@@ -141,6 +180,40 @@ class _MetronomeDialogState extends State<MetronomeDialog> {
                   : null,
             ),
             MetronomeBeat(metronome: meter),
+            if (widget.page case final page?) ...[
+              const Divider(),
+              TextField(
+                controller: _pageBeats,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText:
+                      '${_measures ? 'Measures' : 'Beats'} before turning page $page',
+                  helperText: 'Leave blank for manual turns',
+                  errorText: invalidCount
+                      ? 'Enter a whole number from 0 to $_maximumCount'
+                      : null,
+                ),
+                onChanged: (value) => setState(() => _savePageBeats(value)),
+              ),
+              DropdownButton<bool>(
+                value: _measures,
+                items: const [
+                  DropdownMenuItem(value: false, child: Text('Beats')),
+                  DropdownMenuItem(value: true, child: Text('Measures')),
+                ],
+                onChanged: (value) => setState(() {
+                  final count = int.tryParse(_pageBeats.text.trim());
+                  _measures = value!;
+                  if (count != null && count >= 0) {
+                    final converted = _measures
+                        ? (count / meter.beats).ceil()
+                        : count * meter.beats;
+                    _pageBeats.text = '${converted.clamp(0, _maximumCount)}';
+                    _savePageBeats(_pageBeats.text);
+                  }
+                }),
+              ),
+            ],
           ],
         ),
       ),
