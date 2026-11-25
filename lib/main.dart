@@ -371,10 +371,18 @@ class _ReaderState extends State<Reader> {
           : await _openReaderPanel<String>(
               (_) => _LibraryScreen(
                 scores: _library.recent,
+                setlists: _library.setlists,
                 persistent: _library.storage.persistent,
               ),
             );
       if (result == null || !mounted) return;
+      if (result.startsWith('set:')) {
+        final match = _library.setlists.firstWhere(
+          (list) => list.id == result.substring(4),
+        );
+        if (match.scores.isNotEmpty) await _playScore(match, 0);
+        return;
+      }
       if (result == 'import') {
         setState(() => _picking = false);
         await _open();
@@ -1110,9 +1118,14 @@ class _EdgeTapTracker {
 }
 
 class _LibraryScreen extends StatefulWidget {
-  const _LibraryScreen({required this.scores, required this.persistent});
+  const _LibraryScreen({
+    required this.scores,
+    required this.setlists,
+    required this.persistent,
+  });
 
   final List<ScoreEntry> scores;
+  final List<Setlist> setlists;
   final bool persistent;
 
   @override
@@ -1140,7 +1153,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = widget.scores
-        .where((score) => score.title.toLowerCase().contains(_query))
+        .where(
+          (score) => [
+            score.title,
+            ...score.metadata.values,
+          ].any((value) => value.toLowerCase().contains(_query)),
+        )
         .where(
           (score) =>
               _category == null || _categories(score).contains(_category),
@@ -1153,6 +1171,28 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
       );
     }
+    final matchingSets = _query.isEmpty
+        ? <Setlist>[]
+        : widget.setlists
+              .where(
+                (setlist) =>
+                    setlist.scores.isNotEmpty &&
+                    setlist.name.toLowerCase().contains(_query),
+              )
+              .toList();
+    final actions =
+        {
+              'import': 'Import PDF',
+              'setlists': 'Setlists',
+              if (widget.persistent) 'backup': 'Backup & restore',
+              'sample': 'Open sample score',
+            }.entries
+            .where(
+              (entry) =>
+                  _query.isNotEmpty &&
+                  entry.value.toLowerCase().contains(_query),
+            )
+            .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Score library')),
       body: SafeArea(
@@ -1167,7 +1207,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   TextField(
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
-                      labelText: 'Search scores',
+                      labelText: 'Search library',
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (value) =>
@@ -1233,7 +1273,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       'Browser preview keeps scores for this session.',
                     ),
                   Expanded(
-                    child: visible.isEmpty
+                    child:
+                        visible.isEmpty &&
+                            matchingSets.isEmpty &&
+                            actions.isEmpty
                         ? Center(
                             child: Text(
                               _query.isEmpty
@@ -1242,8 +1285,37 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             ),
                           )
                         : ListView.builder(
-                            itemCount: visible.length,
+                            itemCount:
+                                visible.length +
+                                matchingSets.length +
+                                actions.length,
                             itemBuilder: (context, index) {
+                              if (index >=
+                                  visible.length + matchingSets.length) {
+                                final action =
+                                    actions[index -
+                                        visible.length -
+                                        matchingSets.length];
+                                return ListTile(
+                                  leading: const Icon(Icons.arrow_outward),
+                                  title: Text(action.value),
+                                  onTap: () =>
+                                      Navigator.pop(context, action.key),
+                                );
+                              }
+                              if (index >= visible.length) {
+                                final setlist =
+                                    matchingSets[index - visible.length];
+                                return ListTile(
+                                  leading: const Icon(Icons.queue_music),
+                                  title: Text(setlist.name),
+                                  subtitle: const Text('Setlist'),
+                                  onTap: () => Navigator.pop(
+                                    context,
+                                    'set:${setlist.id}',
+                                  ),
+                                );
+                              }
                               final score = visible[index];
                               return ListTile(
                                 leading: const Icon(Icons.description_outlined),
