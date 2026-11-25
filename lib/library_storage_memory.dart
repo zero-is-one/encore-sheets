@@ -8,6 +8,7 @@ class _MemoryLibraryStorage implements LibraryStorage {
   final _files = <String, XFile>{};
   final _ink = <String, Map<String, dynamic>>{};
   List<Setlist> _setlists = [];
+  List<ScoreEntry> _index = [];
   Map<String, dynamic> _preferences = {};
 
   @override
@@ -74,14 +75,21 @@ class _MemoryLibraryStorage implements LibraryStorage {
   Future<XFile?> latestBackup() async => null;
 
   @override
-  Future<List<ScoreEntry>> readIndex() async => [];
+  Future<List<ScoreEntry>> readIndex() async => _index;
 
   @override
-  Future<void> writeIndex(List<ScoreEntry> entries) async {}
+  Future<void> writeIndex(List<ScoreEntry> entries) async {
+    _index = List.unmodifiable(entries);
+  }
 
   @override
-  Future<void> writeCatalog(List<ScoreEntry> entries, List<Setlist> setlists) =>
-      writeSetlists(setlists);
+  Future<void> writeCatalog(
+    List<ScoreEntry> entries,
+    List<Setlist> setlists,
+  ) async {
+    await writeIndex(entries);
+    await writeSetlists(setlists);
+  }
 
   @override
   Future<XFile> copyScore(String id, XFile source) async {
@@ -91,7 +99,11 @@ class _MemoryLibraryStorage implements LibraryStorage {
   }
 
   @override
-  Future<XFile> openScore(String id) async => _files[id]!;
+  Future<XFile> openScore(String id) async {
+    final source =
+        _index.where((score) => score.id == id).firstOrNull?.storedPdfId ?? id;
+    return _files[source]!;
+  }
 
   @override
   Future<void> removeScore(String id) async {

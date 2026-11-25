@@ -80,6 +80,7 @@ class ScoreEntry {
     this.halfSplits = const {},
     this.crops = const {},
     this.pageNotes = const {},
+    this.pdfSourceId,
     this.deletedAt,
   });
 
@@ -88,6 +89,10 @@ class ScoreEntry {
     title: json['title'] as String,
     page: json['page'] as int,
     openedAt: DateTime.parse(json['openedAt'] as String),
+    pdfSourceId: switch (json['pdfSourceId']) {
+      final String id when RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(id) => id,
+      _ => null,
+    },
     deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
     metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
     collections: (json['collections'] as List?)?.cast<String>() ?? const [],
@@ -134,6 +139,8 @@ class ScoreEntry {
   final Map<int, double> halfSplits;
   final Map<int, PageCrop> crops;
   final Map<int, String> pageNotes;
+  final String? pdfSourceId;
+  String get storedPdfId => pdfSourceId ?? id;
 
   ScoreEntry copyWith({
     String? id,
@@ -148,6 +155,8 @@ class ScoreEntry {
     Map<int, double>? halfSplits,
     Map<int, PageCrop>? crops,
     Map<int, String>? pageNotes,
+    String? pdfSourceId,
+    bool detachPdf = false,
     DateTime? deletedAt,
     bool recover = false,
   }) => ScoreEntry(
@@ -163,6 +172,7 @@ class ScoreEntry {
     halfSplits: halfSplits ?? this.halfSplits,
     crops: crops ?? this.crops,
     pageNotes: pageNotes ?? this.pageNotes,
+    pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
 
@@ -171,6 +181,7 @@ class ScoreEntry {
     'title': title,
     'page': page,
     'openedAt': openedAt.toIso8601String(),
+    if (pdfSourceId != null) 'pdfSourceId': pdfSourceId,
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (collections.isNotEmpty) 'collections': collections,
@@ -515,6 +526,40 @@ class ScoreLibrary {
   });
   Future<void> flush() => _pending;
 
+  Future<ScoreEntry> duplicateScore(String id) => _serialize(() async {
+    final original = lookup(id);
+    if (original == null) throw StateError('The source score is missing.');
+    final now = DateTime.now().toUtc();
+    var next = now.microsecondsSinceEpoch;
+    while (_scores.containsKey('$next')) {
+      next++;
+    }
+    final titles = _scores.values
+        .map((score) => score.title.toLowerCase())
+        .toSet();
+    var name = '${original.title} copy';
+    var suffix = 2;
+    while (titles.contains(name.toLowerCase())) {
+      name = '${original.title} copy ${suffix++}';
+    }
+    final copy = original.copyWith(
+      id: '$next',
+      title: name,
+      openedAt: now,
+      pdfSourceId: original.storedPdfId,
+    );
+    final annotations = await storage.readInk(original.id);
+    try {
+      if (annotations.isNotEmpty) await storage.writeInk(copy.id, annotations);
+      await storage.writeIndex([..._scores.values, copy]);
+    } catch (_) {
+      await storage.removeScore(copy.id);
+      rethrow;
+    }
+    _scores[copy.id] = copy;
+    return copy;
+  });
+
   Future<void> resetSyncState() =>
       updatePreferences({'librarySyncState': null});
 
@@ -560,6 +605,7 @@ class ScoreLibrary {
     final local = <String, Map<String, dynamic>>{};
     for (final score in _scores.values) {
       final data = score.toJson()
+        ..remove('pdfSourceId')
         ..remove('openedAt')
         ..remove('page');
       local['s:${score.id}'] = {
@@ -618,6 +664,7 @@ class ScoreLibrary {
         final existing = _scores[id];
         final score = ScoreEntry.fromJson({
           ...incoming['score'] as Map<String, dynamic>,
+          'pdfSourceId': existing?.pdfSourceId,
           'page': existing?.page ?? 1,
           'openedAt': (existing?.openedAt ?? DateTime.now()).toIso8601String(),
         });
@@ -818,6 +865,7 @@ class ScoreLibrary {
         title: previous?.title ?? score.title,
         openedAt: now,
         recover: true,
+        detachPdf: true,
       );
     }
     final entries = Map.of(_scores);

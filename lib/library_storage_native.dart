@@ -178,9 +178,17 @@ class NativeLibraryStorage implements LibraryStorage {
           await ink.writeAsString(jsonEncode(extractedInk), flush: true);
         }
       }
+      final packaged = extractedPdf == null
+          ? score
+          : score.copyWith(detachPdf: true);
       await Isolate.run(
-        () =>
-            _exportBackup(root, path, [score], [], kind: LibraryArchive.score),
+        () => _exportBackup(
+          root,
+          path,
+          [packaged],
+          [],
+          kind: LibraryArchive.score,
+        ),
       );
       return XFile(path, mimeType: 'application/zip');
     } finally {
@@ -251,7 +259,10 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<XFile> openScore(String id) async {
-    final file = await _file('$id.pdf');
+    final scores = await readIndex();
+    final source =
+        scores.where((score) => score.id == id).firstOrNull?.storedPdfId ?? id;
+    final file = await _file('$source.pdf');
     if (!await file.exists())
       throw FileSystemException('Score is missing', file.path);
     return XFile(file.path);

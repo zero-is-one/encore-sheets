@@ -41,7 +41,7 @@ void _exportBackup(
     if (!includeScores) return;
     for (final (index, score) in scores.indexed) {
       zip.addFileSync(
-        File('$root/${score.id}.pdf'),
+        File('$root/${score.storedPdfId}.pdf'),
         'scores/$index.pdf',
         ZipFileEncoder.store,
       );
@@ -200,7 +200,7 @@ void _exportBackup(
         written.add(destination);
         destination.writeAsStringSync(jsonEncode(pages), flush: true);
       }
-      scores.add(old.copyWith(id: id));
+      scores.add(old.copyWith(id: id, detachPdf: true));
     }
 
     final listIds = existingSetlists.map((setlist) => setlist.id).toSet();

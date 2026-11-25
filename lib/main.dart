@@ -557,6 +557,11 @@ class _ReaderState extends State<Reader> {
         if (score != null) await _editScore(score);
         return;
       }
+      if (result.startsWith('clone:')) {
+        final score = await _library.duplicateScore(result.substring(6));
+        if (mounted) await _openLibraryScore(score);
+        return;
+      }
       if (result.startsWith('rearrange:')) {
         final original = _library.lookup(result.substring('rearrange:'.length));
         if (original == null) return;
@@ -3532,6 +3537,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                         context,
                                         'rearrange:${score.id}',
                                       );
+                                    } else if (action == 'clone') {
+                                      Navigator.pop(
+                                        context,
+                                        'clone:${score.id}',
+                                      );
                                     } else {
                                       Navigator.pop(
                                         context,
@@ -3559,6 +3569,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     PopupMenuItem(
                                       value: 'rearrange',
                                       child: Text('Rearrange pages'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'clone',
+                                      child: Text('Duplicate score'),
                                     ),
                                   ],
                                 ),

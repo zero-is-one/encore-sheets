@@ -28,6 +28,48 @@ class _TestEndpoint implements LibrarySyncEndpoint {
 }
 
 void main() {
+  test(
+    'score copies share their PDF and keep independent saved markup',
+    () async {
+      final folder = await Directory.systemTemp.createTemp(
+        'encore_score_clone',
+      );
+      addTearDown(() => folder.delete(recursive: true));
+      final library = ScoreLibrary(NativeLibraryStorage(directory: folder));
+      final (original, _) = await library.import(
+        XFile('assets/first_light.pdf'),
+      );
+      final marks = {
+        '1': [
+          {
+            'tool': 'pen',
+            'points': [
+              [.2, .5],
+            ],
+          },
+        ],
+      };
+      await library.writeInk(original.id, marks);
+      final duplicate = await library.duplicateScore(original.id);
+      final secondDuplicate = await library.duplicateScore(duplicate.id);
+      expect(secondDuplicate.storedPdfId, original.id);
+      expect(
+        (await library.storage.openScore(duplicate.id)).path,
+        (await library.storage.openScore(original.id)).path,
+      );
+      expect(await library.readInk(duplicate.id), marks);
+      await library.writeInk(duplicate.id, {});
+      expect(await library.readInk(original.id), marks);
+      final package = await library.createScorePackage(duplicate);
+      final restored = await library.restoreScorePackage(package);
+      expect(restored.pdfSourceId, isNull);
+      expect(
+        await (await library.storage.openScore(restored.id)).readAsBytes(),
+        await (await library.storage.openScore(original.id)).readAsBytes(),
+      );
+    },
+  );
+
   test('syncs score files, markup, edits, and deletions without creating duplicates', () async {
     final folder = await Directory.systemTemp.createTemp('encore_sync_test');
     addTearDown(() => folder.delete(recursive: true));
