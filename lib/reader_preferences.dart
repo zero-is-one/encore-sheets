@@ -18,6 +18,16 @@ enum EmbeddedPdfContent {
   final String label;
 }
 
+enum ReaderPageFit {
+  standard('Standard', 'Use the current orientation and layout settings.'),
+  bestFit('Best Fit', 'Show the entire page with a narrow margin.'),
+  zoomed('Zoomed', 'Fill the width and turn through tall pages in sections.');
+
+  const ReaderPageFit(this.label, this.explanation);
+  final String label;
+  final String explanation;
+}
+
 class ReaderPreferences {
   const ReaderPreferences({
     this.left = ReaderTapAction.previous,
@@ -39,6 +49,7 @@ class ReaderPreferences {
     this.compactLibrary = false,
     this.embeddedPdfContent = EmbeddedPdfContent.all,
     this.embeddedPdfLinks = true,
+    this.pageFit = ReaderPageFit.standard,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -74,6 +85,11 @@ class ReaderPreferences {
               .firstOrNull ??
           EmbeddedPdfContent.all,
       embeddedPdfLinks: json['embeddedPdfLinks'] != false,
+      pageFit:
+          ReaderPageFit.values
+              .where((mode) => mode.name == json['pageFit'])
+              .firstOrNull ??
+          ReaderPageFit.standard,
       pageDimming: switch (json['pageDimming']) {
         final num value when value.isFinite => value.toDouble().clamp(0.0, .75),
         _ => 0,
@@ -96,6 +112,7 @@ class ReaderPreferences {
   final bool dockPanels, compactLibrary;
   final EmbeddedPdfContent embeddedPdfContent;
   final bool embeddedPdfLinks;
+  final ReaderPageFit pageFit;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -117,6 +134,7 @@ class ReaderPreferences {
     bool? compactLibrary,
     EmbeddedPdfContent? embeddedPdfContent,
     bool? embeddedPdfLinks,
+    ReaderPageFit? pageFit,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -137,6 +155,7 @@ class ReaderPreferences {
     compactLibrary: compactLibrary ?? this.compactLibrary,
     embeddedPdfContent: embeddedPdfContent ?? this.embeddedPdfContent,
     embeddedPdfLinks: embeddedPdfLinks ?? this.embeddedPdfLinks,
+    pageFit: pageFit ?? this.pageFit,
   );
 
   Map<String, dynamic> toJson() => {
@@ -159,5 +178,6 @@ class ReaderPreferences {
     'compactLibrary': compactLibrary,
     'embeddedPdfContent': embeddedPdfContent.name,
     'embeddedPdfLinks': embeddedPdfLinks,
+    'pageFit': pageFit.name,
   };
 }

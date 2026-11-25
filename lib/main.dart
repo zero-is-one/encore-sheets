@@ -103,6 +103,7 @@ enum _ReaderDisplay {
   panelOptions,
   embeddedPdf,
   fit,
+  fittingMode,
   zoomIn,
   zoomOut,
   previousPage,
@@ -515,11 +516,17 @@ class _ReaderState extends State<Reader> {
       if (mounted) {
         final enabledHalfTurns =
             configured.halfPageTurns && !_preferences.halfPageTurns;
+        final fittingChanged = configured.pageFit != _preferences.pageFit;
         setState(() {
           if (!configured.halfPageTurns) _halfPreview = false;
           _preferences = configured;
         });
         if (enabledHalfTurns) _fit();
+        if (fittingChanged) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _fit();
+          });
+        }
         _keepScreenAwake(_performance || _preferences.keepAwake);
       }
     } catch (_) {
@@ -2447,7 +2454,7 @@ class _ReaderState extends State<Reader> {
       _go(_page + step * _spreadStep);
       return;
     }
-    if (_landscapeWidth && !_inking && _turnLandscapeSection(step)) return;
+    if (_readingAtWidth && !_inking && _turnPageSection(step)) return;
     if (!_preferences.halfPageTurns || _inking) {
       _go(_page + step);
       return;
@@ -2479,7 +2486,7 @@ class _ReaderState extends State<Reader> {
     final crop = _cropFor(page);
     if (crop == null || _spreadStep > 0 || !controller.isReady) return false;
     final bounds = crop.pdfBounds(controller.document.pages[page - 1]);
-    if (_landscapeWidth) {
+    if (_readingAtWidth) {
       final visible = controller.calcRectForRectInsidePage(
         pageNumber: page,
         rect: bounds,
@@ -2503,13 +2510,15 @@ class _ReaderState extends State<Reader> {
     return true;
   }
 
-  bool get _landscapeWidth =>
-      _preferences.landscapeWidth &&
+  bool get _readingAtWidth =>
       _spreadStep == 0 &&
       !_preferences.halfPageTurns &&
-      MediaQuery.orientationOf(context) == Orientation.landscape;
+      (_preferences.pageFit == ReaderPageFit.zoomed ||
+          _preferences.pageFit == ReaderPageFit.standard &&
+              _preferences.landscapeWidth &&
+              MediaQuery.orientationOf(context) == Orientation.landscape);
 
-  bool _turnLandscapeSection(int step) {
+  bool _turnPageSection(int step) {
     final visible = _viewer.visibleRect;
     final fullPage = _viewer.layout.pageLayouts[_page - 1];
     final page = _cropFor(_page)?.within(fullPage) ?? fullPage;
@@ -3391,9 +3400,38 @@ class _ReaderState extends State<Reader> {
   void _fit() {
     if (!_viewer.isReady) return;
     if (!_fitCrop(_page, _viewer)) {
-      _viewer.goTo(_viewer.calcMatrixForFit(pageNumber: _page));
+      if (_readingAtWidth) {
+        _viewer.goToPage(
+          pageNumber: _page,
+          anchor: PdfPageAnchor.topCenter,
+          duration: Duration.zero,
+        );
+      } else {
+        _viewer.goTo(_viewer.calcMatrixForFit(pageNumber: _page));
+      }
     }
     _focus.requestFocus();
+  }
+
+  Future<void> _choosePageFit() async {
+    final mode = await showDialog<ReaderPageFit>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Page fitting'),
+        children: [
+          for (final mode in ReaderPageFit.values)
+            ListTile(
+              title: Text(mode.label),
+              subtitle: Text(mode.explanation),
+              selected: mode == _preferences.pageFit,
+              onTap: () => Navigator.pop(dialog, mode),
+            ),
+        ],
+      ),
+    );
+    if (mounted && mode != null && mode != _preferences.pageFit) {
+      await _savePreferences(_preferences.copyWith(pageFit: mode));
+    }
   }
 
   Future<void> _showCrop() async {
@@ -3571,12 +3609,12 @@ class _ReaderState extends State<Reader> {
               fitMode: PdfFitMode.fit,
               singlePagesFillAvailableWidth: true,
             )
-          : _landscapeWidth
+          : _readingAtWidth
           ? const SequentialPagesLayout(fitMode: PdfFitMode.fill, margin: 12)
-          : const SequentialPagesLayout(
+          : SequentialPagesLayout(
               scrollDirection: Axis.horizontal,
               fitMode: PdfFitMode.fit,
-              margin: 12,
+              margin: _preferences.pageFit == ReaderPageFit.bestFit ? 3 : 12,
             ),
       paging: const PdfPaging(duration: Duration(milliseconds: 140)),
       calculateCurrentPageNumber: _spreadStep == 0
@@ -3593,7 +3631,7 @@ class _ReaderState extends State<Reader> {
               }
               return _page;
             },
-      pageAnchor: _landscapeWidth
+      pageAnchor: _readingAtWidth
           ? PdfPageAnchor.topCenter
           : PdfPageAnchor.center,
       pageDropShadow: const BoxShadow(
@@ -4223,6 +4261,8 @@ class _ReaderState extends State<Reader> {
                         _showEmbeddedPdfSettings();
                       case _ReaderDisplay.fit:
                         _fit();
+                      case _ReaderDisplay.fittingMode:
+                        _choosePageFit();
                       case _ReaderDisplay.zoomIn:
                         if (_viewer.isReady) _viewer.zoomUp();
                       case _ReaderDisplay.zoomOut:
@@ -4453,6 +4493,12 @@ class _ReaderState extends State<Reader> {
                       child: Text('Fit page'),
                     ),
                     PopupMenuItem(
+                      value: _ReaderDisplay.fittingMode,
+                      child: Text(
+                        'Page fitting · ${_preferences.pageFit.label}',
+                      ),
+                    ),
+                    PopupMenuItem(
                       value: _ReaderDisplay.zoomIn,
                       enabled: !_preferences.halfPageTurns,
                       child: const Text('Zoom in'),
@@ -4497,11 +4543,12 @@ class _ReaderState extends State<Reader> {
                       checked: _preferences.halfPageIndicator,
                       child: const Text('Show half-page indicator'),
                     ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.landscapeWidth,
-                      checked: _preferences.landscapeWidth,
-                      child: const Text('Fit width in landscape'),
-                    ),
+                    if (_preferences.pageFit == ReaderPageFit.standard)
+                      CheckedPopupMenuItem(
+                        value: _ReaderDisplay.landscapeWidth,
+                        checked: _preferences.landscapeWidth,
+                        child: const Text('Fit width in landscape'),
+                      ),
                     CheckedPopupMenuItem(
                       value: _ReaderDisplay.spreads,
                       checked: _preferences.spreadStep > 0,
