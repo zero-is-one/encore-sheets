@@ -195,6 +195,17 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/widget")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "practice") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val total = (call.argument<Int>("total") ?: 0).coerceAtLeast(0)
+                val reached = (call.argument<Int>("reached") ?: 0).coerceIn(0, total)
+                RehearsalWidget.publish(this, reached, total)
+                result.success(null)
+            }
         enableFileDrop()
         linksChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/links")
         linksChannel?.setMethodCallHandler { call, result ->

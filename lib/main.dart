@@ -55,6 +55,7 @@ import 'text_score_pdf.dart';
 import 'pdf_text_font.dart';
 import 'practice_activity.dart';
 import 'practice_dashboard.dart';
+import 'practice_goals.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -215,7 +216,10 @@ class _ReaderState extends State<Reader> {
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
-  late final _practice = PracticeActivity(_library);
+  late final _practice = PracticeActivity(
+    _library,
+    onSaved: _requestWidgetRefresh,
+  );
   ReaderRestrictions? _restrictions;
   String? _language;
   late final Future<void> _startupPreferences;
@@ -338,6 +342,7 @@ class _ReaderState extends State<Reader> {
     }
     _lifecycle = AppLifecycleListener(
       onResume: () {
+        _requestWidgetRefresh();
         _focusPractice();
         if (_supportsSharedImport) _requestScoreLinks();
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
@@ -408,6 +413,7 @@ class _ReaderState extends State<Reader> {
         _listenToMidi();
         widget.onLanguage?.call(_language);
         _focusPractice();
+        _requestWidgetRefresh();
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
@@ -678,6 +684,7 @@ class _ReaderState extends State<Reader> {
     _linksWaiting = false;
     setState(() => _picking = true);
     var showLibrary = false;
+    var showPractice = false;
     try {
       final received =
           await _linksChannel.invokeListMethod<String>('take') ?? [];
@@ -690,7 +697,8 @@ class _ReaderState extends State<Reader> {
           .firstOrNull;
       if (link == null) return;
       showLibrary = link.target == ReaderLinkTarget.library;
-      if (showLibrary) return;
+      showPractice = link.target == ReaderLinkTarget.practice;
+      if (showLibrary || showPractice) return;
       await _libraryReady;
       if (!mounted) return;
       if (link.target == ReaderLinkTarget.cloud) {
@@ -763,6 +771,7 @@ class _ReaderState extends State<Reader> {
     } finally {
       _finishPicking();
       if (showLibrary && mounted) unawaited(_showLibrary());
+      if (showPractice && mounted) unawaited(_showPracticeActivity());
     }
   }
 
@@ -1879,9 +1888,29 @@ class _ReaderState extends State<Reader> {
           const SnackBar(content: Text('Could not open practice activity.')),
         );
     } finally {
+      _requestWidgetRefresh();
       if (mounted) _focusPractice();
       _finishPicking();
     }
+  }
+
+  void _requestWidgetRefresh() {
+    if (!_supportsSharedImport) return;
+    unawaited(_publishPracticeWidget().catchError((Object _) {}));
+  }
+
+  Future<void> _publishPracticeWidget() async {
+    final prefs = await _library.storage.readPreferences();
+    final goals = readPracticeGoals(prefs['practiceGoals']);
+    final history = readPracticeActivity(prefs['practiceActivity']);
+    final now = DateTime.now();
+    await const MethodChannel('encoresheets/widget')
+        .invokeMethod<void>('practice', {
+          'total': goals.length,
+          'reached': goals
+              .where((goal) => goalProgress(goal, history, now) >= goal.target)
+              .length,
+        });
   }
 
   RehearsalMetronome get _rehearsalMeter => _metronome ??= RehearsalMetronome()

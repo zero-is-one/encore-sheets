@@ -45,9 +45,10 @@ List<PracticeEntry> readPracticeActivity(Object? saved) {
 }
 
 class PracticeActivity {
-  PracticeActivity(this.library);
+  PracticeActivity(this.library, {this.onSaved});
 
   final ScoreLibrary library;
+  final void Function()? onSaved;
   bool enabled = false;
   List<PracticeSelection> _selection = [];
   final _clock = Stopwatch();
@@ -136,6 +137,7 @@ class PracticeActivity {
               },
           ],
         });
+        onSaved?.call();
       } catch (_) {
         for (final item in batch.entries) {
           final existing = _pending[item.key];

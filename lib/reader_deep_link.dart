@@ -1,4 +1,4 @@
-enum ReaderLinkTarget { score, bookmark, setlist, library, cloud }
+enum ReaderLinkTarget { score, bookmark, setlist, library, cloud, practice }
 
 typedef ReaderDeepLink = ({
   ReaderLinkTarget target,
@@ -24,7 +24,9 @@ ReaderDeepLink? parseReaderLink(String value) {
   final name = uri.queryParameters['name']?.trim();
   final page = int.tryParse(uri.queryParameters['page'] ?? '');
   if (page != null && page < 1) return null;
-  if (target == ReaderLinkTarget.library || target == ReaderLinkTarget.cloud) {
+  if (target == ReaderLinkTarget.library ||
+      target == ReaderLinkTarget.cloud ||
+      target == ReaderLinkTarget.practice) {
     return parts.isEmpty
         ? (target: target, id: null, name: null, page: null)
         : null;

@@ -1,0 +1,7 @@
+<resources>
+    <string name="widget_label">EncoreSheets practice</string>
+    <string name="widget_empty">No practice goals</string>
+    <string name="widget_library">Library</string>
+    <string name="widget_practice">Practice</string>
+    <string name="widget_progress">%1$d of %2$d goals reached</string>
+</resources>

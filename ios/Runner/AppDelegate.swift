@@ -4,6 +4,7 @@ import UIKit
 import VisionKit
 import UniformTypeIdentifiers
 import MediaPlayer
+import WidgetKit
 
 @available(iOS 16.0, *)
 enum EncoreShortcutTarget: String, AppEnum {
@@ -83,6 +84,27 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let practiceWidget = FlutterMethodChannel(
+      name: "encoresheets/widget",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    practiceWidget.setMethodCallHandler { call, result in
+      guard call.method == "practice", let values = call.arguments as? [String: Int] else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      if let defaults = UserDefaults(suiteName: "group.app.encoresheets.encoresheets") {
+        let total = max(0, values["total"] ?? 0)
+        let reached = min(total, max(0, values["reached"] ?? 0))
+        if defaults.integer(forKey: "widgetTotal") != total ||
+          defaults.integer(forKey: "widgetReached") != reached {
+          defaults.set(total, forKey: "widgetTotal")
+          defaults.set(reached, forKey: "widgetReached")
+          WidgetCenter.shared.reloadTimelines(ofKind: "EncorePracticeWidget")
+        }
+      }
+      result(nil)
+    }
     let links = FlutterMethodChannel(
       name: "encoresheets/links",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
