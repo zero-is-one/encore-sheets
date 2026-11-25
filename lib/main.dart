@@ -7,6 +7,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'pdf_assembly_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
@@ -457,6 +458,17 @@ class _ReaderState extends State<Reader> {
         }
       }
       if (result == null) return;
+      if (result == 'combine' || result.startsWith('extract:')) {
+        final source = result == 'combine'
+            ? null
+            : _library.lookup(result.substring('extract:'.length));
+        if (result != 'combine' && source == null) return;
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => PdfAssemblyScreen(library: _library, source: source),
+        );
+        if (score != null && mounted) await _openLibraryScore(score);
+        return;
+      }
       if (result == 'batch') {
         final edit = await editBatchMetadata(context, _library.recent);
         if (edit != null) {
@@ -2406,6 +2418,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         icon: const Icon(Icons.queue_music),
                         label: const Text('Setlists'),
                       ),
+                      if (widget.scores.length > 1)
+                        TextButton.icon(
+                          onPressed: () => Navigator.pop(context, 'combine'),
+                          icon: const Icon(Icons.merge_type),
+                          label: const Text('Combine PDFs'),
+                        ),
                       if (widget.persistent ||
                           widget.library.recentlyDeleted.isNotEmpty)
                         TextButton.icon(
@@ -2498,6 +2516,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                       _assignCollections(score);
                                     } else if (action == 'trash') {
                                       _trashScore(score);
+                                    } else if (action == 'extract') {
+                                      Navigator.pop(
+                                        context,
+                                        'extract:${score.id}',
+                                      );
                                     } else {
                                       Navigator.pop(
                                         context,
@@ -2517,6 +2540,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     PopupMenuItem(
                                       value: 'trash',
                                       child: Text('Delete score'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'extract',
+                                      child: Text('Extract pages'),
                                     ),
                                   ],
                                 ),
