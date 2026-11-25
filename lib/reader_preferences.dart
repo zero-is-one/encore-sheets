@@ -26,6 +26,8 @@ class ReaderPreferences {
     this.largePageButtons = false,
     this.complexGestures = true,
     this.softMetronome = false,
+    this.dockPanels = false,
+    this.compactLibrary = false,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -53,6 +55,8 @@ class ReaderPreferences {
       largePageButtons: json['largePageButtons'] == true,
       complexGestures: json['complexGestures'] != false,
       softMetronome: json['softMetronome'] == true,
+      dockPanels: json['dockPanels'] == true,
+      compactLibrary: json['compactLibrary'] == true,
       pageDimming: switch (json['pageDimming']) {
         final num value when value.isFinite => value.toDouble().clamp(0.0, .75),
         _ => 0,
@@ -72,6 +76,7 @@ class ReaderPreferences {
   final bool sepia;
   final double pageDimming;
   final bool fullScreenPanels, largePageButtons, complexGestures, softMetronome;
+  final bool dockPanels, compactLibrary;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -89,6 +94,8 @@ class ReaderPreferences {
     bool? largePageButtons,
     bool? complexGestures,
     bool? softMetronome,
+    bool? dockPanels,
+    bool? compactLibrary,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -105,6 +112,8 @@ class ReaderPreferences {
     largePageButtons: largePageButtons ?? this.largePageButtons,
     complexGestures: complexGestures ?? this.complexGestures,
     softMetronome: softMetronome ?? this.softMetronome,
+    dockPanels: dockPanels ?? this.dockPanels,
+    compactLibrary: compactLibrary ?? this.compactLibrary,
   );
 
   Map<String, dynamic> toJson() => {
@@ -123,5 +132,7 @@ class ReaderPreferences {
     'largePageButtons': largePageButtons,
     'complexGestures': complexGestures,
     'softMetronome': softMetronome,
+    'dockPanels': dockPanels,
+    'compactLibrary': compactLibrary,
   };
 }

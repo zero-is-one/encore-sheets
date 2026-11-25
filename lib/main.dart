@@ -74,6 +74,7 @@ enum _ReaderDisplay {
   appearance,
   accessibility,
   reflow,
+  panelOptions,
   fit,
   zoomIn,
   zoomOut,
@@ -149,6 +150,7 @@ class _ReaderState extends State<Reader> {
   bool _inking = false;
   bool _allowFinger = false;
   bool _picking = false;
+  bool _sidebarOpen = false;
   bool _saveWarning = false;
   bool _inkSaveWarning = false;
   bool _editingText = false;
@@ -523,35 +525,42 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<T?> _openReaderPanel<T>(WidgetBuilder builder) {
+  Future<T?> _openReaderPanel<T>(WidgetBuilder builder) async {
     if (MediaQuery.sizeOf(context).width < 720 ||
         _preferences.fullScreenPanels) {
       return Navigator.of(context).push<T>(MaterialPageRoute(builder: builder));
     }
-    return showGeneralDialog<T>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black38,
-      pageBuilder: (context, _, _) => SafeArea(
-        child: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: SizedBox(
-            width: 368,
-            height: double.infinity,
-            child: Material(
-              elevation: 12,
-              clipBehavior: Clip.antiAlias,
-              borderRadius: const BorderRadiusDirectional.only(
-                topEnd: Radius.circular(16),
-                bottomEnd: Radius.circular(16),
+    final dock = _preferences.dockPanels && !_sidebarOpen;
+    if (dock) setState(() => _sidebarOpen = true);
+    try {
+      return await showGeneralDialog<T>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(context)
+            .modalBarrierDismissLabel,
+        barrierColor: dock ? Colors.transparent : Colors.black38,
+        pageBuilder: (context, _, _) => SafeArea(
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: SizedBox(
+              width: 368,
+              height: double.infinity,
+              child: Material(
+                elevation: 12,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: const BorderRadiusDirectional.only(
+                  topEnd: Radius.circular(16),
+                  bottomEnd: Radius.circular(16),
+                ),
+                child: Builder(builder: builder),
               ),
-              child: Builder(builder: builder),
             ),
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (dock && mounted) setState(() => _sidebarOpen = false);
+    }
   }
 
   Future<void> _showLibrary({bool setlists = false}) async {
@@ -573,6 +582,7 @@ class _ReaderState extends State<Reader> {
                 canScan: _supportsSharedImport,
                 canSync: _isAppleMobile,
                 onScoreQueue: (ids) => selectedQueue = ids,
+                compact: _preferences.compactLibrary,
               ),
             );
       if (!mounted) return;
@@ -2069,6 +2079,51 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _showPanelOptions() async {
+    var draft = _preferences;
+    final result = await showDialog<ReaderPreferences>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: const Text('Sidebar and lists'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Show sidebar alongside score'),
+                value: draft.dockPanels,
+                onChanged: (value) => refresh(
+                  () => draft = draft.copyWith(
+                    dockPanels: value,
+                    fullScreenPanels: value ? false : null,
+                  ),
+                ),
+              ),
+              SwitchListTile(
+                title: const Text('Compact score lists'),
+                value: draft.compactLibrary,
+                onChanged: (value) => refresh(
+                  () => draft = draft.copyWith(compactLibrary: value),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, draft),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mounted && result != null) await _savePreferences(result);
+  }
+
   Future<void> _showReflow() async {
     if (_picking || !_viewer.isReady || _pages == 0) return;
     final score = _entry;
@@ -2924,6 +2979,14 @@ class _ReaderState extends State<Reader> {
         if (!didPop && _performance) _togglePerformance();
       },
       child: SafeArea(
+        minimum: _sidebarOpen && MediaQuery.sizeOf(context).width >= 720
+            ? EdgeInsets.only(
+                left: Directionality.of(context) == TextDirection.ltr ? 368 : 0,
+                right: Directionality.of(context) == TextDirection.rtl
+                    ? 368
+                    : 0,
+              )
+            : EdgeInsets.zero,
         child: Focus(
           focusNode: _focus,
           autofocus: true,
@@ -3082,6 +3145,8 @@ class _ReaderState extends State<Reader> {
                         _showAccessibility();
                       case _ReaderDisplay.reflow:
                         _showReflow();
+                      case _ReaderDisplay.panelOptions:
+                        _showPanelOptions();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -3252,6 +3317,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.reflow,
                       child: Text('Score reflow'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.panelOptions,
+                      child: Text('Sidebar and lists'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
@@ -3824,6 +3893,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.canScan,
     required this.canSync,
     required this.onScoreQueue,
+    required this.compact,
   });
 
   final List<ScoreEntry> scores;
@@ -3833,6 +3903,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool canScan;
   final bool canSync;
   final ValueChanged<List<String>> onScoreQueue;
+  final bool compact;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -4308,7 +4379,17 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               return ListTile(
                                 leading: const Icon(Icons.description_outlined),
                                 title: Text(score.title),
-                                subtitle: Text('Resume at page ${score.page}'),
+                                dense: widget.compact,
+                                subtitle: widget.compact
+                                    ? null
+                                    : Text(
+                                        [
+                                          if (score.metadata['composer']
+                                              case final composer?)
+                                            composer,
+                                          'Resume at page ${score.page}',
+                                        ].join(' · '),
+                                      ),
                                 trailing: PopupMenuButton<String>(
                                   tooltip: 'Options for ${score.title}',
                                   onSelected: (action) {
