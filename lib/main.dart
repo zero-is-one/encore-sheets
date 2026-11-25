@@ -10,6 +10,7 @@ import 'page_ink.dart';
 import 'ink_layers_dialog.dart';
 import 'pdf_assembly_screen.dart';
 import 'pdf_export_screen.dart';
+import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
@@ -507,6 +508,22 @@ class _ReaderState extends State<Reader> {
       if (result.startsWith('edit:')) {
         final score = _library.lookup(result.substring(5));
         if (score != null) await _editScore(score);
+        return;
+      }
+      if (result.startsWith('rearrange:')) {
+        final original = _library.lookup(result.substring('rearrange:'.length));
+        if (original == null) return;
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => PdfRearrangeScreen(library: _library, score: original),
+        );
+        if (score == null || !mounted) return;
+        if (_library.lookup(original.id) == null &&
+            _scoreTabIds.contains(original.id)) {
+          await _updateScoreTabs([
+            for (final id in _scoreTabIds) id == original.id ? score.id : id,
+          ]);
+        }
+        if (mounted) await _openLibraryScore(score);
         return;
       }
       if (result.startsWith('set:')) {
@@ -2873,6 +2890,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                         context,
                                         'extract:${score.id}',
                                       );
+                                    } else if (action == 'rearrange') {
+                                      Navigator.pop(
+                                        context,
+                                        'rearrange:${score.id}',
+                                      );
                                     } else {
                                       Navigator.pop(
                                         context,
@@ -2896,6 +2918,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     PopupMenuItem(
                                       value: 'extract',
                                       child: Text('Extract pages'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'rearrange',
+                                      child: Text('Rearrange pages'),
                                     ),
                                   ],
                                 ),

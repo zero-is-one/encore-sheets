@@ -186,6 +186,7 @@ abstract class LibraryStorage {
   Future<void> writePreferences(Map<String, dynamic> preferences);
   Future<List<ScoreEntry>> readIndex();
   Future<void> writeIndex(List<ScoreEntry> entries);
+  Future<void> writeCatalog(List<ScoreEntry> entries, List<Setlist> setlists);
   Future<XFile> copyScore(String id, XFile source);
   Future<XFile> openScore(String id);
   Future<void> removeScore(String id);
@@ -405,8 +406,16 @@ class ScoreLibrary {
     return result;
   }
 
-  Future<(ScoreEntry, XFile)> import(XFile source) => _serialize(() async {
+  Future<(ScoreEntry, XFile)> import(
+    XFile source, {
+    ScoreEntry? template,
+    Map<String, dynamic> annotations = const {},
+    bool replace = false,
+  }) => _serialize(() async {
     final now = DateTime.now().toUtc();
+    final previous = replace && template != null ? lookup(template.id) : null;
+    if (replace && previous == null)
+      throw StateError('The source score is missing.');
     var number = now.microsecondsSinceEpoch;
     while (_scores.containsKey('$number')) {
       number++;
@@ -416,20 +425,61 @@ class ScoreLibrary {
         .last
         .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
         .trim();
-    final score = ScoreEntry(
+    var score = ScoreEntry(
       id: '$number',
       title: title.isEmpty ? 'Untitled score' : title,
       page: 1,
       openedAt: now,
     );
+    if (template != null) {
+      score = template.copyWith(
+        id: score.id,
+        title: previous?.title ?? score.title,
+        openedAt: now,
+        recover: true,
+      );
+    }
+    final entries = Map.of(_scores);
+    entries[score.id] = score;
+    final lists = Map.of(_setlists);
+    if (previous != null) {
+      entries[previous.id] = previous.copyWith(deletedAt: now);
+      final remaining = score.bookmarks
+          .where((bookmark) => bookmark.isItem)
+          .map((bookmark) => bookmark.id)
+          .toSet();
+      for (final old in _setlists.values) {
+        lists[old.id] = Setlist(
+          old.id,
+          old.name,
+          old.scores.expand((selection) {
+            final parts = selection.split(':');
+            if (parts.first != previous.id) return [selection];
+            if (parts.length == 1) return [score.id];
+            return remaining.contains(parts.last)
+                ? ['${score.id}:${parts.last}']
+                : <String>[];
+          }),
+        );
+      }
+    }
     final local = await storage.copyScore(score.id, source);
     try {
-      await storage.writeIndex([..._scores.values, score]);
+      if (annotations.isNotEmpty) await storage.writeInk(score.id, annotations);
+      if (previous == null) {
+        await storage.writeIndex(entries.values.toList());
+      } else {
+        await storage.writeCatalog(
+          entries.values.toList(),
+          lists.values.toList(),
+        );
+      }
     } catch (_) {
       await storage.removeScore(score.id);
       rethrow;
     }
-    _scores[score.id] = score;
+    _scores.addAll(entries);
+    _setlists.addAll(lists);
     return (score, local);
   });
 

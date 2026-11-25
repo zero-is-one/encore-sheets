@@ -62,6 +62,10 @@ class _MemoryLibraryStorage implements LibraryStorage {
   Future<void> writeIndex(List<ScoreEntry> entries) async {}
 
   @override
+  Future<void> writeCatalog(List<ScoreEntry> entries, List<Setlist> setlists) =>
+      writeSetlists(setlists);
+
+  @override
   Future<XFile> copyScore(String id, XFile source) async {
     final copy = XFile.fromData(await source.readAsBytes(), name: source.name);
     _files[id] = copy;
@@ -72,5 +76,8 @@ class _MemoryLibraryStorage implements LibraryStorage {
   Future<XFile> openScore(String id) async => _files[id]!;
 
   @override
-  Future<void> removeScore(String id) async => _files.remove(id);
+  Future<void> removeScore(String id) async {
+    _files.remove(id);
+    _ink.remove(id);
+  }
 }

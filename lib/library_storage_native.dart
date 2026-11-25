@@ -56,7 +56,7 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<void> writeIndex(List<ScoreEntry> entries) async =>
-      _writeCatalog(entries, await readSetlists());
+      writeCatalog(entries, await readSetlists());
 
   Future<Map<String, dynamic>?> _readCatalog() async {
     final file = await _file('catalog.json');
@@ -65,7 +65,8 @@ class NativeLibraryStorage implements LibraryStorage {
         : null;
   }
 
-  Future<void> _writeCatalog(List<ScoreEntry> scores, List<Setlist> setlists) =>
+  @override
+  Future<void> writeCatalog(List<ScoreEntry> scores, List<Setlist> setlists) =>
       _writeJson('catalog.json', _catalog(scores, setlists));
 
   Future<void> _writeJson(String name, Object value) async {
@@ -102,7 +103,7 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<void> writeSetlists(List<Setlist> setlists) async =>
-      _writeCatalog(await readIndex(), setlists);
+      writeCatalog(await readIndex(), setlists);
 
   @override
   Future<XFile> createBackup(
@@ -162,7 +163,9 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<void> removeScore(String id) async {
-    final file = await _file('$id.pdf');
-    if (await file.exists()) await file.delete();
+    for (final name in ['$id.pdf', '$id.ink.json']) {
+      final file = await _file(name);
+      if (await file.exists()) await file.delete();
+    }
   }
 }
