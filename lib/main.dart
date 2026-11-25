@@ -17,7 +17,14 @@ const _rail = Color(0xff2e3a36);
 const _paper = Color(0xfff0eddf);
 const _brass = Color(0xffe9bd75);
 
-enum _ReaderDisplay { fit, performance, hideControls, gestures, keepAwake }
+enum _ReaderDisplay {
+  fit,
+  performance,
+  hideControls,
+  gestures,
+  keepAwake,
+  nextTitle,
+}
 
 void main() => runApp(const EncoreSheets());
 
@@ -84,6 +91,15 @@ class _ReaderState extends State<Reader> {
 
   bool get _hasNextScore =>
       _playing != null && _setIndex + 1 < _playing!.scores.length;
+
+  String? get _nextTitle {
+    if (!_preferences.showNextTitle ||
+        !_hasNextScore ||
+        _pages == 0 ||
+        _page != _pages)
+      return null;
+    return _library.lookup(_playing!.scores[_setIndex + 1])?.title;
+  }
 
   String get _title => _entry?.title ?? 'First Light';
   bool get _supportsSharedImport =>
@@ -188,7 +204,10 @@ class _ReaderState extends State<Reader> {
               TextButton(
                 onPressed: () => Navigator.pop(
                   context,
-                  ReaderPreferences(keepAwake: _preferences.keepAwake),
+                  ReaderPreferences(
+                    keepAwake: _preferences.keepAwake,
+                    showNextTitle: _preferences.showNextTitle,
+                  ),
                 ),
                 child: const Text('Reset'),
               ),
@@ -200,6 +219,7 @@ class _ReaderState extends State<Reader> {
                     center: center,
                     right: right,
                     keepAwake: _preferences.keepAwake,
+                    showNextTitle: _preferences.showNextTitle,
                   ),
                 ),
                 child: const Text('Save'),
@@ -816,6 +836,11 @@ class _ReaderState extends State<Reader> {
             children: [
               if (_showControls && !_performance) _header(),
               Expanded(key: const ValueKey('score-viewport'), child: _score()),
+              if (_nextTitle case final title?)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('Next: $title', overflow: TextOverflow.ellipsis),
+                ),
               if (_performance)
                 _performanceBar()
               else if (_showControls)
@@ -900,6 +925,17 @@ class _ReaderState extends State<Reader> {
                             center: _preferences.center,
                             right: _preferences.right,
                             keepAwake: !_preferences.keepAwake,
+                            showNextTitle: _preferences.showNextTitle,
+                          ),
+                        );
+                      case _ReaderDisplay.nextTitle:
+                        _savePreferences(
+                          ReaderPreferences(
+                            left: _preferences.left,
+                            center: _preferences.center,
+                            right: _preferences.right,
+                            keepAwake: _preferences.keepAwake,
+                            showNextTitle: !_preferences.showNextTitle,
                           ),
                         );
                     }
@@ -932,6 +968,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.keepAwake,
                       checked: _preferences.keepAwake,
                       child: const Text('Keep screen awake'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.nextTitle,
+                      checked: _preferences.showNextTitle,
+                      child: const Text('Show next score title'),
                     ),
                   ],
                 ),
