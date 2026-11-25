@@ -33,6 +33,7 @@ enum _ReaderDisplay {
   halfTurns,
   halfSplit,
   halfIndicator,
+  landscapeWidth,
   performance,
   hideControls,
   gestures,
@@ -810,6 +811,7 @@ class _ReaderState extends State<Reader> {
 
   void _turn(int step) {
     if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (_landscapeWidth && !_inking && _turnLandscapeSection(step)) return;
     if (!_preferences.halfPageTurns || _inking) {
       _go(_page + step);
       return;
@@ -824,6 +826,29 @@ class _ReaderState extends State<Reader> {
     if (turn.page != _page) _go(turn.page);
     if (_halfPreview != turn.preview)
       setState(() => _halfPreview = turn.preview);
+  }
+
+  bool get _landscapeWidth =>
+      _preferences.landscapeWidth &&
+      !_preferences.halfPageTurns &&
+      MediaQuery.orientationOf(context) == Orientation.landscape;
+
+  bool _turnLandscapeSection(int step) {
+    final visible = _viewer.visibleRect;
+    final page = _viewer.layout.pageLayouts[_page - 1];
+    final bottom = page.bottom - visible.height;
+    if (bottom <= page.top) return false;
+    if (step < 0 && visible.top <= page.top + 1 ||
+        step > 0 && visible.top >= bottom - 1) {
+      return false;
+    }
+    final target = (visible.top + visible.height * .88 * step).clamp(
+      page.top,
+      bottom,
+    );
+    if ((target - visible.top).abs() < 1) return false;
+    _viewer.goToPosition(documentOffset: Offset(visible.left, target));
+    return true;
   }
 
   void _jumpToPage(int page) {
@@ -1013,13 +1038,17 @@ class _ReaderState extends State<Reader> {
     final pageBeforeResize = _page;
     final params = PdfViewerParams(
       backgroundColor: _stand,
-      layoutStrategy: const SequentialPagesLayout(
-        scrollDirection: Axis.horizontal,
-        fitMode: PdfFitMode.fit,
-        margin: 12,
-      ),
+      layoutStrategy: _landscapeWidth
+          ? const SequentialPagesLayout(fitMode: PdfFitMode.fill, margin: 12)
+          : const SequentialPagesLayout(
+              scrollDirection: Axis.horizontal,
+              fitMode: PdfFitMode.fit,
+              margin: 12,
+            ),
       paging: const PdfPaging(duration: Duration(milliseconds: 140)),
-      pageAnchor: PdfPageAnchor.center,
+      pageAnchor: _landscapeWidth
+          ? PdfPageAnchor.topCenter
+          : PdfPageAnchor.center,
       pageDropShadow: const BoxShadow(
         color: Colors.black54,
         blurRadius: 14,
@@ -1418,6 +1447,12 @@ class _ReaderState extends State<Reader> {
                             halfPageIndicator: !_preferences.halfPageIndicator,
                           ),
                         );
+                      case _ReaderDisplay.landscapeWidth:
+                        _savePreferences(
+                          _preferences.copyWith(
+                            landscapeWidth: !_preferences.landscapeWidth,
+                          ),
+                        );
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -1495,6 +1530,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.halfIndicator,
                       checked: _preferences.halfPageIndicator,
                       child: const Text('Show half-page indicator'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.landscapeWidth,
+                      checked: _preferences.landscapeWidth,
+                      child: const Text('Fit width in landscape'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
