@@ -8,9 +8,20 @@ enum InkTool { pen, highlighter, eraser, text, selection }
 enum InkShape { line, rectangle, oval, arrow, ruler }
 
 typedef PageText = ({String value, Offset position, double size});
+typedef InkLayer = ({String id, String name, bool visible});
+typedef InkLayerChange = ({String target, String? source});
+
+const defaultInkLayer = (id: 'base', name: 'Annotations', visible: true);
 
 class _Stroke {
-  _Stroke(this.tool, this.points, {this.width, this.color, this.text});
+  _Stroke(
+    this.tool,
+    this.points, {
+    this.width,
+    this.color,
+    this.text,
+    this.layer = 'base',
+  });
 
   factory _Stroke.fromJson(Map<String, dynamic> data) => _Stroke(
     InkTool.values.byName(data['tool'] as String),
@@ -21,6 +32,7 @@ class _Stroke {
     width: (data['width'] as num?)?.toDouble(),
     color: data['color'] as int?,
     text: data['text'] as String?,
+    layer: data['layer'] as String? ?? 'base',
   );
 
   final InkTool tool;
@@ -28,13 +40,15 @@ class _Stroke {
   final double? width;
   final int? color;
   final String? text;
+  final String layer;
 
-  _Stroke shifted(Offset delta) => _Stroke(
+  _Stroke shifted(Offset delta, {String? intoLayer}) => _Stroke(
     tool,
     [for (final point in points) point + delta],
     width: width,
     color: color,
     text: text,
+    layer: intoLayer ?? layer,
   );
 
   Map<String, dynamic> toJson() => {
@@ -42,6 +56,7 @@ class _Stroke {
     if (width != null) 'width': width,
     if (color != null) 'color': color,
     if (text != null) 'text': text,
+    if (layer != 'base') 'layer': layer,
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
@@ -50,11 +65,17 @@ class _Stroke {
 
 class PageInk extends ChangeNotifier {
   static const eraserRadius = .018;
-  PageInk({List<dynamic> saved = const [], this.onChanged})
-    : _strokes = [
-        for (final stroke in saved)
-          _Stroke.fromJson(stroke as Map<String, dynamic>),
-      ];
+  PageInk({
+    List<dynamic> saved = const [],
+    this.onChanged,
+    String? activeLayer = 'base',
+    List<String> visibleLayers = const ['base'],
+  }) : _activeLayer = activeLayer,
+       _visibleLayers = visibleLayers,
+       _strokes = [
+         for (final stroke in saved)
+           _Stroke.fromJson(stroke as Map<String, dynamic>),
+       ];
 
   final VoidCallback? onChanged;
   List<_Stroke> _strokes;
@@ -66,6 +87,39 @@ class PageInk extends ChangeNotifier {
   List<Offset> _outline = [];
   bool _lasso = false;
   bool _moving = false;
+  String? _activeLayer;
+  List<String> _visibleLayers;
+
+  void configureLayers({
+    required String? active,
+    required List<String> visible,
+    required List<InkLayerChange> changes,
+  }) {
+    _activeLayer = active;
+    _visibleLayers = visible;
+    for (final change in changes) {
+      if (change.target == change.source) continue;
+      _strokes = [
+        for (final stroke in _strokes)
+          if (stroke.layer != change.target) stroke,
+        for (final stroke in _strokes)
+          if (stroke.layer == change.source)
+            stroke.shifted(Offset.zero, intoLayer: change.target),
+      ];
+    }
+    _selection = {};
+    if (changes.isNotEmpty) {
+      _undo.clear();
+      _redo.clear();
+    }
+    notifyListeners();
+  }
+
+  Iterable<_Stroke> _orderedStrokes() sync* {
+    for (final layer in _visibleLayers) {
+      yield* _strokes.where((stroke) => stroke.layer == layer);
+    }
+  }
 
   List<Map<String, dynamic>> snapshot() => [
     for (final stroke in _strokes) stroke.toJson(),
@@ -86,12 +140,16 @@ class PageInk extends ChangeNotifier {
   }
 
   void pasteSelection(List<Map<String, dynamic>> clipboard) {
-    if (clipboard.isEmpty) return;
+    final layer = _activeLayer;
+    if (clipboard.isEmpty || layer == null) return;
     final strokes = clipboard.map(_Stroke.fromJson).toList();
     final delta = _clampedDelta(const Offset(.024, .024), _bounds(strokes));
     final start = _strokes.length;
     _replaceStrokes(
-      [..._strokes, for (final stroke in strokes) stroke.shifted(delta)],
+      [
+        ..._strokes,
+        for (final stroke in strokes) stroke.shifted(delta, intoLayer: layer),
+      ],
       selection: {for (var i = start; i < start + strokes.length; i++) i},
     );
   }
@@ -152,7 +210,8 @@ class PageInk extends ChangeNotifier {
         final path = _lasso ? (Path()..addPolygon(outline, true)) : null;
         _selection = {
           for (final (index, stroke) in _strokes.indexed)
-            if (_samples(stroke).any(path?.contains ?? rectangle.contains))
+            if (_visibleLayers.contains(stroke.layer) &&
+                _samples(stroke).any(path?.contains ?? rectangle.contains))
               index,
         };
       }
@@ -184,7 +243,7 @@ class PageInk extends ChangeNotifier {
   (int, PageText)? textAt(Offset point, Size size) {
     for (var index = _strokes.length - 1; index >= 0; index--) {
       final mark = _strokes[index];
-      if (mark.text == null) continue;
+      if (mark.text == null || !_visibleLayers.contains(mark.layer)) continue;
       final position = mark.points.first;
       final fontSize = mark.width ?? .024;
       final painter = _layoutText(mark.text!, fontSize, size, position);
@@ -203,6 +262,8 @@ class PageInk extends ChangeNotifier {
 
   void setText(int? index, PageText? annotation) {
     if (index == null && annotation == null) return;
+    final layer = index == null ? _activeLayer : _strokes[index].layer;
+    if (layer == null) return;
     final next = [..._strokes];
     if (index != null) next.removeAt(index);
     if (annotation != null) {
@@ -213,6 +274,7 @@ class PageInk extends ChangeNotifier {
           [annotation.position],
           width: annotation.size,
           text: annotation.value,
+          layer: layer,
         ),
       );
     }
@@ -225,8 +287,10 @@ class PageInk extends ChangeNotifier {
     double? width,
     int? color,
   }) {
+    final layer = _activeLayer;
+    if (layer == null) return;
     _activeStart = point;
-    _active = _Stroke(tool, [point], width: width, color: color);
+    _active = _Stroke(tool, [point], width: width, color: color, layer: layer);
     notifyListeners();
   }
 
@@ -310,7 +374,12 @@ class PageInk extends ChangeNotifier {
     _activeStart = null;
     if (commit) {
       final next = stroke.tool == InkTool.eraser
-          ? _strokes.where((mark) => !_touches(mark, stroke)).toList()
+          ? _strokes
+                .where(
+                  (mark) =>
+                      mark.layer != stroke.layer || !_touches(mark, stroke),
+                )
+                .toList()
           : [..._strokes, stroke];
       if (next.length != _strokes.length) {
         _replaceStrokes(next);
@@ -552,7 +621,7 @@ class _InkPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
     final active = ink._active;
     final strokes = [
-      ...ink._strokes,
+      ...ink._orderedStrokes(),
       if (active != null && active.tool != InkTool.eraser) active,
     ];
     Offset position(Offset point) =>

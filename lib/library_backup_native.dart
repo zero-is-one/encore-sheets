@@ -179,7 +179,33 @@ Map<String, dynamic> _jsonEntry(ArchiveFile? entry) {
 }
 
 void _validateInk(Map<String, dynamic> pages) {
+  final layers = <String>{};
+  if (pages.containsKey('layers')) {
+    final data = pages['layers'];
+    if (data is! List || data.isEmpty) {
+      throw const FormatException('Invalid annotation layers');
+    }
+    var activeCount = 0;
+    for (final layer in data) {
+      if (layer
+          case {
+            'id': final String id,
+            'name': final String name,
+            'visible': final bool visible,
+          }
+          when id.isNotEmpty && name.isNotEmpty && layers.add(id)) {
+        if (layer['active'] == true && (!visible || ++activeCount > 1)) {
+          throw const FormatException('Invalid active annotation layer');
+        }
+      } else {
+        throw const FormatException('Invalid annotation layer');
+      }
+    }
+  } else {
+    layers.add('base');
+  }
   for (final MapEntry(key: page, value: strokes) in pages.entries) {
+    if (page == 'layers') continue;
     if ((int.tryParse(page) ?? 0) < 1 || strokes is! List) {
       throw const FormatException('Invalid annotation page');
     }
@@ -191,6 +217,9 @@ void _validateInk(Map<String, dynamic> pages) {
         throw const FormatException('Invalid annotation stroke');
       }
       final text = stroke['text'];
+      if (!layers.contains(stroke['layer'] ?? 'base')) {
+        throw const FormatException('Unknown annotation layer');
+      }
       if (stroke['tool'] == 'text'
           ? text is! String || text.isEmpty || text.length > 2000
           : text != null) {

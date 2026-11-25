@@ -37,6 +37,15 @@ void main() {
       await original.createCollection('Empty library');
       await original.assignCollections(second.id, ['Choir']);
       final annotation = {
+        'layers': [
+          {'id': 'base', 'name': 'Annotations', 'visible': true},
+          {
+            'id': 'practice',
+            'name': 'Practice',
+            'visible': true,
+            'active': true,
+          },
+        ],
         '3': [
           {
             'tool': 'highlighter',
@@ -50,6 +59,7 @@ void main() {
           {
             'tool': 'text',
             'text': 'Bring out the melody',
+            'layer': 'practice',
             'width': .03,
             'points': [
               [.12, .65],

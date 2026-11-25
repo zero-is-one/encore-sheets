@@ -7,6 +7,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'ink_layers_dialog.dart';
 import 'pdf_assembly_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
@@ -104,6 +105,8 @@ class _ReaderState extends State<Reader> {
   InkShape? _shape;
   bool _freeformSelection = false;
   List<Map<String, dynamic>> _inkClipboard = [];
+  List<InkLayer> _inkLayers = [defaultInkLayer];
+  String? _activeInkLayer = defaultInkLayer.id;
   String? _stamp;
   List<String> _personalStamps = [];
   double? _penWidth;
@@ -837,6 +840,19 @@ class _ReaderState extends State<Reader> {
     final id = _entry?.id;
     if (id == null) return;
     final pages = <String, dynamic>{};
+    if (_inkLayers.length != 1 ||
+        _inkLayers.single != defaultInkLayer ||
+        _activeInkLayer != defaultInkLayer.id) {
+      pages['layers'] = [
+        for (final layer in _inkLayers)
+          {
+            'id': layer.id,
+            'name': layer.name,
+            'visible': layer.visible,
+            if (layer.id == _activeInkLayer) 'active': true,
+          },
+      ];
+    }
     for (final MapEntry(key: page, value: ink) in _ink.entries) {
       final strokes = ink.snapshot();
       if (strokes.isNotEmpty) pages['$page'] = strokes;
@@ -864,12 +880,41 @@ class _ReaderState extends State<Reader> {
     if (_entry?.id != entry?.id) {
       _previousItem = (id: _entry?.id, page: _page);
     }
+    final savedLayers = annotations['layers'];
+    final layers = <InkLayer>[
+      if (savedLayers is List)
+        for (final layer in savedLayers)
+          if (layer case {
+            'id': final String id,
+            'name': final String name,
+            'visible': final bool visible,
+          })
+            (id: id, name: name, visible: visible),
+    ];
+    if (layers.isEmpty) layers.add(defaultInkLayer);
+    final visible = [
+      for (final layer in layers)
+        if (layer.visible) layer.id,
+    ];
+    final nomination = savedLayers is List
+        ? savedLayers
+              .whereType<Map>()
+              .where((layer) => layer['active'] == true)
+              .firstOrNull
+        : null;
+    final nominated = nomination?['id'] ?? defaultInkLayer.id;
+    final active =
+        visible.where((id) => id == nominated).firstOrNull ??
+        visible.firstOrNull;
     final restoredInk = {
       for (final MapEntry(key: page, value: strokes) in annotations.entries)
-        int.parse(page): PageInk(
-          saved: strokes as List<dynamic>,
-          onChanged: _saveInk,
-        ),
+        if (int.tryParse(page) case final pageNumber?)
+          pageNumber: PageInk(
+            saved: strokes as List<dynamic>,
+            onChanged: _saveInk,
+            activeLayer: active,
+            visibleLayers: visible,
+          ),
     };
     final retiredInk = _ink.values.toList();
     setState(() {
@@ -882,6 +927,8 @@ class _ReaderState extends State<Reader> {
       _viewer = PdfViewerController();
       _ink.clear();
       _ink.addAll(restoredInk);
+      _inkLayers = layers;
+      _activeInkLayer = active;
       _page = _initialPage = startPage ?? entry?.page ?? 1;
       _previousPage = null;
       _pages = 0;
@@ -894,6 +941,41 @@ class _ReaderState extends State<Reader> {
         ink.dispose();
       }
     });
+  }
+
+  PageInk _newPageInk() => PageInk(
+    onChanged: _saveInk,
+    activeLayer: _activeInkLayer,
+    visibleLayers: [
+      for (final layer in _inkLayers)
+        if (layer.visible) layer.id,
+    ],
+  );
+
+  Future<void> _showInkLayers() async {
+    final revision = _revision;
+    final settings = await showDialog<InkLayerSettings>(
+      context: context,
+      builder: (_) =>
+          InkLayersDialog(layers: _inkLayers, active: _activeInkLayer),
+    );
+    if (!mounted || settings == null || revision != _revision) return;
+    final visible = [
+      for (final layer in settings.layers)
+        if (layer.visible) layer.id,
+    ];
+    setState(() {
+      _inkLayers = settings.layers;
+      _activeInkLayer = settings.active;
+    });
+    for (final ink in _ink.values) {
+      ink.configureLayers(
+        active: settings.active,
+        visible: visible,
+        changes: settings.changes,
+      );
+    }
+    await _saveInk();
   }
 
   void _go(int page) {
@@ -1224,7 +1306,7 @@ class _ReaderState extends State<Reader> {
             fullSize: size,
             indicator: _preferences.halfPageIndicator,
             overlay: InkSurface(
-              ink: _ink.putIfAbsent(next, () => PageInk(onChanged: _saveInk)),
+              ink: _ink.putIfAbsent(next, _newPageInk),
               enabled: false,
               allowFinger: false,
               tool: InkTool.pen,
@@ -1440,10 +1522,7 @@ class _ReaderState extends State<Reader> {
         Positioned.fill(
           child: InkSurface(
             key: ValueKey(page.pageNumber),
-            ink: _ink.putIfAbsent(
-              page.pageNumber,
-              () => PageInk(onChanged: _saveInk),
-            ),
+            ink: _ink.putIfAbsent(page.pageNumber, _newPageInk),
             enabled: _inking,
             allowFinger: _allowFinger || _shape != null,
             tool: _tool,
@@ -2090,6 +2169,11 @@ class _ReaderState extends State<Reader> {
                 ),
                 if (_tool == InkTool.selection && _ink[_page] != null)
                   _selectionActions(_ink[_page]!),
+                IconButton(
+                  tooltip: 'Annotation layers',
+                  onPressed: _showInkLayers,
+                  icon: const Icon(Icons.layers_outlined),
+                ),
                 Semantics(
                   label: 'Allow finger drawing',
                   child: ChoiceChip(
