@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:printing/printing.dart';
 
 import 'practice_activity.dart';
 import 'practice_goals.dart';
+import 'practice_report.dart';
 import 'score_library.dart';
 
 enum PracticePeriod {
@@ -46,6 +48,7 @@ class PracticeDashboard extends StatefulWidget {
 class _PracticeDashboardState extends State<PracticeDashboard> {
   var _period = PracticePeriod.week;
   var _category = PracticeKind.score;
+  var _reportStyle = PracticeReportStyle.summary;
   List<PracticeEntry> _history = [];
   List<PracticeGoal> _goals = [];
   bool _busy = true;
@@ -63,6 +66,9 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
       final prefs = await widget.library.storage.readPreferences();
       _history = readPracticeActivity(prefs['practiceActivity']);
       _goals = readPracticeGoals(prefs['practiceGoals']);
+      if (prefs['practiceReportStyle'] == PracticeReportStyle.log.name) {
+        _reportStyle = PracticeReportStyle.log;
+      }
     } catch (_) {
       _error = 'Could not read practice history.';
     } finally {
@@ -137,6 +143,64 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
     }
   }
 
+  Future<void> _exportReport() async {
+    final choice = await showDialog<PracticeReportStyle>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Practice report layout'),
+        children: [
+          for (final style in [
+            _reportStyle,
+            ...PracticeReportStyle.values.where((item) => item != _reportStyle),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, style),
+              child: Text(style.label),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    final box = context.findRenderObject() as RenderBox;
+    final anchor = box.localToGlobal(Offset.zero) & box.size;
+    final now = DateTime.now();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final bytes = await buildPracticeReport(
+        history: _history.where(
+          (row) =>
+              row.selection.kind == _category && _period.includes(row, now),
+        ),
+        style: choice,
+        period: _period.label,
+        category: switch (_category) {
+          PracticeKind.score => 'Scores',
+          PracticeKind.bookmark => 'Bookmarks',
+          PracticeKind.setlist => 'Setlists',
+        },
+        generated: now,
+      );
+      await widget.library.updatePreferences({
+        'practiceReportStyle': choice.name,
+      });
+      _reportStyle = choice;
+      if (mounted) {
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: 'Practice report ${practiceDay(now)}.pdf',
+          bounds: anchor,
+        );
+      }
+    } catch (_) {
+      _error = 'Could not export the practice report.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -154,7 +218,16 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
     final rows = results.values.toList()
       ..sort((a, b) => b.seconds.compareTo(a.seconds));
     return Scaffold(
-      appBar: AppBar(title: const Text('Practice activity')),
+      appBar: AppBar(
+        title: const Text('Practice activity'),
+        actions: [
+          IconButton(
+            tooltip: 'Export practice report',
+            onPressed: _busy ? null : _exportReport,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
