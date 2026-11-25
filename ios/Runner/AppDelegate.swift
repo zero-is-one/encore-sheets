@@ -66,6 +66,9 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
   private var musicPickerResult: FlutterResult?
   private var musicTrackID: MPMediaEntityPersistentID?
   var presentedScore: (path: String, page: Int)?
+  #if compiler(>=6.4)
+  private var displayAccessoryRegistration: Any?
+  #endif
   nonisolated private let syncBookmark = "librarySyncFolder"
   private let syncQueue = DispatchQueue(label: "app.encoresheets.library-sync")
   override func application(
@@ -191,12 +194,29 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
         result(FlutterMethodNotImplemented)
         return
       }
+      #if compiler(>=6.4)
+      if #available(iOS 27.0, *) { self.updateDisplayAccessory() }
+      #endif
       for scene in UIApplication.shared.connectedScenes {
         (scene.delegate as? ScorePresentationSceneDelegate)?.refresh()
       }
       result(nil)
     }
   }
+
+  #if compiler(>=6.4)
+  @available(iOS 27.0, *)
+  private func updateDisplayAccessory() {
+    if let registration = displayAccessoryRegistration as? UISceneAccessoryRegistration {
+      registration.isEnabled = presentedScore != nil
+    } else if presentedScore != nil, let controller = frontController {
+      let configuration = UISceneConfiguration()
+      configuration.delegateClass = ScorePresentationSceneDelegate.self
+      let accessory = UISceneAccessory.externalNonInteractive(sceneConfiguration: configuration)
+      displayAccessoryRegistration = controller.registerSceneAccessory(accessory)
+    }
+  }
+  #endif
 
   func receiveScoreLink(_ url: URL) {
     guard url.scheme == "encoresheets", url.absoluteString.count <= 2048 else { return }
