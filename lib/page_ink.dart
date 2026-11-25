@@ -33,6 +33,7 @@ class _Stroke {
 }
 
 class PageInk extends ChangeNotifier {
+  static const eraserRadius = .018;
   PageInk({List<dynamic> saved = const [], this.onChanged})
     : _strokes = [
         for (final stroke in saved)
@@ -93,7 +94,9 @@ class PageInk extends ChangeNotifier {
   }
 
   static bool _touches(_Stroke mark, _Stroke eraser) {
-    const radius = .018;
+    final radius =
+        eraserRadius +
+        (mark.width ?? (mark.tool == InkTool.highlighter ? .023 : .003)) / 2;
     final points = eraser.points;
     for (var i = 0; i < points.length; i++) {
       final start = points[i == 0 ? 0 : i - 1];
@@ -259,6 +262,21 @@ class _InkPainter extends CustomPainter {
       }
       paint.style = PaintingStyle.stroke;
       canvas.drawPath(path, paint);
+    }
+    if (active?.tool == InkTool.eraser) {
+      final cursor = Paint()
+        ..color = const Color(0xff565e57)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      final center = position(active!.points.last);
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: center,
+          width: 2 * size.width * PageInk.eraserRadius,
+          height: 2 * size.height * PageInk.eraserRadius,
+        ),
+        cursor,
+      );
     }
   }
 
