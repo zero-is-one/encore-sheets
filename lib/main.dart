@@ -19,6 +19,8 @@ const _brass = Color(0xffe9bd75);
 
 enum _ReaderDisplay {
   fit,
+  zoomIn,
+  zoomOut,
   performance,
   hideControls,
   gestures,
@@ -736,6 +738,16 @@ class _ReaderState extends State<Reader> {
           controller.viewSize.width,
         );
         if (step != 0) return true;
+        if (details.type == PdfViewerGeneralTapType.doubleTap) {
+          if (controller.currentZoom > controller.coverScale * 1.02) {
+            _fit();
+          } else {
+            controller.zoomUpOnLocalPosition(
+              localPosition: details.localPosition,
+            );
+          }
+          return true;
+        }
         if (details.type != PdfViewerGeneralTapType.tap) return false;
         _focus.requestFocus();
         _performTap(0);
@@ -912,6 +924,10 @@ class _ReaderState extends State<Reader> {
                     switch (action) {
                       case _ReaderDisplay.fit:
                         _fit();
+                      case _ReaderDisplay.zoomIn:
+                        if (_viewer.isReady) _viewer.zoomUp();
+                      case _ReaderDisplay.zoomOut:
+                        if (_viewer.isReady) _viewer.zoomDown();
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -944,6 +960,14 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.zoomIn,
+                      child: Text('Zoom in'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.zoomOut,
+                      child: Text('Zoom out'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
