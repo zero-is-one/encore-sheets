@@ -6,6 +6,12 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
+            android:name=".ScoreWindowActivity"
+            android:exported="false"
+            android:taskAffinity="app.encoresheets.score-window"
+            android:documentLaunchMode="always"
+            android:resizeableActivity="true" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"

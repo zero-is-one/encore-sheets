@@ -80,6 +80,7 @@ enum _ReaderDisplay {
   midiDevices,
   midiAutomation,
   ensemble,
+  scoreWindow,
   appearance,
   accessibility,
   reflow,
@@ -2279,6 +2280,24 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _openScoreWindow() async {
+    final file = _file;
+    if (file == null || !_supportsSharedImport) return;
+    try {
+      await const MethodChannel('encoresheets/score-windows')
+          .invokeMethod<void>('open', {
+            'path': file.path,
+            'title': _title,
+            'page': _page,
+          });
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open another score window.')),
+        );
+    }
+  }
+
   Future<void> _followEnsemble(
     EnsemblePosition position,
     EnsembleFollowMode mode,
@@ -3625,6 +3644,8 @@ class _ReaderState extends State<Reader> {
                         _showMidiAutomation();
                       case _ReaderDisplay.ensemble:
                         _showEnsemble();
+                      case _ReaderDisplay.scoreWindow:
+                        _openScoreWindow();
                       case _ReaderDisplay.appearance:
                         _showAppearance();
                       case _ReaderDisplay.accessibility:
@@ -3804,6 +3825,12 @@ class _ReaderState extends State<Reader> {
                       const PopupMenuItem(
                         value: _ReaderDisplay.ensemble,
                         child: Text('Ensemble sync'),
+                      ),
+                    if (_supportsSharedImport)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.scoreWindow,
+                        enabled: _file != null,
+                        child: const Text('Open score in another window'),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.appearance,

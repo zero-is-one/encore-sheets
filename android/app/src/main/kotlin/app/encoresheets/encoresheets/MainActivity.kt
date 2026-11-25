@@ -102,6 +102,27 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/score-windows")
+            .setMethodCallHandler { call, result ->
+                val path = call.argument<String>("path")
+                if (call.method != "open" || path == null) {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    startActivity(Intent(this, ScoreWindowActivity::class.java).apply {
+                        putExtra("path", path)
+                        putExtra("title", call.argument<String>("title"))
+                        putExtra("page", call.argument<Int>("page") ?: 1)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
+                            Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                            Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+                    })
+                    result.success(null)
+                } catch (error: Exception) {
+                    result.error("window_unavailable", error.message, null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/scanner")
             .setMethodCallHandler { call, result ->
                 if (call.method == "scan") beginScan(result) else result.notImplemented()

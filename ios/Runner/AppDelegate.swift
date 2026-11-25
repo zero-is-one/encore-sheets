@@ -73,6 +73,43 @@ import MediaPlayer
       }
       self.handleMusic(call, result: result)
     }
+    let windows = FlutterMethodChannel(
+      name: "encoresheets/score-windows",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    windows.setMethodCallHandler { call, result in
+      guard call.method == "open",
+        let data = call.arguments as? [String: Any],
+        let path = data["path"] as? String,
+        let title = data["title"] as? String,
+        let page = data["page"] as? Int else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard UIApplication.shared.supportsMultipleScenes else {
+        result(FlutterError(code: "windows_unavailable", message: "This device does not support multiple app windows.", details: nil))
+        return
+      }
+      let activity = NSUserActivity(activityType: ScoreWindowSceneDelegate.activityType)
+      activity.userInfo = ["path": path, "title": title, "page": page]
+      UIApplication.shared.requestSceneSessionActivation(nil, userActivity: activity, options: nil) { error in
+        NSLog("EncoreSheets could not open the score window: %@", error.localizedDescription)
+      }
+      result(nil)
+    }
+  }
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    if options.userActivities.contains(where: { $0.activityType == ScoreWindowSceneDelegate.activityType }) {
+      let configuration = UISceneConfiguration(name: "Score window", sessionRole: connectingSceneSession.role)
+      configuration.delegateClass = ScoreWindowSceneDelegate.self
+      return configuration
+    }
+    return UISceneConfiguration(name: "flutter", sessionRole: connectingSceneSession.role)
   }
 
   private func handleMusic(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -164,6 +201,7 @@ import MediaPlayer
   private var frontController: UIViewController? {
     var controller = UIApplication.shared.connectedScenes
       .compactMap { $0 as? UIWindowScene }
+      .filter { $0.delegate is SceneDelegate }
       .flatMap { $0.windows }
       .first(where: { $0.isKeyWindow })?.rootViewController
     while let next = controller?.presentedViewController { controller = next }
