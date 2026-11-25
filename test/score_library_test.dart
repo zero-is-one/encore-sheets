@@ -28,6 +28,23 @@ class _TestEndpoint implements LibrarySyncEndpoint {
 }
 
 void main() {
+  test('page notes survive reopen and can be removed without affecting other pages', () async {
+    final folder = await Directory.systemTemp.createTemp('encore_page_notes');
+    addTearDown(() => folder.delete(recursive: true));
+    final library = ScoreLibrary(NativeLibraryStorage(directory: folder));
+    final (score, _) = await library.import(XFile('assets/first_light.pdf'));
+    await library.savePageNote(score.id, 1, ' Breathe before the repeat. ');
+    await library.savePageNote(score.id, 2, 'Play under the solo.');
+    final reopened = ScoreLibrary(NativeLibraryStorage(directory: folder));
+    await reopened.load();
+    expect(reopened.lookup(score.id)?.pageNotes, {
+      1: 'Breathe before the repeat.',
+      2: 'Play under the solo.',
+    });
+    await reopened.savePageNote(score.id, 1, '');
+    expect(reopened.lookup(score.id)?.pageNotes, {2: 'Play under the solo.'});
+  });
+
   test(
     'score copies share their PDF and keep independent saved markup',
     () async {

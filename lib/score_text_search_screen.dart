@@ -113,7 +113,7 @@ class _ScoreTextSearchScreenState extends State<ScoreTextSearchScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   subtitle: Text('Page ${match.page} · ${match.source.label}'),
-                  onTap: () => Navigator.pop(context, match.page),
+                  onTap: () => Navigator.pop(context, match),
                 );
               },
             ),

@@ -383,6 +383,20 @@ class ScoreLibrary {
         (old) => old.copyWith(collections: List.unmodifiable(names.toSet())),
       );
 
+  Future<void> savePageNote(String id, int page, String text) {
+    if (page < 1) throw ArgumentError.value(page, 'page');
+    return updateScore(id, (score) {
+      final notes = Map.of(score.pageNotes);
+      final cleaned = text.trim();
+      if (cleaned.isEmpty) {
+        notes.remove(page);
+      } else {
+        notes[page] = cleaned;
+      }
+      return score.copyWith(pageNotes: notes);
+    });
+  }
+
   Future<void> updateScore(String id, ScoreEntry Function(ScoreEntry) update) =>
       _serialize(() async {
         final old = _scores[id];

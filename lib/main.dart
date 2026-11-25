@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'page_note_dialog.dart';
 import 'drawing_settings.dart';
 import 'drawing_settings_dialog.dart';
 import 'page_crop.dart';
@@ -33,6 +34,7 @@ import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
 import 'score_text_search_screen.dart';
+import 'score_text_search.dart';
 import 'setlists_screen.dart';
 import 'text_annotation_dialog.dart';
 
@@ -44,6 +46,7 @@ const _brass = Color(0xffe9bd75);
 enum _ReaderDisplay {
   nowPlaying,
   findInScore,
+  pageNote,
   fit,
   zoomIn,
   zoomOut,
@@ -1094,9 +1097,9 @@ class _ReaderState extends State<Reader> {
     final first = _firstPage;
     final last = _lastPage;
     setState(() => _picking = true);
-    int? page;
+    ScoreTextMatch? match;
     try {
-      page = await _openReaderPanel<int>(
+      match = await _openReaderPanel<ScoreTextMatch>(
         (_) => ScoreTextSearchScreen(
           document: document,
           firstPage: first,
@@ -1108,7 +1111,35 @@ class _ReaderState extends State<Reader> {
     } finally {
       _finishPicking();
     }
-    if (mounted && revision == _revision && page != null) _go(page);
+    if (mounted && revision == _revision && match != null) {
+      _go(match.page);
+      if (match.source == ScoreTextSource.note) await _editPageNote(match.page);
+    }
+  }
+
+  Future<void> _editPageNote(int page) async {
+    final score = _entry;
+    if (_picking || score == null || page < _firstPage || page > _lastPage)
+      return;
+    setState(() => _picking = true);
+    try {
+      final before = score.pageNotes[page] ?? '';
+      final note = await showDialog<String>(
+        context: context,
+        builder: (_) => PageNoteDialog(page: page, note: before),
+      );
+      if (!mounted || note == null || note == before) return;
+      await _library.savePageNote(score.id, page, note);
+      if (mounted && _entry?.id == score.id)
+        setState(() => _entry = _library.lookup(score.id));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the page note.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   Future<void> _keepScreenAwake(bool enabled) async {
@@ -2117,6 +2148,25 @@ class _ReaderState extends State<Reader> {
             ),
           ),
         ),
+        if (!_inking &&
+            !_performance &&
+            _entry?.pageNotes.containsKey(page.pageNumber) == true)
+          Positioned(
+            top: (_cropFor(page.pageNumber)?.top ?? 0) * rect.height + 4,
+            left: rect.width / 2 - 22,
+            child: Material(
+              color: _rail,
+              shape: const CircleBorder(),
+              child: IconButton(
+                tooltip: 'Page ${page.pageNumber} note',
+                color: _brass,
+                icon: const Icon(Icons.sticky_note_2_outlined),
+                onPressed: _picking
+                    ? null
+                    : () => _editPageNote(page.pageNumber),
+              ),
+            ),
+          ),
         if (!_inking)
           for (final (link, point, target, returning) in _jumpMarkers())
             if (point.page == page.pageNumber)
@@ -2355,6 +2405,8 @@ class _ReaderState extends State<Reader> {
                         _showNowPlaying();
                       case _ReaderDisplay.findInScore:
                         _findInScore();
+                      case _ReaderDisplay.pageNote:
+                        _editPageNote(_page);
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2468,6 +2520,15 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.findInScore,
                       child: Text('Find in score'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.pageNote,
+                      enabled: _entry != null,
+                      child: Text(
+                        _entry?.pageNotes.containsKey(_page) == true
+                            ? 'Open page note'
+                            : 'Add page note',
+                      ),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
