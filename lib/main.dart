@@ -9,6 +9,7 @@ import 'page_ink.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
+import 'bookmarks_screen.dart';
 import 'score_library.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
@@ -24,6 +25,7 @@ enum _ReaderDisplay {
   zoomOut,
   previousPage,
   previousScore,
+  bookmarks,
   performance,
   hideControls,
   gestures,
@@ -456,23 +458,61 @@ class _ReaderState extends State<Reader> {
         );
         return;
       }
-      final entry = _library.lookup(result)!;
-      final local = await _library.storage.openScore(entry.id);
-      final bytes = kIsWeb ? await local.readAsBytes() : null;
-      if (!mounted) return;
-      if (_entry?.id != entry.id) {
-        final annotations = await _library.readInk(entry.id);
-        if (!mounted) return;
-        _load(entry, local, bytes, annotations: annotations);
+      if (result.startsWith('bookmark:')) {
+        final parts = result.split(':');
+        final entry = _library.lookup(parts[1])!;
+        final bookmark = entry.bookmarks.firstWhere(
+          (item) => item.id == parts[2],
+        );
+        await _openLibraryScore(entry, startPage: bookmark.page);
+      } else {
+        await _openLibraryScore(_library.lookup(result)!);
       }
-      setState(() => _playing = null);
-      _remember(entry.id, _page, opened: true);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not open the library or score.')),
         );
       }
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _openLibraryScore(ScoreEntry entry, {int? startPage}) async {
+    if (_entry?.id != entry.id) {
+      final local = await _library.storage.openScore(entry.id);
+      final bytes = kIsWeb ? await local.readAsBytes() : null;
+      final annotations = await _library.readInk(entry.id);
+      if (!mounted) return;
+      _load(
+        entry,
+        local,
+        bytes,
+        annotations: annotations,
+        startPage: startPage,
+      );
+    } else if (startPage != null) {
+      _jumpToPage(startPage);
+    }
+    setState(() => _playing = null);
+    _remember(entry.id, _page, opened: true);
+  }
+
+  Future<void> _showBookmarks() async {
+    final entry = _entry;
+    if (entry == null || _picking || _pages == 0) return;
+    setState(() => _picking = true);
+    try {
+      final bookmark = await _openReaderPanel<ScoreBookmark>(
+        (_) => BookmarksScreen(
+          library: _library,
+          scoreId: entry.id,
+          page: _page,
+          pageCount: _pages,
+        ),
+      );
+      if (mounted && bookmark != null) _jumpToPage(bookmark.page);
     } finally {
       _finishPicking();
     }
@@ -628,6 +668,11 @@ class _ReaderState extends State<Reader> {
       _nextScore();
       return;
     }
+    _jumpToPage(page);
+  }
+
+  void _jumpToPage(int page) {
+    if (!_viewer.isReady || _pages == 0) return;
     final target = page.clamp(1, _pages);
     if (target == _page) return;
     _ink[_page]?.finish(commit: false);
@@ -1022,6 +1067,8 @@ class _ReaderState extends State<Reader> {
                         if (_previousPage case final page?) _go(page);
                       case _ReaderDisplay.previousScore:
                         _returnToPreviousScore();
+                      case _ReaderDisplay.bookmarks:
+                        _showBookmarks();
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -1072,6 +1119,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.previousScore,
                       enabled: _previousItem != null,
                       child: const Text('Return to previous score'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.bookmarks,
+                      enabled: _entry != null,
+                      child: const Text('Bookmarks'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
@@ -1609,6 +1661,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   entry.value.toLowerCase().contains(_query),
             )
             .toList();
+    final matchingBookmarks = [
+      if (_query.isNotEmpty)
+        for (final score in inCollection)
+          for (final bookmark in score.bookmarks)
+            if (bookmark.title.toLowerCase().contains(_query))
+              (score, bookmark),
+    ];
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -1715,6 +1774,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   Expanded(
                     child:
                         visible.isEmpty &&
+                            matchingBookmarks.isEmpty &&
                             matchingSets.isEmpty &&
                             actions.isEmpty
                         ? Center(
@@ -1727,9 +1787,30 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         : ListView.builder(
                             itemCount:
                                 visible.length +
+                                matchingBookmarks.length +
                                 matchingSets.length +
                                 actions.length,
                             itemBuilder: (context, index) {
+                              if (index >= visible.length &&
+                                  index <
+                                      visible.length +
+                                          matchingBookmarks.length) {
+                                final (score, bookmark) =
+                                    matchingBookmarks[index - visible.length];
+                                return ListTile(
+                                  leading: const Icon(Icons.bookmark_outline),
+                                  title: Text(bookmark.title),
+                                  subtitle: Text(
+                                    '${score.title} · Page ${bookmark.page}',
+                                  ),
+                                  onTap: () => Navigator.pop(
+                                    context,
+                                    'bookmark:${score.id}:${bookmark.id}',
+                                  ),
+                                );
+                              }
+                              if (index >= visible.length)
+                                index -= matchingBookmarks.length;
                               if (index >=
                                   visible.length + matchingSets.length) {
                                 final action =

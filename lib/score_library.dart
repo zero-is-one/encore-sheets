@@ -4,6 +4,22 @@ import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
     as platform;
 
+class ScoreBookmark {
+  const ScoreBookmark(this.id, this.title, this.page);
+
+  factory ScoreBookmark.fromJson(Map<String, dynamic> json) => ScoreBookmark(
+    json['id'] as String,
+    json['title'] as String,
+    json['page'] as int,
+  );
+
+  final String id;
+  final String title;
+  final int page;
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'page': page};
+}
+
 class ScoreEntry {
   const ScoreEntry({
     required this.id,
@@ -12,6 +28,7 @@ class ScoreEntry {
     required this.openedAt,
     this.metadata = const {},
     this.collections = const [],
+    this.bookmarks = const [],
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -21,6 +38,10 @@ class ScoreEntry {
     openedAt: DateTime.parse(json['openedAt'] as String),
     metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
     collections: (json['collections'] as List?)?.cast<String>() ?? const [],
+    bookmarks: [
+      for (final item in (json['bookmarks'] as List? ?? const []))
+        ScoreBookmark.fromJson(item as Map<String, dynamic>),
+    ],
   );
 
   final String id;
@@ -29,6 +50,7 @@ class ScoreEntry {
   final DateTime openedAt;
   final Map<String, String> metadata;
   final List<String> collections;
+  final List<ScoreBookmark> bookmarks;
 
   ScoreEntry copyWith({
     String? id,
@@ -37,6 +59,7 @@ class ScoreEntry {
     DateTime? openedAt,
     Map<String, String>? metadata,
     List<String>? collections,
+    List<ScoreBookmark>? bookmarks,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -44,6 +67,7 @@ class ScoreEntry {
     openedAt: openedAt ?? this.openedAt,
     metadata: metadata ?? this.metadata,
     collections: collections ?? this.collections,
+    bookmarks: bookmarks ?? this.bookmarks,
   );
 
   Map<String, dynamic> toJson() => {
@@ -53,6 +77,8 @@ class ScoreEntry {
     'openedAt': openedAt.toIso8601String(),
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (collections.isNotEmpty) 'collections': collections,
+    if (bookmarks.isNotEmpty)
+      'bookmarks': bookmarks.map((item) => item.toJson()).toList(),
   };
 }
 
