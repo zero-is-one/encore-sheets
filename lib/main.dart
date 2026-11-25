@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/services.dart';
 import 'package:flutter_midi_command/flutter_midi_command.dart';
+import 'package:flutter_midi_command_ble/flutter_midi_command_ble.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
@@ -39,6 +40,7 @@ import 'score_audio_dialog.dart';
 import 'practice_recordings.dart';
 import 'practice_recordings_dialog.dart';
 import 'metronome_dialog.dart';
+import 'midi_devices_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'tuner_dialog.dart';
@@ -65,6 +67,7 @@ enum _ReaderDisplay {
   metronome,
   tuner,
   inputShortcuts,
+  midiDevices,
   fit,
   zoomIn,
   zoomOut,
@@ -164,6 +167,9 @@ class _ReaderState extends State<Reader> {
   Map<String, ReaderShortcut> _shortcuts = {};
   final _midiShortcuts = StreamController<String>.broadcast();
   StreamSubscription<MidiPacket>? _midiInput;
+  late final _midi = MidiCommand(
+    bleTransport: _supportsSharedImport ? UniversalBleMidiTransport() : null,
+  );
   List<String> _libraryQueue = const [];
   int _setIndex = 0;
   bool _performance = false;
@@ -1828,7 +1834,7 @@ class _ReaderState extends State<Reader> {
 
   void _listenToMidi() {
     if (!ScoreAudioSession.supported || _midiInput != null) return;
-    final stream = MidiCommand().onMidiPacketReceived;
+    final stream = _midi.onMidiPacketReceived;
     _midiInput = stream?.listen((packet) {
       if (!mounted) return;
       final key = shortcutMidi(packet.data);
@@ -1889,6 +1895,21 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save input shortcuts.')),
         );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showMidiDevices() async {
+    if (_picking || !_supportsSharedImport) return;
+    setState(() => _picking = true);
+    try {
+      _listenToMidi();
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => MidiDevicesDialog(midi: _midi),
+      );
     } finally {
       _finishPicking();
     }
@@ -2784,6 +2805,8 @@ class _ReaderState extends State<Reader> {
                         _showTuner();
                       case _ReaderDisplay.inputShortcuts:
                         _showInputShortcuts();
+                      case _ReaderDisplay.midiDevices:
+                        _showMidiDevices();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2938,6 +2961,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.inputShortcuts,
                       child: Text('Input shortcuts'),
                     ),
+                    if (_supportsSharedImport)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.midiDevices,
+                        child: Text('Pedals and MIDI devices'),
+                      ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
