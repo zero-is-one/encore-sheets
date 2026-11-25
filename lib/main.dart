@@ -34,6 +34,7 @@ enum _ReaderDisplay {
   halfSplit,
   halfIndicator,
   landscapeWidth,
+  spreads,
   performance,
   hideControls,
   gestures,
@@ -811,6 +812,10 @@ class _ReaderState extends State<Reader> {
 
   void _turn(int step) {
     if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (_spreadStep > 0) {
+      _go(_page + step * _spreadStep);
+      return;
+    }
     if (_landscapeWidth && !_inking && _turnLandscapeSection(step)) return;
     if (!_preferences.halfPageTurns || _inking) {
       _go(_page + step);
@@ -828,8 +833,14 @@ class _ReaderState extends State<Reader> {
       setState(() => _halfPreview = turn.preview);
   }
 
+  int get _spreadStep =>
+      _inking || _itemBookmark != null || _preferences.halfPageTurns
+      ? 0
+      : _preferences.spreadStep;
+
   bool get _landscapeWidth =>
       _preferences.landscapeWidth &&
+      _spreadStep == 0 &&
       !_preferences.halfPageTurns &&
       MediaQuery.orientationOf(context) == Orientation.landscape;
 
@@ -864,7 +875,16 @@ class _ReaderState extends State<Reader> {
       _page = target;
       _halfPreview = false;
     });
-    _viewer.goToPage(pageNumber: target, duration: Duration.zero);
+    if (_spreadStep == 1) {
+      final viewer = _viewer;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _viewer == viewer && viewer.isReady && _page == target) {
+          viewer.goToPage(pageNumber: target, duration: Duration.zero);
+        }
+      });
+    } else {
+      _viewer.goToPage(pageNumber: target, duration: Duration.zero);
+    }
     _remember(_entry?.id, target);
   }
 
@@ -1038,7 +1058,13 @@ class _ReaderState extends State<Reader> {
     final pageBeforeResize = _page;
     final params = PdfViewerParams(
       backgroundColor: _stand,
-      layoutStrategy: _landscapeWidth
+      layoutStrategy: _spreadStep > 0
+          ? FacingPagesLayout(
+              coverPage: _spreadStep == 1 && _page.isEven,
+              fitMode: PdfFitMode.fit,
+              singlePagesFillAvailableWidth: true,
+            )
+          : _landscapeWidth
           ? const SequentialPagesLayout(fitMode: PdfFitMode.fill, margin: 12)
           : const SequentialPagesLayout(
               scrollDirection: Axis.horizontal,
@@ -1046,6 +1072,20 @@ class _ReaderState extends State<Reader> {
               margin: 12,
             ),
       paging: const PdfPaging(duration: Duration(milliseconds: 140)),
+      calculateCurrentPageNumber: _spreadStep == 0
+          ? null
+          : (visible, pages, controller) {
+              for (final spread in controller.layout.spreads) {
+                final first = pages[spread.firstPageNumber - 1];
+                final last = pages[spread.lastPageNumber - 1];
+                final bounds = first.expandToInclude(last);
+                if (bounds.top <= visible.center.dy &&
+                    bounds.bottom >= visible.center.dy) {
+                  return spread.firstPageNumber;
+                }
+              }
+              return _page;
+            },
       pageAnchor: _landscapeWidth
           ? PdfPageAnchor.topCenter
           : PdfPageAnchor.center,
@@ -1417,7 +1457,7 @@ class _ReaderState extends State<Reader> {
                   tooltip: 'Display options',
                   enabled: _pages > 0 && !_picking,
                   icon: const Icon(Icons.tune),
-                  onSelected: (action) {
+                  onSelected: (action) async {
                     switch (action) {
                       case _ReaderDisplay.fit:
                         _fit();
@@ -1453,6 +1493,33 @@ class _ReaderState extends State<Reader> {
                             landscapeWidth: !_preferences.landscapeWidth,
                           ),
                         );
+                      case _ReaderDisplay.spreads:
+                        final step = await showDialog<int>(
+                          context: context,
+                          builder: (context) => SimpleDialog(
+                            title: const Text('Page layout'),
+                            children: [
+                              for (final (step, label) in [
+                                (0, 'Single page'),
+                                (1, 'Two pages · advance one'),
+                                (2, 'Two pages · advance two'),
+                              ])
+                                SimpleDialogOption(
+                                  onPressed: () => Navigator.pop(context, step),
+                                  child: Text(label),
+                                ),
+                            ],
+                          ),
+                        );
+                        if (step != null && mounted) {
+                          _savePreferences(
+                            _preferences.copyWith(
+                              spreadStep: step,
+                              halfPageTurns:
+                                  step == 0 && _preferences.halfPageTurns,
+                            ),
+                          );
+                        }
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -1535,6 +1602,11 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.landscapeWidth,
                       checked: _preferences.landscapeWidth,
                       child: const Text('Fit width in landscape'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.spreads,
+                      checked: _preferences.spreadStep > 0,
+                      child: const Text('Two-page layout'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,

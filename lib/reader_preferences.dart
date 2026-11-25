@@ -19,6 +19,7 @@ class ReaderPreferences {
     this.halfPageTurns = false,
     this.halfPageIndicator = true,
     this.landscapeWidth = false,
+    this.spreadStep = 0,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -36,6 +37,11 @@ class ReaderPreferences {
       halfPageTurns: json['halfPageTurns'] == true,
       halfPageIndicator: json['halfPageIndicator'] != false,
       landscapeWidth: json['landscapeWidth'] == true,
+      spreadStep: switch (json['spreadStep']) {
+        1 => 1,
+        2 => 2,
+        _ => 0,
+      },
     );
   }
 
@@ -47,6 +53,7 @@ class ReaderPreferences {
   final bool halfPageTurns;
   final bool halfPageIndicator;
   final bool landscapeWidth;
+  final int spreadStep;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -57,6 +64,7 @@ class ReaderPreferences {
     bool? halfPageTurns,
     bool? halfPageIndicator,
     bool? landscapeWidth,
+    int? spreadStep,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -66,6 +74,7 @@ class ReaderPreferences {
     halfPageTurns: halfPageTurns ?? this.halfPageTurns,
     halfPageIndicator: halfPageIndicator ?? this.halfPageIndicator,
     landscapeWidth: landscapeWidth ?? this.landscapeWidth,
+    spreadStep: spreadStep ?? this.spreadStep,
   );
 
   Map<String, dynamic> toJson() => {
@@ -77,5 +86,6 @@ class ReaderPreferences {
     'halfPageTurns': halfPageTurns,
     'halfPageIndicator': halfPageIndicator,
     'landscapeWidth': landscapeWidth,
+    'spreadStep': spreadStep,
   };
 }
