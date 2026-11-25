@@ -43,6 +43,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan printed sheet music into EncoreSheets.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose sheet music images to turn into a PDF.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

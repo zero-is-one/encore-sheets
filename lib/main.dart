@@ -29,6 +29,7 @@ import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
 import 'score_library.dart';
+import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
@@ -578,16 +579,42 @@ class _ReaderState extends State<Reader> {
         await _open();
         return;
       }
+      if (result == 'import-images') {
+        final score = await _openReaderPanel<ScoreEntry>(
+          (_) => ScanCleanupScreen(library: _library),
+        );
+        if (mounted && score != null) await _openLibraryScore(score);
+        return;
+      }
       if (result == 'scan') {
         try {
           final path = await const MethodChannel('encoresheets/scanner')
               .invokeMethod<String>('scan');
           if (!mounted || path == null) return;
-          final score = await _openReaderPanel<ScoreEntry>(
-            (_) => PdfRearrangeScreen.scanned(
-              library: _library,
-              scan: XFile(path),
+          final clean = await showDialog<bool>(
+            context: context,
+            builder: (dialog) => SimpleDialog(
+              title: const Text('Review scan'),
+              children: [
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: const Text('Arrange pages'),
+                ),
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: const Text('Clean up images'),
+                ),
+              ],
             ),
+          );
+          if (!mounted || clean == null) return;
+          final score = await _openReaderPanel<ScoreEntry>(
+            (_) => clean
+                ? ScanCleanupScreen(library: _library, cameraPdf: XFile(path))
+                : PdfRearrangeScreen.scanned(
+                    library: _library,
+                    scan: XFile(path),
+                  ),
           );
           if (mounted && score != null) await _openLibraryScore(score);
         } on PlatformException catch (error) {
@@ -3229,6 +3256,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         onPressed: () => Navigator.pop(context, 'import'),
                         icon: const Icon(Icons.add),
                         label: const Text('Import PDF'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () =>
+                            Navigator.pop(context, 'import-images'),
+                        icon: const Icon(Icons.image_outlined),
+                        label: const Text('Import images'),
                       ),
                       if (widget.canScan)
                         TextButton.icon(
