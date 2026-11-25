@@ -1,6 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'score_library.dart';
+import 'setlist_order.dart';
+
+enum _SetlistAction { edit, duplicate, playInOrder, earlier, later }
 
 class SetlistsScreen extends StatefulWidget {
   const SetlistsScreen({super.key, required this.library});
@@ -12,6 +15,8 @@ class SetlistsScreen extends StatefulWidget {
 }
 
 class _SetlistsScreenState extends State<SetlistsScreen> {
+  SetlistOrder _sort = SetlistOrder.manual;
+
   Future<void> _edit([Setlist? initial]) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -35,26 +40,117 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     }
   }
 
-  Widget _row(Setlist list) => ListTile(
+  Future<void> _choosePlayOrder(Setlist list) async {
+    final order = await showDialog<SetlistOrder>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: Text('Play ${list.name}'),
+        children: [
+          for (final order in SetlistOrder.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, order),
+              child: Text(order.label),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || order == null) return;
+    final items = orderSetlistItems(
+      list.scores,
+      order,
+      title: (id) {
+        final found = widget.library.lookupSelection(id);
+        return found?.$2?.title ?? found?.$1.title ?? '';
+      },
+      lastPlayed: (id) => widget.library.lastSetlistPlay(list.id, id),
+    );
+    Navigator.pop(context, list.copyWith(scores: items));
+  }
+
+  Future<void> _move(Setlist current, Setlist other) async {
+    try {
+      await widget.library.moveSetlist(current.id, other.id);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not move the setlist.')),
+        );
+    }
+  }
+
+  Widget _row(Setlist list, List<Setlist> group, int index) => ListTile(
     leading: const Icon(Icons.queue_music),
     title: Text(list.name),
     subtitle: Text('${list.scores.length} scores'),
     onTap: list.scores.isEmpty
         ? () => _edit(list)
         : () => Navigator.pop(context, list),
-    trailing: PopupMenuButton<bool>(
+    trailing: PopupMenuButton<_SetlistAction>(
       tooltip: 'Options for ${list.name}',
-      onSelected: (duplicate) => duplicate ? _duplicate(list) : _edit(list),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: false, child: Text('Edit setlist')),
-        PopupMenuItem(value: true, child: Text('Duplicate setlist')),
+      onSelected: (action) {
+        switch (action) {
+          case _SetlistAction.edit:
+            _edit(list);
+          case _SetlistAction.duplicate:
+            _duplicate(list);
+          case _SetlistAction.playInOrder:
+            _choosePlayOrder(list);
+          case _SetlistAction.earlier:
+            _move(list, group[index - 1]);
+          case _SetlistAction.later:
+            _move(list, group[index + 1]);
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: _SetlistAction.edit,
+          child: Text('Edit setlist'),
+        ),
+        const PopupMenuItem(
+          value: _SetlistAction.duplicate,
+          child: Text('Duplicate setlist'),
+        ),
+        PopupMenuItem(
+          value: _SetlistAction.playInOrder,
+          enabled: list.scores.isNotEmpty,
+          child: const Text('Choose play order'),
+        ),
+        if (_sort == SetlistOrder.manual) ...[
+          PopupMenuItem(
+            value: _SetlistAction.earlier,
+            enabled: index > 0,
+            child: const Text('Move earlier'),
+          ),
+          PopupMenuItem(
+            value: _SetlistAction.later,
+            enabled: index + 1 < group.length,
+            child: const Text('Move later'),
+          ),
+        ],
       ],
     ),
   );
 
   @override
   Widget build(BuildContext context) {
-    final lists = widget.library.setlists;
+    final lists = orderSetlistItems(
+      widget.library.setlists,
+      _sort,
+      title: (list) => list.name,
+      lastPlayed: (list) => widget.library.lastSetlistPlay(list.id),
+    );
+    final grouped = <String, List<Setlist>>{};
+    for (final list in lists) {
+      (grouped[list.folder] ??= []).add(list);
+    }
+    List<Widget> rowsFor(String folder) {
+      final group = grouped[folder] ?? [];
+      return [
+        for (final (index, list) in group.indexed) _row(list, group, index),
+      ];
+    }
+
     final folders = {
       for (final list in lists)
         if (list.folder.isNotEmpty) list.folder,
@@ -63,6 +159,20 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       appBar: AppBar(
         title: const Text('Setlists'),
         actions: [
+          PopupMenuButton<SetlistOrder>(
+            tooltip: 'Sort setlists',
+            icon: const Icon(Icons.sort),
+            onSelected: (order) => setState(() => _sort = order),
+            itemBuilder: (_) => [
+              for (final order in SetlistOrder.values)
+                if (order != SetlistOrder.shuffle)
+                  CheckedPopupMenuItem(
+                    value: order,
+                    checked: _sort == order,
+                    child: Text(order.label),
+                  ),
+            ],
+          ),
           TextButton.icon(
             onPressed: _edit,
             icon: const Icon(Icons.add),
@@ -81,13 +191,9 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
                     key: PageStorageKey(folder),
                     leading: const Icon(Icons.folder_outlined),
                     title: Text(folder),
-                    children: [
-                      for (final list in lists)
-                        if (list.folder == folder) _row(list),
-                    ],
+                    children: rowsFor(folder),
                   ),
-                for (final list in lists)
-                  if (list.folder.isEmpty) _row(list),
+                ...rowsFor(''),
               ],
             ),
     );

@@ -253,6 +253,7 @@ class ScoreLibrary {
   final LibraryStorage storage;
   final _scores = <String, ScoreEntry>{};
   final _setlists = <String, Setlist>{};
+  final _setlistPlayed = <String, int>{};
   final _collections = <String>{};
   Future<void> _pending = Future.value();
 
@@ -358,6 +359,33 @@ class ScoreLibrary {
     _scores[id] = updated;
   });
   List<Setlist> get setlists => List.unmodifiable(_setlists.values);
+
+  int? lastSetlistPlay(String id, [String? selection]) =>
+      _setlistPlayed[selection == null ? id : '$id/$selection'];
+
+  Future<void> recordSetlistPlay(String id, String selection) =>
+      _serialize(() async {
+        final now = DateTime.now().microsecondsSinceEpoch;
+        final history = {..._setlistPlayed, id: now, '$id/$selection': now};
+        await storage.writePreferences({
+          ...await storage.readPreferences(),
+          'setlistPlayHistory': history,
+        });
+        _setlistPlayed.addAll(history);
+      });
+
+  Future<void> moveSetlist(String id, String adjacentId) =>
+      _serialize(() async {
+        final ordered = setlists.toList();
+        final start = ordered.indexWhere((list) => list.id == id);
+        final end = ordered.indexWhere((list) => list.id == adjacentId);
+        if (start < 0 || end < 0 || start == end) return;
+        ordered.insert(end, ordered.removeAt(start));
+        await storage.writeSetlists(ordered);
+        _setlists
+          ..clear()
+          ..addEntries(ordered.map((list) => MapEntry(list.id, list)));
+      });
 
   Future<void> batchMetadata(
     Set<String> ids,
@@ -632,6 +660,13 @@ class ScoreLibrary {
 
   Future<void> load() async {
     final preferences = await storage.readPreferences();
+    final history = preferences['setlistPlayHistory'];
+    if (history is Map) {
+      for (final row in history.entries) {
+        if (row.key is String && row.value is int)
+          _setlistPlayed[row.key] = row.value;
+      }
+    }
     _collections.addAll(
       (preferences['scoreCollections'] as List?)?.whereType<String>() ?? [],
     );

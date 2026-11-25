@@ -964,6 +964,11 @@ class _ReaderState extends State<Reader> {
       _setIndex = index;
     });
     _remember(entry.id, start, opened: true);
+    unawaited(
+      _library
+          .recordSetlistPlay(setlist.id, setlist.scores[index])
+          .catchError((Object _) {}),
+    );
   }
 
   Future<void> _editScore(ScoreEntry score) async {
