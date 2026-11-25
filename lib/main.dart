@@ -51,6 +51,7 @@ import 'ensemble_dialog.dart';
 import 'ensemble_session.dart';
 import 'rehearsal_piano.dart';
 import 'pdf_template.dart';
+import 'text_score_pdf.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -582,6 +583,72 @@ class _ReaderState extends State<Reader> {
     );
   }
 
+  Future<void> _importTextScores() async {
+    final documents = await openFiles(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Text and Word documents',
+          extensions: ['txt', 'rtf', 'doc', 'docx'],
+          mimeTypes: [
+            'text/plain',
+            'application/rtf',
+            'text/rtf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          ],
+          uniformTypeIdentifiers: [
+            'public.plain-text',
+            'public.rtf',
+            'com.microsoft.word.doc',
+            'org.openxmlformats.wordprocessingml.document',
+          ],
+        ),
+      ],
+    );
+    final converted = <XFile>[];
+    final failed = <String>[];
+    for (final file in documents) {
+      if (!mounted) return;
+      try {
+        if (await file.length() > 8 * 1024 * 1024) {
+          throw const FormatException('Choose a document under 8 MB.');
+        }
+        final name = file.name;
+        final separator = name.lastIndexOf('.');
+        if (separator <= 0)
+          throw const FormatException('File type is missing.');
+        final title = name.substring(0, separator);
+        final extension = name.substring(separator + 1).toLowerCase();
+        final source = await file.readAsBytes();
+        final result = await compute(
+          (Uint8List data) =>
+              convertTextScore(data, extension: extension, title: title),
+          source,
+        );
+        converted.add(_generatedScore(result, title));
+      } catch (error) {
+        failed.add(
+          error is FormatException
+              ? '${file.name}: ${error.message}'
+              : '${file.name} could not be converted.',
+        );
+      }
+    }
+    if (!mounted) return;
+    await _importScores(converted);
+    if (mounted && failed.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            failed.length == 1
+                ? failed.single
+                : 'Could not convert ${failed.length} documents. ${failed.first}',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<T?> _openReaderPanel<T>(WidgetBuilder builder) async {
     if (MediaQuery.sizeOf(context).width < 720 ||
         _preferences.fullScreenPanels) {
@@ -731,6 +798,10 @@ class _ReaderState extends State<Reader> {
         final bytes = await createTemplatePdf(config);
         if (mounted)
           await _importScores([_generatedScore(bytes, config.title)]);
+        return;
+      }
+      if (result == 'import-text') {
+        await _importTextScores();
         return;
       }
       if (result == 'scan') {
@@ -4806,6 +4877,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         {
               'import': 'Import PDF',
               'create-template': 'Create from template',
+              'import-text': 'Import text or Word document',
               'setlists': 'Setlists',
               if (widget.persistent) 'backup': 'Backup & restore',
               'sample': 'Open sample score',
@@ -4913,6 +4985,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             Navigator.pop(context, 'create-template'),
                         icon: const Icon(Icons.note_add_outlined),
                         label: const Text('Create from template'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(context, 'import-text'),
+                        icon: const Icon(Icons.text_snippet_outlined),
+                        label: const Text('Import text or Word'),
                       ),
                       TextButton.icon(
                         onPressed: () =>
