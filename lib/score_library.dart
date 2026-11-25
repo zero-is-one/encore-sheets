@@ -11,6 +11,7 @@ class ScoreEntry {
     required this.page,
     required this.openedAt,
     this.metadata = const {},
+    this.collections = const [],
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -19,6 +20,7 @@ class ScoreEntry {
     page: json['page'] as int,
     openedAt: DateTime.parse(json['openedAt'] as String),
     metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
+    collections: (json['collections'] as List?)?.cast<String>() ?? const [],
   );
 
   final String id;
@@ -26,6 +28,23 @@ class ScoreEntry {
   final int page;
   final DateTime openedAt;
   final Map<String, String> metadata;
+  final List<String> collections;
+
+  ScoreEntry copyWith({
+    String? id,
+    String? title,
+    int? page,
+    DateTime? openedAt,
+    Map<String, String>? metadata,
+    List<String>? collections,
+  }) => ScoreEntry(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    page: page ?? this.page,
+    openedAt: openedAt ?? this.openedAt,
+    metadata: metadata ?? this.metadata,
+    collections: collections ?? this.collections,
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -33,6 +52,7 @@ class ScoreEntry {
     'page': page,
     'openedAt': openedAt.toIso8601String(),
     if (metadata.isNotEmpty) 'metadata': metadata,
+    if (collections.isNotEmpty) 'collections': collections,
   };
 }
 
@@ -82,12 +102,52 @@ class ScoreLibrary {
   final LibraryStorage storage;
   final _scores = <String, ScoreEntry>{};
   final _setlists = <String, Setlist>{};
+  final _collections = <String>{};
   Future<void> _pending = Future.value();
 
   List<ScoreEntry> get recent =>
       _scores.values.toList()..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
   ScoreEntry? lookup(String id) => _scores[id];
+  List<String> get collections => {
+    ..._collections,
+    for (final score in _scores.values) ...score.collections,
+  }.toList()..sort();
+
+  Future<void> updatePreferences(Map<String, dynamic> changes) => _serialize(
+    () async => storage.writePreferences({
+      ...await storage.readPreferences(),
+      ...changes,
+    }),
+  );
+
+  Future<void> createCollection(String name) => _serialize(() async {
+    final title = name.trim();
+    if (title.isEmpty || collections.contains(title)) return;
+    final next = {..._collections, title};
+    await storage.writePreferences({
+      ...await storage.readPreferences(),
+      'scoreCollections': next.toList(),
+    });
+    _collections.add(title);
+  });
+
+  Future<void> assignCollections(String id, Iterable<String> names) =>
+      updateScore(
+        id,
+        (old) => old.copyWith(collections: List.unmodifiable(names.toSet())),
+      );
+
+  Future<void> updateScore(String id, ScoreEntry Function(ScoreEntry) update) =>
+      _serialize(() async {
+        final old = _scores[id];
+        if (old == null) return;
+        final changed = update(old);
+        await storage.writeIndex([
+          for (final score in _scores.values) score.id == id ? changed : score,
+        ]);
+        _scores[id] = changed;
+      });
 
   Future<void> editMetadata(
     String id,
@@ -104,13 +164,7 @@ class ScoreLibrary {
         metadata[key] = value;
       }
     }
-    final updated = ScoreEntry(
-      id: id,
-      title: title,
-      page: old.page,
-      openedAt: old.openedAt,
-      metadata: metadata,
-    );
+    final updated = old.copyWith(title: title, metadata: metadata);
     await storage.writeIndex([
       for (final score in _scores.values) score.id == id ? updated : score,
     ]);
@@ -152,13 +206,7 @@ class ScoreLibrary {
     } else {
       metadata[field] = combined;
     }
-    return ScoreEntry(
-      id: old.id,
-      title: old.title,
-      page: old.page,
-      openedAt: old.openedAt,
-      metadata: metadata,
-    );
+    return old.copyWith(metadata: metadata);
   }
 
   Future<void> saveSetlist(Setlist setlist) => _serialize(() async {
@@ -197,6 +245,10 @@ class ScoreLibrary {
       _serialize(() => storage.writeInk(id, pages));
 
   Future<void> load() async {
+    final preferences = await storage.readPreferences();
+    _collections.addAll(
+      (preferences['scoreCollections'] as List?)?.whereType<String>() ?? [],
+    );
     for (final score in await storage.readIndex()) {
       _scores[score.id] = score;
     }
@@ -243,12 +295,9 @@ class ScoreLibrary {
       _serialize(() async {
         final old = _scores[id];
         if (old == null || (!opened && old.page == page)) return;
-        final updated = ScoreEntry(
-          id: id,
-          title: old.title,
+        final updated = old.copyWith(
           page: page,
-          openedAt: opened ? DateTime.now().toUtc() : old.openedAt,
-          metadata: old.metadata,
+          openedAt: opened ? DateTime.now().toUtc() : null,
         );
         await storage.writeIndex([
           for (final entry in _scores.values) entry.id == id ? updated : entry,

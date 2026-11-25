@@ -242,7 +242,7 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _savePreferences(ReaderPreferences configured) async {
     try {
-      await _library.storage.writePreferences(configured.toJson());
+      await _library.updatePreferences(configured.toJson());
       if (mounted) {
         setState(() => _preferences = configured);
         _keepScreenAwake(_performance || _preferences.keepAwake);
@@ -399,6 +399,7 @@ class _ReaderState extends State<Reader> {
           ? 'setlists'
           : await _openReaderPanel<String>(
               (_) => _LibraryScreen(
+                library: _library,
                 scores: _library.recent,
                 setlists: _library.setlists,
                 persistent: _library.storage.persistent,
@@ -1381,12 +1382,14 @@ class _EdgeTapTracker {
 
 class _LibraryScreen extends StatefulWidget {
   const _LibraryScreen({
+    required this.library,
     required this.scores,
     required this.setlists,
     required this.persistent,
   });
 
   final List<ScoreEntry> scores;
+  final ScoreLibrary library;
   final List<Setlist> setlists;
   final bool persistent;
 
@@ -1398,6 +1401,152 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   String _query = '';
   String _browseBy = 'Recent';
   String? _category;
+  String? _collection;
+  bool _excludeCollection = false;
+  bool _unassigned = false;
+
+  Future<void> _chooseCollection() => showDialog<void>(
+    context: context,
+    builder: (dialog) => SimpleDialog(
+      title: const Text('Libraries'),
+      children: [
+        SimpleDialogOption(
+          onPressed: () => _filterCollection(dialog, null),
+          child: const Text('All scores'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => _filterCollection(dialog, null, unassigned: true),
+          child: const Text('Unassigned scores'),
+        ),
+        for (final name in widget.library.collections)
+          ListTile(
+            title: Text(name),
+            onTap: () => _filterCollection(dialog, name),
+            trailing: IconButton(
+              tooltip: 'Exclude $name',
+              icon: const Icon(Icons.remove_circle_outline),
+              onPressed: () => _filterCollection(dialog, name, exclude: true),
+            ),
+          ),
+        SimpleDialogOption(
+          onPressed: () {
+            Navigator.pop(dialog);
+            _createCollection();
+          },
+          child: const Text('New library'),
+        ),
+      ],
+    ),
+  );
+
+  void _filterCollection(
+    BuildContext dialog,
+    String? name, {
+    bool exclude = false,
+    bool unassigned = false,
+  }) {
+    setState(() {
+      _collection = name;
+      _excludeCollection = exclude;
+      _unassigned = unassigned;
+      _category = null;
+    });
+    Navigator.pop(dialog);
+  }
+
+  Future<void> _createCollection() async {
+    var name = '';
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('New library'),
+        content: TextField(
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Library name'),
+          onChanged: (value) => name = value,
+          onSubmitted: (value) => Navigator.pop(dialog, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, name),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result.trim().isEmpty || !mounted) return;
+    await _saveCollectionChange(() => widget.library.createCollection(result));
+  }
+
+  Future<void> _assignCollections(ScoreEntry score) async {
+    final checked = score.collections.toSet();
+    final names = widget.library.collections;
+    if (names.isEmpty) {
+      await _createCollection();
+      if (mounted && widget.library.collections.isNotEmpty)
+        await _assignCollections(score);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: Text('Libraries for ${score.title}'),
+          content: SizedBox(
+            width: 360,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final name in names)
+                  CheckboxListTile(
+                    title: Text(name),
+                    value: checked.contains(name),
+                    onChanged: (selected) => refresh(() {
+                      if (selected == true) {
+                        checked.add(name);
+                      } else {
+                        checked.remove(name);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _saveCollectionChange(
+        () => widget.library.assignCollections(score.id, checked),
+      );
+    }
+  }
+
+  Future<void> _saveCollectionChange(Future<void> Function() save) async {
+    try {
+      await save();
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save libraries.')),
+        );
+    }
+  }
 
   static const _fields = {
     'Composer': 'composer',
@@ -1414,7 +1563,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final visible = widget.scores
+    final inCollection = widget.library.recent.where((score) {
+      if (_unassigned) return score.collections.isEmpty;
+      if (_collection == null) return true;
+      return score.collections.contains(_collection) != _excludeCollection;
+    }).toList();
+    final visible = inCollection
         .where(
           (score) => [
             score.title,
@@ -1426,7 +1580,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
               _category == null || _categories(score).contains(_category),
         )
         .toList();
-    final categories = widget.scores.expand(_categories).toSet().toList()
+    final categories = inCollection.expand(_categories).toSet().toList()
       ..sort();
     if (_browseBy != 'Recent') {
       visible.sort(
@@ -1457,8 +1611,21 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             .toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Score library'),
+        title: Text(
+          _unassigned
+              ? 'Unassigned scores'
+              : _collection == null
+              ? 'Score library'
+              : _excludeCollection
+              ? 'Outside $_collection'
+              : _collection!,
+        ),
         actions: [
+          IconButton(
+            tooltip: 'Libraries',
+            onPressed: _chooseCollection,
+            icon: const Icon(Icons.folder_copy_outlined),
+          ),
           IconButton(
             tooltip: 'Edit multiple scores',
             onPressed: widget.scores.isEmpty
@@ -1594,13 +1761,28 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                 leading: const Icon(Icons.description_outlined),
                                 title: Text(score.title),
                                 subtitle: Text('Resume at page ${score.page}'),
-                                trailing: IconButton(
-                                  tooltip: 'Edit ${score.title} details',
-                                  icon: const Icon(Icons.info_outline),
-                                  onPressed: () => Navigator.pop(
-                                    context,
-                                    'edit:${score.id}',
-                                  ),
+                                trailing: PopupMenuButton<String>(
+                                  tooltip: 'Options for ${score.title}',
+                                  onSelected: (action) {
+                                    if (action == 'libraries') {
+                                      _assignCollections(score);
+                                    } else {
+                                      Navigator.pop(
+                                        context,
+                                        'edit:${score.id}',
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'details',
+                                      child: Text('Score details'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'libraries',
+                                      child: Text('Assign to libraries'),
+                                    ),
+                                  ],
                                 ),
                                 onTap: () => Navigator.pop(context, score.id),
                               );

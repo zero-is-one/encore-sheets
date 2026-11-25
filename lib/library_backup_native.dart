@@ -119,15 +119,7 @@ void _exportBackup(
         written.add(destination);
         destination.writeAsStringSync(jsonEncode(pages), flush: true);
       }
-      scores.add(
-        ScoreEntry(
-          id: id,
-          title: old.title,
-          page: old.page,
-          openedAt: old.openedAt,
-          metadata: old.metadata,
-        ),
-      );
+      scores.add(old.copyWith(id: id));
     }
 
     final listIds = existingSetlists.map((setlist) => setlist.id).toSet();
