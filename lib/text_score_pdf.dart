@@ -144,6 +144,7 @@ Future<Uint8List> convertTextScore(
   Uint8List bytes, {
   required String extension,
   required String title,
+  required ByteData fontData,
 }) {
   if (bytes.isEmpty || bytes.length > 8 * 1024 * 1024) {
     throw const FormatException('Choose a non-empty document under 8 MB.');
@@ -169,7 +170,10 @@ Future<Uint8List> convertTextScore(
       'The document contains no convertible text or is too long.',
     );
   }
-  final document = pdf.Document(title: title);
+  final document = pdf.Document(
+    title: title,
+    theme: pdf.ThemeData.withFont(base: pdf.Font.ttf(fontData)),
+  );
   final lines = text
       .replaceAll('\r\n', '\n')
       .replaceAll('\r', '\n')
@@ -181,12 +185,9 @@ Future<Uint8List> convertTextScore(
       maxPages: 160,
       build: (_) => [
         for (final line in lines)
-          pdf.Padding(
-            padding: const pdf.EdgeInsets.only(bottom: 3),
-            child: pdf.Text(
-              line.isEmpty ? ' ' : line.replaceAll('\t', '    '),
-              style: const pdf.TextStyle(fontSize: 11, lineSpacing: 2),
-            ),
+          pdf.Text(
+            line.isEmpty ? ' ' : line.replaceAll('\t', '    '),
+            style: const pdf.TextStyle(fontSize: 11, lineSpacing: 3),
           ),
       ],
     ),

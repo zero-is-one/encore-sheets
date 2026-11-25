@@ -52,6 +52,7 @@ import 'ensemble_session.dart';
 import 'rehearsal_piano.dart';
 import 'pdf_template.dart';
 import 'text_score_pdf.dart';
+import 'pdf_text_font.dart';
 import 'practice_activity.dart';
 import 'practice_dashboard.dart';
 import 'reader_restrictions.dart';
@@ -857,6 +858,8 @@ class _ReaderState extends State<Reader> {
     );
     final converted = <XFile>[];
     final failed = <String>[];
+    if (documents.isEmpty) return;
+    final fontData = await loadPdfTextFont();
     for (final file in documents) {
       if (!mounted) return;
       try {
@@ -871,8 +874,12 @@ class _ReaderState extends State<Reader> {
         final extension = name.substring(separator + 1).toLowerCase();
         final source = await file.readAsBytes();
         final result = await compute(
-          (Uint8List data) =>
-              convertTextScore(data, extension: extension, title: title),
+          (Uint8List data) => convertTextScore(
+            data,
+            extension: extension,
+            title: title,
+            fontData: fontData,
+          ),
           source,
         );
         converted.add(_generatedScore(result, title));

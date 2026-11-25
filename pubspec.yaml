@@ -37,3 +37,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/first_light.pdf
+    - assets/NotoSans-Regular.ttf
+    - assets/NotoSans-OFL.txt

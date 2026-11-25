@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pdf;
 
 import 'practice_activity.dart';
+import 'pdf_text_font.dart';
 
 enum PracticeReportStyle {
   summary('Summary by item'),
@@ -19,7 +20,7 @@ Future<Uint8List> buildPracticeReport({
   required String period,
   required String category,
   required DateTime generated,
-}) {
+}) async {
   final totals = <String, ({String title, int seconds, int views})>{};
   final entries = history.toList()..sort((a, b) => b.day.compareTo(a.day));
   if (style == PracticeReportStyle.summary) {
@@ -56,7 +57,10 @@ Future<Uint8List> buildPracticeReport({
             ],
         ];
 
-  final document = pdf.Document(title: 'EncoreSheets practice report');
+  final document = pdf.Document(
+    title: 'EncoreSheets practice report',
+    theme: pdf.ThemeData.withFont(base: pdf.Font.ttf(await loadPdfTextFont())),
+  );
   document.addPage(
     pdf.MultiPage(
       maxPages: 500,
