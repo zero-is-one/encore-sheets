@@ -52,6 +52,8 @@ import 'ensemble_session.dart';
 import 'rehearsal_piano.dart';
 import 'pdf_template.dart';
 import 'text_score_pdf.dart';
+import 'practice_activity.dart';
+import 'practice_dashboard.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -77,6 +79,7 @@ enum _ReaderDisplay {
   pageActions,
   scoreAudio,
   practiceRecordings,
+  practiceActivity,
   metronome,
   tuner,
   piano,
@@ -186,6 +189,7 @@ class _ReaderState extends State<Reader> {
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
+  late final _practice = PracticeActivity(_library);
   EnsembleSession? _ensemble;
   bool _leadingSpread = false;
   bool _followingSpread = false;
@@ -277,9 +281,11 @@ class _ReaderState extends State<Reader> {
     }
     _lifecycle = AppLifecycleListener(
       onResume: () {
+        _focusPractice();
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
         if (_isAppleMobile) _syncIfReady();
       },
+      onHide: () => unawaited(_practice.suspend().catchError((Object _) {})),
     );
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler((call) async {
@@ -303,6 +309,7 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          _practice.enabled = data['practiceTracking'] == true;
           _midiPiano = data['midiPiano'] == true;
           if (data['readerShortcuts'] case final Map saved) {
             _shortcuts = {
@@ -327,6 +334,7 @@ class _ReaderState extends State<Reader> {
           }
         });
         _listenToMidi();
+        _focusPractice();
         if (_preferences.keepAwake) _keepScreenAwake(true);
       }
     } catch (_) {
@@ -461,6 +469,7 @@ class _ReaderState extends State<Reader> {
     unawaited(_piano?.dispose().catchError((Object _) {}));
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
+    unawaited(_practice.suspend().catchError((Object _) {}));
     unawaited(_ensemble?.close());
     if (_presenting) {
       unawaited(
@@ -560,6 +569,7 @@ class _ReaderState extends State<Reader> {
       if (!mounted) return;
       _playing = null;
       _load(entry, local, bytes);
+      _remember(entry.id, _page, opened: true);
     }
     if (failed > 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1455,6 +1465,45 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  void _focusPractice({bool opened = false}) {
+    final score = _entry;
+    final bookmark = _itemBookmark;
+    final list = _playing;
+    _practice.focus([
+      if (score != null)
+        (kind: PracticeKind.score, id: score.id, title: score.title),
+      if (score != null && bookmark != null)
+        (
+          kind: PracticeKind.bookmark,
+          id: bookmark.selectionId(score.id),
+          title: bookmark.title,
+        ),
+      if (score != null && list != null)
+        (kind: PracticeKind.setlist, id: list.id, title: list.name),
+    ], opened: opened);
+  }
+
+  Future<void> _showPracticeActivity() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      await _libraryReady;
+      await _practice.suspend();
+      if (!mounted) return;
+      await _openReaderPanel<void>(
+        (_) => PracticeDashboard(activity: _practice, library: _library),
+      );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open practice activity.')),
+        );
+    } finally {
+      if (mounted) _focusPractice();
+      _finishPicking();
+    }
+  }
+
   RehearsalMetronome get _rehearsalMeter => _metronome ??= RehearsalMetronome()
     ..soft = _preferences.softMetronome
     ..addListener(_onMetronomeBeat);
@@ -1829,6 +1878,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _remember(String? id, int page, {bool opened = false}) async {
+    if (opened && mounted) _focusPractice(opened: true);
     if (_presenting) unawaited(_updatePresentation());
     if (id == null) return;
     try {
@@ -2029,6 +2079,7 @@ class _ReaderState extends State<Reader> {
     if (scoreChanged && entry != null && ScoreAudioSession.supported) {
       unawaited(_sendScoreMidi(entry).catchError((Object _) {}));
     }
+    _focusPractice();
     if (_presenting) unawaited(_updatePresentation());
   }
 
@@ -3819,6 +3870,8 @@ class _ReaderState extends State<Reader> {
                         _showScoreAudio();
                       case _ReaderDisplay.practiceRecordings:
                         _showPracticeRecordings();
+                      case _ReaderDisplay.practiceActivity:
+                        _showPracticeActivity();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -3987,6 +4040,10 @@ class _ReaderState extends State<Reader> {
                         enabled: _entry != null,
                         child: const Text('Practice recordings'),
                       ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.practiceActivity,
+                      child: Text('Practice activity'),
+                    ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
                         value: _ReaderDisplay.metronome,
