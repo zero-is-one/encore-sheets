@@ -16,7 +16,8 @@ void main() {
       await original.load();
       final pdf = await File('assets/first_light.pdf').readAsBytes();
       final firstFile = await File('${root.path}/First.pdf').writeAsBytes(pdf);
-      final secondFile = await File('${root.path}/Second.pdf').writeAsBytes(pdf);
+      final secondFile = await File('${root.path}/Second.pdf')
+          .writeAsBytes(pdf);
       final (first, _) = await original.import(XFile(firstFile.path));
       final (second, _) = await original.import(XFile(secondFile.path));
       await original.record(second.id, 3);
@@ -24,6 +25,8 @@ void main() {
         '3': [
           {
             'tool': 'highlighter',
+            'width': .02,
+            'color': 0x663391ff,
             'points': [
               [.2, .3],
               [.4, .5],
