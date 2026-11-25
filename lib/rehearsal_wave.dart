@@ -45,13 +45,18 @@ Uint8List _wave(
   return bytes.buffer.asUint8List();
 }
 
-Uint8List metronomeWave(int bpm, int beats, RehearsalChannel channel) {
+Uint8List metronomeWave(
+  int bpm,
+  int beats,
+  RehearsalChannel channel, {
+  bool soft = false,
+}) {
   final spacing = rehearsalSampleRate * 60 / bpm;
   return _wave((beats * spacing).round(), (frame) {
     final beat = math.min(beats - 1, (frame / spacing).floor());
     final seconds = (frame - beat * spacing) / rehearsalSampleRate;
     if (seconds > .045) return 0;
-    final frequency = beat == 0 ? 1500 : 950;
+    final frequency = soft ? (beat == 0 ? 760 : 500) : (beat == 0 ? 1500 : 950);
     return math.sin(seconds * frequency * 2 * math.pi) *
         math.exp(-seconds * 100) *
         .62;

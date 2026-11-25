@@ -22,6 +22,10 @@ class ReaderPreferences {
     this.spreadStep = 0,
     this.sepia = false,
     this.pageDimming = 0,
+    this.fullScreenPanels = false,
+    this.largePageButtons = false,
+    this.complexGestures = true,
+    this.softMetronome = false,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -45,6 +49,10 @@ class ReaderPreferences {
         _ => 0,
       },
       sepia: json['sepia'] == true,
+      fullScreenPanels: json['fullScreenPanels'] == true,
+      largePageButtons: json['largePageButtons'] == true,
+      complexGestures: json['complexGestures'] != false,
+      softMetronome: json['softMetronome'] == true,
       pageDimming: switch (json['pageDimming']) {
         final num value when value.isFinite => value.toDouble().clamp(0.0, .75),
         _ => 0,
@@ -63,6 +71,7 @@ class ReaderPreferences {
   final int spreadStep;
   final bool sepia;
   final double pageDimming;
+  final bool fullScreenPanels, largePageButtons, complexGestures, softMetronome;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -76,6 +85,10 @@ class ReaderPreferences {
     int? spreadStep,
     bool? sepia,
     double? pageDimming,
+    bool? fullScreenPanels,
+    bool? largePageButtons,
+    bool? complexGestures,
+    bool? softMetronome,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -88,6 +101,10 @@ class ReaderPreferences {
     spreadStep: spreadStep ?? this.spreadStep,
     sepia: sepia ?? this.sepia,
     pageDimming: pageDimming ?? this.pageDimming,
+    fullScreenPanels: fullScreenPanels ?? this.fullScreenPanels,
+    largePageButtons: largePageButtons ?? this.largePageButtons,
+    complexGestures: complexGestures ?? this.complexGestures,
+    softMetronome: softMetronome ?? this.softMetronome,
   );
 
   Map<String, dynamic> toJson() => {
@@ -102,5 +119,9 @@ class ReaderPreferences {
     'spreadStep': spreadStep,
     'sepia': sepia,
     'pageDimming': pageDimming,
+    'fullScreenPanels': fullScreenPanels,
+    'largePageButtons': largePageButtons,
+    'complexGestures': complexGestures,
+    'softMetronome': softMetronome,
   };
 }

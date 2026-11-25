@@ -14,6 +14,7 @@ class RehearsalMetronome extends ChangeNotifier {
   int bpm = 96, beats = 4, unit = 4, beat = 0;
   bool audible = true, visual = true, countIn = false, countingIn = false;
   bool running = false;
+  bool soft = false;
   RehearsalChannel channel = RehearsalChannel.both;
 
   Future<void> start() async {
@@ -24,7 +25,7 @@ class RehearsalMetronome extends ChangeNotifier {
     );
     _wave = wave;
     try {
-      await wave.writeAsBytes(metronomeWave(bpm, beats, channel));
+      await wave.writeAsBytes(metronomeWave(bpm, beats, channel, soft: soft));
       await _player.setFilePath(wave.path);
       await _player.setLoopMode(LoopMode.one);
       await _player.setVolume(audible ? 1 : 0);

@@ -69,6 +69,7 @@ enum _ReaderDisplay {
   inputShortcuts,
   midiDevices,
   appearance,
+  accessibility,
   fit,
   zoomIn,
   zoomOut,
@@ -519,7 +520,8 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<T?> _openReaderPanel<T>(WidgetBuilder builder) {
-    if (MediaQuery.sizeOf(context).width < 720) {
+    if (MediaQuery.sizeOf(context).width < 720 ||
+        _preferences.fullScreenPanels) {
       return Navigator.of(context).push<T>(MaterialPageRoute(builder: builder));
     }
     return showGeneralDialog<T>(
@@ -988,7 +990,7 @@ class _ReaderState extends State<Reader> {
       final marker = JumpPoint(action.page, action.x, action.y);
       if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
               .distance <=
-          22) {
+          _pageTargetRadius) {
         _runScoreAction(action);
         return true;
       }
@@ -998,7 +1000,7 @@ class _ReaderState extends State<Reader> {
         continue;
       if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
               .distance <=
-          22) {
+          _pageTargetRadius) {
         _followJump(target);
         return true;
       }
@@ -1083,7 +1085,8 @@ class _ReaderState extends State<Reader> {
       switch (action.kind) {
         case ScoreActionKind.tempo:
           final tempo = int.parse(action.parameter!);
-          final meter = _metronome ??= RehearsalMetronome();
+          final meter = _metronome ??= RehearsalMetronome()
+            ..soft = _preferences.softMetronome;
           final wasRunning = meter.running;
           if (wasRunning) await meter.stop();
           meter.bpm = tempo;
@@ -1201,7 +1204,8 @@ class _ReaderState extends State<Reader> {
   Future<void> _showMetronome() async {
     if (_picking || !ScoreAudioSession.supported) return;
     final score = _entry;
-    final meter = _metronome ??= RehearsalMetronome();
+    final meter = _metronome ??= RehearsalMetronome()
+      ..soft = _preferences.softMetronome;
     if (!meter.running && score != null) {
       final tempo = int.tryParse(score.metadata['tempo'] ?? '');
       if (tempo != null) meter.bpm = tempo.clamp(25, 280);
@@ -1986,6 +1990,71 @@ class _ReaderState extends State<Reader> {
   }
 
   static const _sepiaTint = Color(0xffffedd1);
+  double get _pageTargetRadius => _preferences.largePageButtons ? 32 : 22;
+  double get _pageButtonSize => _preferences.largePageButtons ? 52 : 36;
+
+  Future<void> _showAccessibility() async {
+    var draft = _preferences;
+    final result = await showDialog<ReaderPreferences>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: const Text('Accessible reader controls'),
+          scrollable: true,
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: const Text('Full-screen menus'),
+                  value: draft.fullScreenPanels,
+                  onChanged: (value) => refresh(
+                    () => draft = draft.copyWith(fullScreenPanels: value),
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('Larger links and action buttons'),
+                  value: draft.largePageButtons,
+                  onChanged: (value) => refresh(
+                    () => draft = draft.copyWith(largePageButtons: value),
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('Double-tap and long-press gestures'),
+                  value: draft.complexGestures,
+                  onChanged: (value) => refresh(
+                    () => draft = draft.copyWith(complexGestures: value),
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('Softer metronome click'),
+                  value: draft.softMetronome,
+                  onChanged: (value) => refresh(
+                    () => draft = draft.copyWith(softMetronome: value),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, draft),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      if (_metronome case final meter?) meter.soft = result.softMetronome;
+      await _savePreferences(result);
+    }
+  }
 
   Future<void> _showAppearance() async {
     var sepia = _preferences.sepia;
@@ -2590,7 +2659,7 @@ class _ReaderState extends State<Reader> {
           return true;
         }
         if (details.type == PdfViewerGeneralTapType.longPress) {
-          if (!_performance) _toggleInk();
+          if (!_performance && _preferences.complexGestures) _toggleInk();
           return true;
         }
         final step = _EdgeTapTracker.direction(
@@ -2599,7 +2668,8 @@ class _ReaderState extends State<Reader> {
         );
         if (step != 0) return true;
         if (details.type == PdfViewerGeneralTapType.doubleTap) {
-          if (_preferences.halfPageTurns) return true;
+          if (_preferences.halfPageTurns || !_preferences.complexGestures)
+            return true;
           if (controller.currentZoom > controller.coverScale * 1.02) {
             _fit();
           } else {
@@ -2619,16 +2689,16 @@ class _ReaderState extends State<Reader> {
           for (final action in _entry?.actions ?? const <ScoreAction>[])
             if (action.page == page.pageNumber)
               Positioned(
-                left: action.x * rect.width - 18,
-                top: action.y * rect.height - 18,
+                left: action.x * rect.width - _pageButtonSize / 2,
+                top: action.y * rect.height - _pageButtonSize / 2,
                 child: Semantics(
                   button: true,
                   label: action.title,
                   onTap: () => _runScoreAction(action),
                   child: IgnorePointer(
                     child: Container(
-                      width: 36,
-                      height: 36,
+                      width: _pageButtonSize,
+                      height: _pageButtonSize,
                       decoration: BoxDecoration(
                         color: Color(action.color),
                         shape: BoxShape.circle,
@@ -2702,16 +2772,16 @@ class _ReaderState extends State<Reader> {
           for (final (link, point, target, returning) in _jumpMarkers())
             if (point.page == page.pageNumber)
               Positioned(
-                left: point.x * rect.width - 18,
-                top: point.y * rect.height - 18,
+                left: point.x * rect.width - _pageButtonSize / 2,
+                top: point.y * rect.height - _pageButtonSize / 2,
                 child: IgnorePointer(
                   child: Semantics(
                     label: returning ? 'Return from ${link.title}' : link.title,
                     button: true,
                     onTap: () => _followJump(target),
                     child: Container(
-                      width: 36,
-                      height: 36,
+                      width: _pageButtonSize,
+                      height: _pageButtonSize,
                       decoration: BoxDecoration(
                         color: returning ? _brass : const Color(0xff316989),
                         shape: BoxShape.circle,
@@ -2955,6 +3025,8 @@ class _ReaderState extends State<Reader> {
                         _showMidiDevices();
                       case _ReaderDisplay.appearance:
                         _showAppearance();
+                      case _ReaderDisplay.accessibility:
+                        _showAccessibility();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -3117,6 +3189,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.appearance,
                       child: Text('Reading appearance'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.accessibility,
+                      child: Text('Accessible reader controls'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,
