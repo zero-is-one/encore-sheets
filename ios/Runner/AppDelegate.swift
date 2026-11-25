@@ -1,14 +1,18 @@
 import Flutter
 import UIKit
 import VisionKit
+import UniformTypeIdentifiers
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
-  VNDocumentCameraViewControllerDelegate {
+  VNDocumentCameraViewControllerDelegate, UIDocumentPickerDelegate {
   private var importChannel: FlutterMethodChannel?
   private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
   private var scanResult: FlutterResult?
+  private var folderResult: FlutterResult?
+  nonisolated private let syncBookmark = "librarySyncFolder"
+  private let syncQueue = DispatchQueue(label: "app.encoresheets.library-sync")
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -47,23 +51,175 @@ import VisionKit
       }
       self.startScan(result)
     }
+    let sync = FlutterMethodChannel(
+      name: "encoresheets/library-sync",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    sync.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      self.handleSync(call, result: result)
+    }
   }
 
   func notifyPencilTap() {
     stylusChannel?.invokeMethod("switchTool", arguments: nil)
   }
 
+  private var frontController: UIViewController? {
+    var controller = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+      .first(where: { $0.isKeyWindow })?.rootViewController
+    while let next = controller?.presentedViewController { controller = next }
+    return controller
+  }
+
+  private func handleSync(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "configured":
+      result(UserDefaults.standard.data(forKey: syncBookmark) != nil)
+    case "disconnect":
+      UserDefaults.standard.removeObject(forKey: syncBookmark)
+      result(nil)
+    case "chooseFolder":
+      guard folderResult == nil, let presenter = frontController else {
+        result(FlutterError(code: "sync_picker", message: "Could not open Files.", details: nil))
+        return
+      }
+      let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+      picker.delegate = self
+      folderResult = result
+      presenter.present(picker, animated: true)
+    case "readDevices", "writeDevice", "fetchPdf", "publishPdf":
+      let method = call.method
+      let args = call.arguments as? [String: String] ?? [:]
+      syncQueue.async {
+        do {
+          let value = try self.performSync(method, args: args)
+          DispatchQueue.main.async { result(value) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "sync_io", message: error.localizedDescription, details: nil))
+          }
+        }
+      }
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController,
+                      didPickDocumentsAt urls: [URL]) {
+    let result = folderResult
+    folderResult = nil
+    guard let url = urls.first, url.startAccessingSecurityScopedResource() else {
+      result?(false)
+      return
+    }
+    defer { url.stopAccessingSecurityScopedResource() }
+    do {
+      let data = try url.bookmarkData(options: .minimalBookmark)
+      UserDefaults.standard.set(data, forKey: syncBookmark)
+      result?(true)
+    } catch {
+      result?(FlutterError(code: "sync_bookmark", message: error.localizedDescription, details: nil))
+    }
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    let result = folderResult
+    folderResult = nil
+    result?(false)
+  }
+
+  nonisolated private func performSync(_ method: String, args: [String: String]) throws -> Any? {
+    let files = FileManager.default
+    guard let bookmark = UserDefaults.standard.data(forKey: syncBookmark) else {
+      throw CocoaError(.fileReadNoSuchFile)
+    }
+    var stale = false
+    let selected = try URL(resolvingBookmarkData: bookmark, options: [.withoutUI],
+                           relativeTo: nil, bookmarkDataIsStale: &stale)
+    guard selected.startAccessingSecurityScopedResource() else {
+      throw CocoaError(.fileReadNoPermission)
+    }
+    defer { selected.stopAccessingSecurityScopedResource() }
+    if stale {
+      let fresh = try selected.bookmarkData(options: .minimalBookmark)
+      UserDefaults.standard.set(fresh, forKey: syncBookmark)
+    }
+    let root = selected.appendingPathComponent("EncoreSheets Sync", isDirectory: true)
+    try files.createDirectory(at: root, withIntermediateDirectories: true)
+    if method == "readDevices" {
+      let urls = try files.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+      var records: [String: String] = [:]
+      for file in urls where file.pathExtension == "json" && file.lastPathComponent.hasPrefix("device-") {
+        let id = String(file.deletingPathExtension().lastPathComponent.dropFirst(7))
+        guard id.range(of: "^[a-zA-Z0-9-]{1,80}$", options: .regularExpression) != nil else { continue }
+        records[id] = try withCoordinatedRead(file) { try String(contentsOf: $0, encoding: .utf8) }
+      }
+      return records
+    }
+    guard let id = args["id"],
+          id.range(of: "^[a-zA-Z0-9-]{1,80}$", options: .regularExpression) != nil else {
+      throw CocoaError(.fileReadInvalidFileName)
+    }
+    if method == "writeDevice", let json = args["json"] {
+      let target = root.appendingPathComponent("device-\(id).json")
+      try withCoordinatedWrite(target) { try Data(json.utf8).write(to: $0, options: .atomic) }
+      return nil
+    }
+    let sharedPdf = root.appendingPathComponent("score-\(id).pdf")
+    if method == "publishPdf", let path = args["path"] {
+      try withCoordinatedWrite(sharedPdf) { target in
+        if !files.fileExists(atPath: target.path) {
+          try files.copyItem(at: URL(fileURLWithPath: path), to: target)
+        }
+      }
+      return nil
+    }
+    if method == "fetchPdf" {
+      let target = files.temporaryDirectory.appendingPathComponent("sync-\(UUID().uuidString).pdf")
+      try withCoordinatedRead(sharedPdf) { try files.copyItem(at: $0, to: target) }
+      return target.path
+    }
+    throw CocoaError(.fileReadUnknown)
+  }
+
+  nonisolated private func withCoordinatedRead<T>(
+    _ url: URL, work: (URL) throws -> T
+  ) throws -> T {
+    if FileManager.default.isUbiquitousItem(at: url) {
+      try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+    }
+    var failure: NSError?
+    var result: Result<T, Error>?
+    NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &failure) { path in
+      result = Result { try work(path) }
+    }
+    if let failure { throw failure }
+    guard let result else { throw CocoaError(.fileReadUnknown) }
+    return try result.get()
+  }
+
+  nonisolated private func withCoordinatedWrite(_ url: URL, work: (URL) throws -> Void) throws {
+    var failure: NSError?
+    var result: Result<Void, Error>?
+    NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &failure) { path in
+      result = Result { try work(path) }
+    }
+    if let failure { throw failure }
+    guard let result else { throw CocoaError(.fileWriteUnknown) }
+    return try result.get()
+  }
+
   private func startScan(_ result: @escaping FlutterResult) {
     guard VNDocumentCameraViewController.isSupported, scanResult == nil,
-          var presenter = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows })
-            .first(where: { $0.isKeyWindow })?.rootViewController else {
+          let presenter = frontController else {
       result(FlutterError(code: "scan_unavailable",
                           message: "The document scanner is unavailable.", details: nil))
       return
     }
-    while let next = presenter.presentedViewController { presenter = next }
     let scanner = VNDocumentCameraViewController()
     scanner.delegate = self
     scanResult = result

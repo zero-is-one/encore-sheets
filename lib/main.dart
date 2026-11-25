@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
@@ -22,6 +23,8 @@ import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
+import 'library_sync.dart';
+import 'library_sync_screen.dart';
 import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
@@ -142,6 +145,10 @@ class _ReaderState extends State<Reader> {
   static const _stylusChannel = MethodChannel('encoresheets/stylus');
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
+  final _syncEndpoint = AppleLibrarySync();
+  Timer? _syncTimer;
+  Future<DateTime>? _syncRunning;
+  DateTime? _lastSync;
 
   bool get _hasNextScore =>
       _playing != null && _setIndex + 1 < _playing!.scores.length;
@@ -180,10 +187,16 @@ class _ReaderState extends State<Reader> {
       _stylusChannel.setMethodCallHandler((call) async {
         if (call.method == 'switchTool') _switchStylusTool();
       });
+      _syncTimer = Timer.periodic(
+        const Duration(seconds: 45),
+        (_) => _syncIfReady(),
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncIfReady());
     }
     _lifecycle = AppLifecycleListener(
       onResume: () {
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
+        if (_isAppleMobile) _syncIfReady();
       },
     );
     if (_supportsSharedImport) {
@@ -346,6 +359,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler(null);
@@ -493,6 +507,7 @@ class _ReaderState extends State<Reader> {
                 setlists: _library.setlists,
                 persistent: _library.storage.persistent,
                 canScan: _supportsSharedImport,
+                canSync: _isAppleMobile,
               ),
             );
       if (!mounted) return;
@@ -606,6 +621,17 @@ class _ReaderState extends State<Reader> {
         if (mounted) await _restorePreferences();
         return;
       }
+      if (result == 'sync') {
+        await _openReaderPanel<void>(
+          (_) => LibrarySyncScreen(
+            endpoint: _syncEndpoint,
+            refresh: _syncLibrary,
+            reset: _library.resetSyncState,
+            lastSuccess: _lastSync,
+          ),
+        );
+        return;
+      }
       if (result == 'import-package') {
         final file = await openFile(
           acceptedTypeGroups: const [
@@ -671,6 +697,66 @@ class _ReaderState extends State<Reader> {
     }
     setState(() => _playing = null);
     _remember(entry.id, _page, opened: true);
+  }
+
+  Future<void> _syncIfReady() async {
+    if (!mounted || _picking || _inking || _stylusDrawing || _performance)
+      return;
+    try {
+      if (await _syncEndpoint.configured &&
+          mounted &&
+          !_picking &&
+          !_inking &&
+          !_stylusDrawing &&
+          !_performance) {
+        await _syncLibrary();
+      }
+    } catch (_) {
+      // Files may still be downloading or the device may be offline.
+      // The next foreground refresh retries; manual refresh reports the failure.
+    }
+  }
+
+  Future<DateTime> _syncLibrary() => _syncRunning ??= _runLibrarySync()
+      .whenComplete(() => _syncRunning = null);
+
+  Future<DateTime> _runLibrarySync() async {
+    await _libraryReady;
+    final updated = await _library.synchronize(
+      _syncEndpoint,
+      mayApply: () => mounted && !_inking && !_stylusDrawing && !_performance,
+    );
+    if (_entry case final current?
+        when mounted && !_inking && !_stylusDrawing && !_performance) {
+      if (updated.contains(current.id)) {
+        final refreshed = _library.lookup(current.id);
+        if (refreshed == null) {
+          _playing = null;
+          _load(null, null, null);
+        } else {
+          final revision = _revision;
+          final annotations = await _library.readInk(current.id);
+          if (mounted &&
+              !_inking &&
+              !_stylusDrawing &&
+              !_performance &&
+              revision == _revision) {
+            final item = refreshed.bookmarks
+                .where((bookmark) => bookmark.id == _itemBookmark?.id)
+                .firstOrNull;
+            _load(
+              refreshed,
+              _file,
+              _bytes,
+              annotations: annotations,
+              startPage: _page,
+              item: item,
+            );
+          }
+        }
+      }
+    }
+    return _lastSync = DateTime.now();
   }
 
   Future<void> _updateScoreTabs(List<String> ids) async {
@@ -2793,6 +2879,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.setlists,
     required this.persistent,
     required this.canScan,
+    required this.canSync,
   });
 
   final List<ScoreEntry> scores;
@@ -2800,6 +2887,7 @@ class _LibraryScreen extends StatefulWidget {
   final List<Setlist> setlists;
   final bool persistent;
   final bool canScan;
+  final bool canSync;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -3147,6 +3235,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                           onPressed: () => Navigator.pop(context, 'scan'),
                           icon: const Icon(Icons.document_scanner_outlined),
                           label: const Text('Scan sheet music'),
+                        ),
+                      if (widget.canSync)
+                        TextButton.icon(
+                          onPressed: () => Navigator.pop(context, 'sync'),
+                          icon: const Icon(Icons.cloud_sync_outlined),
+                          label: const Text('Device sync'),
                         ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),

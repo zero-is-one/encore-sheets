@@ -1,11 +1,81 @@
 import 'dart:io';
 
 import 'package:encoresheets/library_storage_native.dart';
+import 'package:encoresheets/library_sync.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _TestEndpoint implements LibrarySyncEndpoint {
+  final devices = <String, Map<String, dynamic>>{};
+  final pdfs = <String, XFile>{};
+
+  @override
+  Future<XFile> fetchPdf(String id) async => pdfs[id]!;
+
+  @override
+  Future<void> publishPdf(String id, XFile file) async {
+    pdfs[id] = XFile.fromData(await file.readAsBytes(), name: file.name);
+  }
+
+  @override
+  Future<Map<String, Map<String, dynamic>>> readDevices() async => devices;
+
+  @override
+  Future<void> writeDevice(String device, Map<String, dynamic> records) async {
+    devices[device] = records;
+  }
+}
+
 void main() {
+  test('syncs score files, markup, edits, and deletions without creating duplicates', () async {
+    final folder = await Directory.systemTemp.createTemp('encore_sync_test');
+    addTearDown(() => folder.delete(recursive: true));
+    final first = ScoreLibrary(
+      NativeLibraryStorage(directory: Directory('${folder.path}/first')),
+    );
+    final second = ScoreLibrary(
+      NativeLibraryStorage(directory: Directory('${folder.path}/second')),
+    );
+    final endpoint = _TestEndpoint();
+    final (score, _) = await first.import(XFile('assets/first_light.pdf'));
+    await first.writeInk(score.id, {
+      '2': [
+        {
+          'tool': 'pen',
+          'points': [
+            [.15, .2],
+          ],
+        },
+      ],
+    });
+    await first.saveSetlist(Setlist('practice', 'Practice', [score.id]));
+
+    await first.synchronize(endpoint);
+    expect(await second.synchronize(endpoint), {score.id});
+    expect(await second.readInk(score.id), await first.readInk(score.id));
+    expect(second.setlists.single.scores, [score.id]);
+    expect(
+      await (await second.storage.openScore(score.id)).readAsBytes(),
+      await File('assets/first_light.pdf').readAsBytes(),
+    );
+    await second.editMetadata(score.id, 'Rehearsal', {});
+    await second.synchronize(endpoint);
+    await first.synchronize(endpoint);
+    expect(first.recent.single.title, 'Rehearsal');
+    expect(await first.synchronize(endpoint), isEmpty);
+
+    await first.trashScores([score.id]);
+    await first.synchronize(endpoint);
+    await second.synchronize(endpoint);
+    expect(second.recent, isEmpty);
+    expect(second.recentlyDeleted.single.id, score.id);
+    await second.recoverScore(score.id);
+    await second.synchronize(endpoint);
+    await first.synchronize(endpoint);
+    expect(first.recent.single.id, score.id);
+  });
+
   test('recovers a deleted score with its PDF and setlist reference', () async {
     final directory = await Directory.systemTemp.createTemp(
       'encoresheets_test',

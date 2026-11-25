@@ -100,8 +100,10 @@ class NativeLibraryStorage implements LibraryStorage {
   }
 
   @override
-  Future<void> writeInk(String id, Map<String, dynamic> pages) =>
-      _writeJson('$id.ink.json', pages);
+  Future<void> writeInk(String id, Map<String, dynamic> pages) {
+    _validateInk(pages);
+    return _writeJson('$id.ink.json', pages);
+  }
 
   @override
   Future<List<Setlist>> readSetlists() async {
@@ -131,7 +133,7 @@ class NativeLibraryStorage implements LibraryStorage {
     final path =
         '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
-    final preferences = await readPreferences();
+    final preferences = (await readPreferences())..remove('librarySyncState');
     await Isolate.run(
       () =>
           _exportBackup(root, path, scores, setlists, preferences: preferences),

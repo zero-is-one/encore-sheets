@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 
+import 'library_sync.dart';
 import 'page_crop.dart';
 import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
@@ -378,6 +383,158 @@ class ScoreLibrary {
     _setlists[setlist.id] = setlist;
   });
   Future<void> flush() => _pending;
+
+  Future<void> resetSyncState() =>
+      updatePreferences({'librarySyncState': null});
+
+  Future<Set<String>> synchronize(
+    LibrarySyncEndpoint endpoint, {
+    bool Function()? mayApply,
+  }) => _serialize(() async {
+    String fingerprint(Map<String, dynamic> data) =>
+        sha256.convert(utf8.encode(jsonEncode(data))).toString();
+    final preferences = await storage.readPreferences();
+    final state = preferences['librarySyncState'] as Map? ?? {};
+    final device =
+        state['device'] as String? ??
+        DateTime.now().microsecondsSinceEpoch.toString();
+    final known = state['known'] as Map? ?? {};
+    final heads = await endpoint.readDevices();
+    final latest =
+        <String, ({int revision, String device, Map<String, dynamic> data})>{};
+    var sequence = DateTime.now().microsecondsSinceEpoch;
+    for (final head in heads.entries) {
+      for (final record in head.value.entries) {
+        if (!RegExp(r'^[sl]:[a-zA-Z0-9-]{1,80}$').hasMatch(record.key))
+          continue;
+        if (record.value case {
+          'revision': final int revision,
+          'data': final Map<String, dynamic> data,
+        }) {
+          final existing = latest[record.key];
+          if (existing == null ||
+              revision > existing.revision ||
+              revision == existing.revision &&
+                  head.key.compareTo(existing.device) > 0) {
+            latest[record.key] = (
+              revision: revision,
+              device: head.key,
+              data: data,
+            );
+          }
+          sequence = math.max(sequence, revision);
+        }
+      }
+    }
+    final local = <String, Map<String, dynamic>>{};
+    for (final score in _scores.values) {
+      final data = score.toJson()
+        ..remove('openedAt')
+        ..remove('page');
+      local['s:${score.id}'] = {
+        'score': data,
+        'ink': await storage.readInk(score.id),
+      };
+    }
+    for (final setlist in _setlists.values) {
+      local['l:${setlist.id}'] = setlist.toJson();
+    }
+    final outbound = {...?heads[device]};
+    var changed = false;
+    for (final row in local.entries) {
+      final remote = latest[row.key]?.data;
+      final serialized = fingerprint(row.value);
+      if (serialized == known[row.key] ||
+          remote != null &&
+              (serialized == fingerprint(remote) ||
+                  !known.containsKey(row.key))) {
+        continue;
+      }
+      if (remote == null && row.key.startsWith('s:')) {
+        final id = row.key.substring(2);
+        await endpoint.publishPdf(id, await storage.openScore(id));
+      }
+      final revision = ++sequence;
+      outbound[row.key] = {'revision': revision, 'data': row.value};
+      latest[row.key] = (revision: revision, device: device, data: row.value);
+      changed = true;
+    }
+    if (changed) await endpoint.writeDevice(device, outbound);
+    if (mayApply?.call() == false)
+      throw StateError('Library changes are deferred while editing.');
+
+    final scores = Map.of(_scores);
+    final setlists = Map.of(_setlists);
+    final updated = <String>{};
+    final staged = <String>[];
+    final previousInk = <String, Map<String, dynamic>>{};
+    var receivedLists = false;
+    try {
+      for (final row in latest.entries) {
+        final incoming = row.value.data;
+        final previous = local[row.key];
+        if (previous != null && fingerprint(previous) == fingerprint(incoming))
+          continue;
+        final id = row.key.substring(2);
+        if (row.key.startsWith('l:')) {
+          final setlist = Setlist.fromJson(incoming);
+          if (setlist.id != id)
+            throw const FormatException('Invalid shared setlist');
+          setlists[id] = setlist;
+          receivedLists = true;
+          continue;
+        }
+        final existing = _scores[id];
+        final score = ScoreEntry.fromJson({
+          ...incoming['score'] as Map<String, dynamic>,
+          'page': existing?.page ?? 1,
+          'openedAt': (existing?.openedAt ?? DateTime.now()).toIso8601String(),
+        });
+        if (score.id != id) throw const FormatException('Invalid shared score');
+        final rawInk = incoming['ink'] as Map<String, dynamic>;
+        if (existing == null) {
+          final pdf = await endpoint.fetchPdf(id);
+          await storage.copyScore(id, pdf);
+          staged.add(id);
+        } else {
+          previousInk[id] = previous!['ink'] as Map<String, dynamic>;
+        }
+        await storage.writeInk(id, rawInk);
+        scores[id] = score;
+        updated.add(id);
+      }
+      if (updated.isNotEmpty || receivedLists) {
+        if (mayApply?.call() == false)
+          throw StateError('Library changes are deferred while editing.');
+        await storage.writeCatalog(
+          scores.values.toList(),
+          setlists.values.toList(),
+        );
+      }
+    } catch (_) {
+      for (final id in staged) {
+        await storage.removeScore(id);
+      }
+      for (final entry in previousInk.entries) {
+        await storage.writeInk(entry.key, entry.value);
+      }
+      rethrow;
+    }
+    _scores.addAll(scores);
+    _setlists.addAll(setlists);
+    final nextKnown = {
+      for (final row in latest.entries) row.key: fingerprint(row.value.data),
+    };
+    if (state['device'] != device ||
+        known.length != nextKnown.length ||
+        nextKnown.entries.any((row) => known[row.key] != row.value)) {
+      await storage.writePreferences({
+        ...preferences,
+        'librarySyncState': {'device': device, 'known': nextKnown},
+      });
+    }
+    return updated;
+  });
 
   Future<XFile> createBackup() =>
       _serialize(() => storage.createBackup(_scores.values.toList(), setlists));
