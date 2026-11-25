@@ -21,6 +21,18 @@ class NativeLibraryStorage implements LibraryStorage {
   @override
   bool get persistent => true;
 
+  @override
+  Future<Map<String, dynamic>> readPreferences() async {
+    final file = await _file('reader-preferences.json');
+    return await file.exists()
+        ? jsonDecode(await file.readAsString()) as Map<String, dynamic>
+        : {};
+  }
+
+  @override
+  Future<void> writePreferences(Map<String, dynamic> preferences) =>
+      _writeJson('reader-preferences.json', preferences);
+
   Future<Directory> _prepare() async {
     final documents = _override ?? await getApplicationDocumentsDirectory();
     return Directory('${documents.path}/scores').create(recursive: true);

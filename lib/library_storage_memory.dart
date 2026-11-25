@@ -8,6 +8,15 @@ class _MemoryLibraryStorage implements LibraryStorage {
   final _files = <String, XFile>{};
   final _ink = <String, Map<String, dynamic>>{};
   List<Setlist> _setlists = [];
+  Map<String, dynamic> _preferences = {};
+
+  @override
+  Future<Map<String, dynamic>> readPreferences() async => _preferences;
+
+  @override
+  Future<void> writePreferences(Map<String, dynamic> preferences) async {
+    _preferences = Map.unmodifiable(preferences);
+  }
 
   @override
   Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists) =>

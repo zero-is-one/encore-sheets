@@ -6,6 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
+import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'score_library.dart';
 import 'setlists_screen.dart';
@@ -15,7 +16,7 @@ const _rail = Color(0xff2e3a36);
 const _paper = Color(0xfff0eddf);
 const _brass = Color(0xffe9bd75);
 
-enum _ReaderDisplay { fit, performance, hideControls }
+enum _ReaderDisplay { fit, performance, hideControls, gestures }
 
 void main() => runApp(const EncoreSheets());
 
@@ -73,6 +74,7 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   int _setIndex = 0;
   bool _performance = false;
+  ReaderPreferences _preferences = const ReaderPreferences();
   static const _sharedImports = MethodChannel('encoresheets/import');
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
@@ -89,6 +91,7 @@ class _ReaderState extends State<Reader> {
   @override
   void initState() {
     super.initState();
+    _restorePreferences();
     _lifecycle = AppLifecycleListener(
       onResume: () {
         if (_performance) _keepScreenAwake(true);
@@ -101,6 +104,110 @@ class _ReaderState extends State<Reader> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _requestSharedImport();
       });
+    }
+  }
+
+  Future<void> _restorePreferences() async {
+    try {
+      final data = await _library.storage.readPreferences();
+      if (mounted) {
+        setState(() => _preferences = ReaderPreferences.fromJson(data));
+      }
+    } catch (_) {
+      // Use the default controls if preferences are unavailable.
+    }
+  }
+
+  void _performTap(int zone) {
+    final action = _performance
+        ? switch (zone) {
+            -1 => ReaderTapAction.previous,
+            1 => ReaderTapAction.next,
+            _ => ReaderTapAction.none,
+          }
+        : switch (zone) {
+            -1 => _preferences.left,
+            1 => _preferences.right,
+            _ => _preferences.center,
+          };
+    switch (action) {
+      case ReaderTapAction.previous:
+        _go(_page - 1);
+      case ReaderTapAction.next:
+        _go(_page + 1);
+      case ReaderTapAction.controls:
+        setState(() => _showControls = !_showControls);
+      case ReaderTapAction.markup:
+        _toggleInk();
+      case ReaderTapAction.none:
+        break;
+    }
+  }
+
+  Future<void> _configureGestures() async {
+    var left = _preferences.left;
+    var center = _preferences.center;
+    var right = _preferences.right;
+    final configured = await showDialog<ReaderPreferences>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) {
+          Widget choice(
+            String label,
+            ReaderTapAction value,
+            ValueChanged<ReaderTapAction> set,
+          ) => DropdownButton<ReaderTapAction>(
+            isExpanded: true,
+            value: value,
+            items: [
+              for (final action in ReaderTapAction.values)
+                DropdownMenuItem(
+                  value: action,
+                  child: Text('$label: ${action.label}'),
+                ),
+            ],
+            onChanged: (action) {
+              if (action != null) update(() => set(action));
+            },
+          );
+          return AlertDialog(
+            title: const Text('Reader gestures'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                choice('Left', left, (value) => left = value),
+                choice('Center', center, (value) => center = value),
+                choice('Right', right, (value) => right = value),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, const ReaderPreferences()),
+                child: const Text('Reset'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  context,
+                  ReaderPreferences(left: left, center: center, right: right),
+                ),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (configured == null || !mounted) return;
+    try {
+      await _library.storage.writePreferences(configured.toJson());
+      if (mounted) setState(() => _preferences = configured);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save reader settings.')),
+        );
+      }
     }
   }
 
@@ -541,7 +648,7 @@ class _ReaderState extends State<Reader> {
               // callback from the viewer's double-tap recognizer.
               _dispatchingEdgeLink = true;
               try {
-                if (!handleLinkTap(event.localPosition)) _go(_page + step);
+                if (!handleLinkTap(event.localPosition)) _performTap(step);
               } finally {
                 _dispatchingEdgeLink = false;
               }
@@ -592,7 +699,7 @@ class _ReaderState extends State<Reader> {
         if (step != 0) return true;
         if (details.type != PdfViewerGeneralTapType.tap) return false;
         _focus.requestFocus();
-        if (!_performance) setState(() => _showControls = !_showControls);
+        _performTap(0);
         return true;
       },
       pageOverlaysBuilder: (context, rect, page) => [
@@ -757,6 +864,8 @@ class _ReaderState extends State<Reader> {
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
                         setState(() => _showControls = false);
+                      case _ReaderDisplay.gestures:
+                        _configureGestures();
                     }
                   },
                   itemBuilder: (_) => [
@@ -770,8 +879,18 @@ class _ReaderState extends State<Reader> {
                     ),
                     PopupMenuItem(
                       value: _ReaderDisplay.hideControls,
-                      enabled: !_inking,
+                      enabled:
+                          !_inking &&
+                          [
+                            _preferences.left,
+                            _preferences.center,
+                            _preferences.right,
+                          ].contains(ReaderTapAction.controls),
                       child: const Text('Hide controls'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.gestures,
+                      child: Text('Reader gestures'),
                     ),
                   ],
                 ),

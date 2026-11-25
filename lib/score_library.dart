@@ -53,6 +53,8 @@ abstract class LibraryStorage {
   static LibraryStorage create() => platform.createStorage();
 
   bool get persistent;
+  Future<Map<String, dynamic>> readPreferences();
+  Future<void> writePreferences(Map<String, dynamic> preferences);
   Future<List<ScoreEntry>> readIndex();
   Future<void> writeIndex(List<ScoreEntry> entries);
   Future<XFile> copyScore(String id, XFile source);
