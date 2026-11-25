@@ -2,10 +2,12 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/widgets.dart';
 
-enum InkTool { pen, highlighter, eraser }
+enum InkTool { pen, highlighter, eraser, text }
+
+typedef PageText = ({String value, Offset position, double size});
 
 class _Stroke {
-  _Stroke(this.tool, this.points, {this.width, this.color});
+  _Stroke(this.tool, this.points, {this.width, this.color, this.text});
 
   factory _Stroke.fromJson(Map<String, dynamic> data) => _Stroke(
     InkTool.values.byName(data['tool'] as String),
@@ -15,17 +17,20 @@ class _Stroke {
     ],
     width: (data['width'] as num?)?.toDouble(),
     color: data['color'] as int?,
+    text: data['text'] as String?,
   );
 
   final InkTool tool;
   final List<Offset> points;
   final double? width;
   final int? color;
+  final String? text;
 
   Map<String, dynamic> toJson() => {
     'tool': tool.name,
     if (width != null) 'width': width,
     if (color != null) 'color': color,
+    if (text != null) 'text': text,
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
@@ -49,6 +54,48 @@ class PageInk extends ChangeNotifier {
   List<Map<String, dynamic>> snapshot() => [
     for (final stroke in _strokes) stroke.toJson(),
   ];
+
+  (int, PageText)? textAt(Offset point, Size size) {
+    for (var index = _strokes.length - 1; index >= 0; index--) {
+      final mark = _strokes[index];
+      if (mark.text == null) continue;
+      final position = mark.points.first;
+      final fontSize = mark.width ?? .024;
+      final painter = _layoutText(mark.text!, fontSize, size, position);
+      final hit = Rect.fromLTWH(
+        position.dx * size.width - 4,
+        position.dy * size.height - 4,
+        painter.width + 8,
+        painter.height + 8,
+      ).contains(Offset(point.dx * size.width, point.dy * size.height));
+      painter.dispose();
+      if (hit)
+        return (index, (value: mark.text!, position: position, size: fontSize));
+    }
+    return null;
+  }
+
+  void setText(int? index, PageText? annotation) {
+    if (index == null && annotation == null) return;
+    final next = [..._strokes];
+    if (index != null) next.removeAt(index);
+    if (annotation != null) {
+      next.insert(
+        index ?? next.length,
+        _Stroke(
+          InkTool.text,
+          [annotation.position],
+          width: annotation.size,
+          text: annotation.value,
+        ),
+      );
+    }
+    _undo.add(_strokes);
+    _redo.clear();
+    _strokes = next;
+    onChanged?.call();
+    notifyListeners();
+  }
 
   void begin(
     Offset point, {
@@ -145,6 +192,7 @@ class InkSurface extends StatefulWidget {
     required this.tool,
     this.width,
     this.color,
+    this.onTextTap,
   });
 
   final PageInk ink;
@@ -153,6 +201,7 @@ class InkSurface extends StatefulWidget {
   final InkTool tool;
   final double? width;
   final int? color;
+  final void Function(Offset point, Size pageSize)? onTextTap;
 
   @override
   State<InkSurface> createState() => _InkSurfaceState();
@@ -197,6 +246,10 @@ class _InkSurfaceState extends State<InkSurface> {
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
             if (_pointer != null || event.buttons != 1 || size.isEmpty) return;
+            if (widget.tool == InkTool.text) {
+              widget.onTextTap?.call(_point(event, size), size);
+              return;
+            }
             final accepted = switch (event.kind) {
               PointerDeviceKind.stylus ||
               PointerDeviceKind.invertedStylus => true,
@@ -231,6 +284,24 @@ class _InkSurfaceState extends State<InkSurface> {
   }
 }
 
+TextPainter _layoutText(
+  String text,
+  double fontSize,
+  Size size,
+  Offset position,
+) {
+  return TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(
+        color: const Color(0xff263a4f),
+        fontSize: size.width * fontSize,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout(maxWidth: (1 - position.dx) * size.width);
+}
+
 class _InkPainter extends CustomPainter {
   _InkPainter(this.ink) : super(repaint: ink);
 
@@ -251,6 +322,20 @@ class _InkPainter extends CustomPainter {
     Offset position(Offset point) =>
         Offset(point.dx * size.width, point.dy * size.height);
     for (final mark in strokes) {
+      if (mark.text case final text?) {
+        final painter = _layoutText(
+          text,
+          mark.width ?? .024,
+          size,
+          mark.points.first,
+        );
+        canvas.save();
+        canvas.clipRect(Offset.zero & size);
+        painter.paint(canvas, position(mark.points.first));
+        canvas.restore();
+        painter.dispose();
+        continue;
+      }
       final highlighted = mark.tool == InkTool.highlighter;
       paint
         ..color = mark.color != null

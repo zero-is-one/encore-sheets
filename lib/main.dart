@@ -18,6 +18,7 @@ import 'score_library.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
+import 'text_annotation_dialog.dart';
 
 const _stand = Color(0xff202a28);
 const _rail = Color(0xff2e3a36);
@@ -98,6 +99,7 @@ class _ReaderState extends State<Reader> {
   bool _picking = false;
   bool _saveWarning = false;
   bool _inkSaveWarning = false;
+  bool _editingText = false;
   InkTool _tool = InkTool.pen;
   double? _penWidth;
   int? _penColor;
@@ -1018,6 +1020,29 @@ class _ReaderState extends State<Reader> {
     return KeyEventResult.handled;
   }
 
+  Future<void> _editText(int page, Offset position, Size pageSize) async {
+    if (_editingText || !_inking) return;
+    final ink = _ink[page];
+    if (ink == null) return;
+    final selected = ink.textAt(position, pageSize);
+    _editingText = true;
+    try {
+      final result = await showDialog<({PageText? annotation, bool delete})>(
+        context: context,
+        builder: (_) => TextAnnotationDialog(
+          initial: selected?.$2 ?? (value: '', position: position, size: .024),
+          existing: selected != null,
+        ),
+      );
+      if (!mounted || _ink[page] != ink || result == null) return;
+      if (result.delete || result.annotation != null) {
+        ink.setText(selected?.$1, result.annotation);
+      }
+    } finally {
+      _editingText = false;
+    }
+  }
+
   void _toggleInk() {
     if (_pages == 0) return;
     _ink[_page]?.finish(commit: false);
@@ -1349,6 +1374,7 @@ class _ReaderState extends State<Reader> {
             tool: _tool,
             width: _tool == InkTool.pen ? _penWidth : null,
             color: _tool == InkTool.pen ? _penColor : null,
+            onTextTap: (point, size) => _editText(page.pageNumber, point, size),
           ),
         ),
         if (!_inking)
@@ -1902,6 +1928,7 @@ class _ReaderState extends State<Reader> {
                   Icons.backspace_outlined,
                   'Erase strokes',
                 ),
+                _toolButton(InkTool.text, Icons.text_fields, 'Text annotation'),
                 Semantics(
                   label: 'Allow finger drawing',
                   child: ChoiceChip(

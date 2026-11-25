@@ -47,6 +47,14 @@ void main() {
               [.4, .5],
             ],
           },
+          {
+            'tool': 'text',
+            'text': 'Bring out the melody',
+            'width': .03,
+            'points': [
+              [.12, .65],
+            ],
+          },
         ],
       };
       await original.writeInk(second.id, annotation);

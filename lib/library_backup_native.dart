@@ -185,10 +185,16 @@ void _validateInk(Map<String, dynamic> pages) {
     }
     for (final stroke in strokes) {
       if (stroke is! Map ||
-          (stroke['tool'] != 'pen' && stroke['tool'] != 'highlighter') ||
+          !const {'pen', 'highlighter', 'text'}.contains(stroke['tool']) ||
           stroke['points'] is! List ||
           (stroke['points'] as List).isEmpty) {
         throw const FormatException('Invalid annotation stroke');
+      }
+      final text = stroke['text'];
+      if (stroke['tool'] == 'text'
+          ? text is! String || text.isEmpty || text.length > 2000
+          : text != null) {
+        throw const FormatException('Invalid annotation text');
       }
       final width = stroke['width'];
       final color = stroke['color'];
