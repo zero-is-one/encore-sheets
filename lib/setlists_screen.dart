@@ -1,9 +1,20 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'score_library.dart';
+import 'program_duration.dart';
 import 'setlist_order.dart';
 
 enum _SetlistAction { edit, duplicate, playInOrder, earlier, later }
+
+String _durationText(ScoreLibrary library, Iterable<String> selections) {
+  final estimate = library.estimateSetlistDuration(selections);
+  final parts = [
+    if (estimate.total > Duration.zero)
+      '${formatProgramDuration(estimate.total)} estimated',
+    if (estimate.missing > 0) '${estimate.missing} without durations',
+  ];
+  return parts.join(' · ');
+}
 
 class SetlistsScreen extends StatefulWidget {
   const SetlistsScreen({super.key, required this.library});
@@ -82,7 +93,16 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
   Widget _row(Setlist list, List<Setlist> group, int index) => ListTile(
     leading: const Icon(Icons.queue_music),
     title: Text(list.name),
-    subtitle: Text('${list.scores.length} scores'),
+    subtitle: Text(
+      [
+        '${list.scores.length} scores',
+        if (list.label.isNotEmpty) list.label,
+        if (list.scores.isNotEmpty) _durationText(widget.library, list.scores),
+        if (list.notes.isNotEmpty) list.notes,
+      ].join(' · '),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    ),
     onTap: list.scores.isEmpty
         ? () => _edit(list)
         : () => Navigator.pop(context, list),
@@ -215,6 +235,8 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   late final _folder = TextEditingController(
     text: widget.initial?.folder ?? '',
   );
+  late final _label = TextEditingController(text: widget.initial?.label ?? '');
+  late final _notes = TextEditingController(text: widget.initial?.notes ?? '');
   late final _scores = [
     for (final id in widget.initial?.scores ?? <String>[])
       (key: Object(), id: id),
@@ -225,6 +247,8 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   void dispose() {
     _name.dispose();
     _folder.dispose();
+    _label.dispose();
+    _notes.dispose();
     super.dispose();
   }
 
@@ -284,6 +308,8 @@ class _SetlistEditorState extends State<_SetlistEditor> {
           name,
           _scores.map((item) => item.id),
           folder: _folder.text.trim(),
+          label: _label.text.trim(),
+          notes: _notes.text.trim(),
         ),
       );
       if (mounted) Navigator.pop(context);
@@ -295,6 +321,45 @@ class _SetlistEditorState extends State<_SetlistEditor> {
       );
     }
   }
+
+  Widget _details() => Padding(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _name,
+          enabled: !_saving,
+          decoration: const InputDecoration(labelText: 'Setlist name'),
+          onChanged: (_) => setState(() {}),
+        ),
+        TextField(
+          controller: _folder,
+          enabled: !_saving,
+          decoration: const InputDecoration(labelText: 'Folder (optional)'),
+        ),
+        TextField(
+          controller: _label,
+          enabled: !_saving,
+          decoration: const InputDecoration(labelText: 'Program label'),
+        ),
+        TextField(
+          controller: _notes,
+          enabled: !_saving,
+          minLines: 1,
+          maxLines: 4,
+          decoration: const InputDecoration(labelText: 'Program notes'),
+        ),
+        if (_scores.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              _durationText(widget.library, _scores.map((row) => row.id)),
+            ),
+          ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -310,25 +375,9 @@ class _SetlistEditorState extends State<_SetlistEditor> {
     body: SafeArea(
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              controller: _name,
-              enabled: !_saving,
-              decoration: const InputDecoration(labelText: 'Setlist name'),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: TextField(
-              controller: _folder,
-              enabled: !_saving,
-              decoration: const InputDecoration(labelText: 'Folder (optional)'),
-            ),
-          ),
           Expanded(
             child: ReorderableListView.builder(
+              header: _details(),
               buildDefaultDragHandles: false,
               itemCount: _scores.length,
               onReorderItem: (oldIndex, newIndex) {

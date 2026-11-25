@@ -1,11 +1,43 @@
 import 'dart:io';
 
 import 'package:encoresheets/library_storage_native.dart';
+import 'package:encoresheets/program_duration.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/setlist_order.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'counts repeated pieces and reports excerpts without independent timings',
+    () async {
+      final root = await Directory.systemTemp.createTemp('encore_duration');
+      addTearDown(() => root.delete(recursive: true));
+      final library = ScoreLibrary(NativeLibraryStorage(directory: root));
+      final (score, _) = await library.import(XFile('assets/first_light.pdf'));
+      const excerpt = ScoreBookmark('excerpt', 'Excerpt', 1, endPage: 2);
+      await library.updateScore(
+        score.id,
+        (old) =>
+            old.copyWith(metadata: {'duration': '3:45'}, bookmarks: [excerpt]),
+      );
+      final program = Setlist(
+        'concert',
+        'Winter recital',
+        [score.id, excerpt.selectionId(score.id), score.id],
+        label: 'Choir',
+        notes: 'Ten-minute interval after the second piece.',
+      );
+      await library.saveSetlist(program);
+      final estimate = library.estimateSetlistDuration(program.scores);
+      expect(estimate.missing, 1);
+      expect(formatProgramDuration(estimate.total), '7:30');
+      expect(parseScoreDuration('1:07:30')!.inSeconds, 4050);
+      expect(parseScoreDuration('4:61'), isNull);
+      expect(Setlist.fromJson(program.toJson()).notes, program.notes);
+    },
+  );
+
   test(
     'persists manual program order and sorts unplayed pieces first',
     () async {

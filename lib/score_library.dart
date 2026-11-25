@@ -6,6 +6,7 @@ import 'package:file_selector/file_selector.dart';
 
 import 'library_sync.dart';
 import 'page_crop.dart';
+import 'program_duration.dart';
 import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
     as platform;
@@ -181,31 +182,45 @@ class ScoreEntry {
 }
 
 class Setlist {
-  Setlist(this.id, this.name, Iterable<String> scores, {this.folder = ''})
-    : scores = List.unmodifiable(scores);
+  Setlist(
+    this.id,
+    this.name,
+    Iterable<String> scores, {
+    this.folder = '',
+    this.label = '',
+    this.notes = '',
+  }) : scores = List.unmodifiable(scores);
 
   factory Setlist.fromJson(Map<String, dynamic> row) => Setlist(
     row['id'] as String,
     row['name'] as String,
     (row['scores'] as List<dynamic>).cast<String>(),
     folder: row['folder'] as String? ?? '',
+    label: row['label'] as String? ?? '',
+    notes: row['notes'] as String? ?? '',
   );
 
   final String id;
   final String name;
   final List<String> scores;
   final String folder;
+  final String label;
+  final String notes;
 
   Setlist copyWith({
     String? id,
     String? name,
     Iterable<String>? scores,
     String? folder,
+    String? label,
+    String? notes,
   }) => Setlist(
     id ?? this.id,
     name ?? this.name,
     scores ?? this.scores,
     folder: folder ?? this.folder,
+    label: label ?? this.label,
+    notes: notes ?? this.notes,
   );
 
   Map<String, dynamic> toJson() => {
@@ -213,6 +228,8 @@ class Setlist {
     'name': name,
     'scores': scores,
     if (folder.isNotEmpty) 'folder': folder,
+    if (label.isNotEmpty) 'label': label,
+    if (notes.isNotEmpty) 'notes': notes,
   };
 }
 
@@ -359,6 +376,25 @@ class ScoreLibrary {
     _scores[id] = updated;
   });
   List<Setlist> get setlists => List.unmodifiable(_setlists.values);
+
+  ({Duration total, int missing}) estimateSetlistDuration(
+    Iterable<String> selections,
+  ) {
+    var total = Duration.zero;
+    var missing = 0;
+    for (final id in selections) {
+      final item = lookupSelection(id);
+      final duration = item == null || item.$2 != null
+          ? null
+          : parseScoreDuration(item.$1.metadata['duration']);
+      if (duration == null) {
+        missing++;
+      } else {
+        total += duration;
+      }
+    }
+    return (total: total, missing: missing);
+  }
 
   int? lastSetlistPlay(String id, [String? selection]) =>
       _setlistPlayed[selection == null ? id : '$id/$selection'];

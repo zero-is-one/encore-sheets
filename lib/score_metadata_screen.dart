@@ -65,7 +65,12 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
           for (final field in scoreMetadataFields.entries)
             TextField(
               controller: _fields[field.key],
-              decoration: InputDecoration(labelText: field.value),
+              decoration: InputDecoration(
+                labelText: field.value,
+                hintText: field.key == 'duration'
+                    ? 'm:ss, h:mm:ss, or whole minutes'
+                    : null,
+              ),
             ),
         ],
       ),
