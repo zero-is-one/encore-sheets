@@ -25,11 +25,20 @@ class _MemoryLibraryStorage implements LibraryStorage {
       );
 
   @override
+  Future<XFile> createScorePackage(
+    ScoreEntry score, {
+    XFile? extractedPdf,
+    Map<String, dynamic>? extractedInk,
+  }) async =>
+      throw UnsupportedError('Score packages require the installed app');
+
+  @override
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
-    List<Setlist> setlists,
-  ) => Future.error(
+    List<Setlist> setlists, {
+    bool scorePackage = false,
+  }) => Future.error(
     UnsupportedError('Library restore requires the installed app'),
   );
 

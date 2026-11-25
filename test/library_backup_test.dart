@@ -76,10 +76,24 @@ void main() {
         ]),
       );
       final backup = await original.createBackup();
+      final scorePackage = await original.createScorePackage(
+        original.lookup(second.id)!,
+      );
+      expect(scorePackage.name, endsWith('.encorescore.zip'));
 
       final target = await Directory('${root.path}/new-install').create();
       final restored = ScoreLibrary(NativeLibraryStorage(directory: target));
       await restored.load();
+      final packageTarget = ScoreLibrary(
+        NativeLibraryStorage(
+          directory: await Directory('${root.path}/package-install').create(),
+        ),
+      );
+      final packaged = await packageTarget.restoreScorePackage(scorePackage);
+      expect(packaged.title, 'Second');
+      expect(packaged.bookmarks.single.title, 'Movement');
+      expect(await packageTarget.readInk(packaged.id), annotation);
+      expect(packageTarget.setlists, isEmpty);
       expect(await restored.restoreBackup(backup), (scores: 2, setlists: 1));
       final reopened = ScoreLibrary(NativeLibraryStorage(directory: target));
       await reopened.load();

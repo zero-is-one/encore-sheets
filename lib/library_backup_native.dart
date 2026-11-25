@@ -12,15 +12,16 @@ void _exportBackup(
   String root,
   String path,
   List<ScoreEntry> scores,
-  List<Setlist> setlists,
-) {
+  List<Setlist> setlists, {
+  bool scorePackage = false,
+}) {
   final zip = ZipFileEncoder()..create(path);
   try {
     zip.addArchiveFile(
       ArchiveFile.string(
         'manifest.json',
         jsonEncode({
-          'format': 'EncoreSheetsLibrary',
+          'format': scorePackage ? 'EncoreSheetsScore' : 'EncoreSheetsLibrary',
           'version': 1,
           ..._catalog(scores, setlists),
         }),
@@ -44,15 +45,16 @@ void _exportBackup(
   String root,
   String path,
   List<ScoreEntry> existingScores,
-  List<Setlist> existingSetlists,
-) {
+  List<Setlist> existingSetlists, {
+  bool scorePackage = false,
+}) {
   final input = InputFileStream(path);
   final written = <File>[];
   try {
     final archive = ZipDecoder().decodeStream(input, verify: true);
     final manifest = _jsonEntry(archive.find('manifest.json'));
-    if (manifest['format'] != 'EncoreSheetsLibrary' ||
-        manifest['version'] != 1) {
+    final format = scorePackage ? 'EncoreSheetsScore' : 'EncoreSheetsLibrary';
+    if (manifest['format'] != format || manifest['version'] != 1) {
       throw const FormatException('Unsupported library backup');
     }
     final sourceScores = [
@@ -63,6 +65,12 @@ void _exportBackup(
       for (final row in manifest['setlists'] as List)
         Setlist.fromJson(row as Map<String, dynamic>),
     ];
+    if (scorePackage &&
+        (sourceScores.length != 1 ||
+            sourceSetlists.isNotEmpty ||
+            sourceScores.single.deletedAt != null)) {
+      throw const FormatException('Invalid editable score package');
+    }
     final sourceIds = sourceScores.map((score) => score.id).toSet();
     final validSelections = {
       ...sourceIds,

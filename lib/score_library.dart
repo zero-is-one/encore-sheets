@@ -196,11 +196,17 @@ abstract class LibraryStorage {
   Future<void> writeSetlists(List<Setlist> setlists);
   Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists);
   Future<XFile?> latestBackup();
+  Future<XFile> createScorePackage(
+    ScoreEntry score, {
+    XFile? extractedPdf,
+    Map<String, dynamic>? extractedInk,
+  });
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
-    List<Setlist> setlists,
-  );
+    List<Setlist> setlists, {
+    bool scorePackage = false,
+  });
 }
 
 class ScoreLibrary {
@@ -361,6 +367,30 @@ class ScoreLibrary {
 
   Future<XFile> createBackup() =>
       _serialize(() => storage.createBackup(_scores.values.toList(), setlists));
+
+  Future<XFile> createScorePackage(
+    ScoreEntry score, {
+    XFile? extractedPdf,
+    Map<String, dynamic>? extractedInk,
+  }) => _serialize(
+    () => storage.createScorePackage(
+      score,
+      extractedPdf: extractedPdf,
+      extractedInk: extractedInk,
+    ),
+  );
+
+  Future<ScoreEntry> restoreScorePackage(XFile source) => _serialize(() async {
+    final restored = await storage.restoreBackup(
+      source,
+      _scores.values.toList(),
+      setlists,
+      scorePackage: true,
+    );
+    final score = restored.scores.single;
+    _scores[score.id] = score;
+    return score;
+  });
 
   Future<({int scores, int setlists})> restoreBackup(XFile source) =>
       _serialize(() async {

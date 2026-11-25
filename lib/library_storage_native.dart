@@ -130,14 +130,61 @@ class NativeLibraryStorage implements LibraryStorage {
   }
 
   @override
+  Future<XFile> createScorePackage(
+    ScoreEntry score, {
+    XFile? extractedPdf,
+    Map<String, dynamic>? extractedInk,
+  }) async {
+    final temp = _override ?? await getTemporaryDirectory();
+    final folder = await temp.createTemp('encoresheets-package-');
+    final safeTitle = score.title
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_')
+        .trim();
+    final path =
+        '${folder.path}/${safeTitle.isEmpty ? 'Score' : safeTitle}.encorescore.zip';
+    final files = <File>[];
+    try {
+      var root = (await _root).path;
+      if (extractedPdf != null) {
+        root = folder.path;
+        final pdf = File('$root/${score.id}.pdf');
+        files.add(pdf);
+        await extractedPdf.saveTo(pdf.path);
+        if (extractedInk?.isNotEmpty == true) {
+          final ink = File('$root/${score.id}.ink.json');
+          files.add(ink);
+          await ink.writeAsString(jsonEncode(extractedInk), flush: true);
+        }
+      }
+      await Isolate.run(
+        () => _exportBackup(root, path, [score], [], scorePackage: true),
+      );
+      return XFile(path, mimeType: 'application/zip');
+    } finally {
+      for (final file in files) {
+        if (await file.exists()) await file.delete();
+      }
+    }
+  }
+
+  @override
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
-    List<Setlist> setlists,
-  ) async {
+    List<Setlist> setlists, {
+    bool scorePackage = false,
+  }) async {
     final root = (await _root).path;
     final path = source.path;
-    return Isolate.run(() => _restoreBackup(root, path, scores, setlists));
+    return Isolate.run(
+      () => _restoreBackup(
+        root,
+        path,
+        scores,
+        setlists,
+        scorePackage: scorePackage,
+      ),
+    );
   }
 
   @override

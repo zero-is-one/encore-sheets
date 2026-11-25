@@ -4,12 +4,14 @@ import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'page_ink.dart';
 import 'ink_layers_dialog.dart';
 import 'pdf_assembly_screen.dart';
 import 'pdf_export_screen.dart';
+import 'pdf_rearrange.dart';
 import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
 import 'reader_preferences.dart';
@@ -43,6 +45,7 @@ enum _ReaderDisplay {
   spreads,
   scoreTabs,
   exportPdf,
+  shareScorePackage,
   performance,
   hideControls,
   gestures,
@@ -556,6 +559,23 @@ class _ReaderState extends State<Reader> {
         );
         return;
       }
+      if (result == 'import-package') {
+        final file = await openFile(
+          acceptedTypeGroups: const [
+            XTypeGroup(
+              label: 'EncoreSheets score packages',
+              extensions: ['zip'],
+              mimeTypes: ['application/zip'],
+              uniformTypeIdentifiers: ['public.zip-archive'],
+            ),
+          ],
+        );
+        if (file != null && mounted) {
+          final score = await _library.restoreScorePackage(file);
+          if (mounted) await _openLibraryScore(score);
+        }
+        return;
+      }
       if (result.startsWith('bookmark:')) {
         final parts = result.split(':');
         final entry = _library.lookup(parts[1])!;
@@ -908,6 +928,46 @@ class _ReaderState extends State<Reader> {
           annotations: _inkSnapshot(),
         ),
       );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _shareEditableScore() async {
+    final entry = _entry;
+    if (_picking || entry == null || !_viewer.isReady) return;
+    final box = context.findRenderObject() as RenderBox;
+    final origin = box.localToGlobal(Offset.zero) & box.size;
+    setState(() => _picking = true);
+    try {
+      final bookmark = _itemBookmark;
+      final XFile package;
+      if (bookmark == null) {
+        package = await _library.createScorePackage(entry);
+      } else {
+        final source = _viewer.document;
+        final pages = [
+          for (var page = _firstPage; page <= _lastPage; page++)
+            EditedPdfPage(source.pages[page - 1], originalPage: page),
+        ];
+        final extracted = await writeRearrangedPdf('Excerpt.pdf', pages);
+        final remapped = remapScorePages(entry, _inkSnapshot(), pages);
+        package = await _library.createScorePackage(
+          remapped.score.copyWith(title: bookmark.title, page: 1),
+          extractedPdf: extracted,
+          extractedInk: remapped.annotations,
+        );
+      }
+      if (mounted) {
+        await SharePlus.instance.share(
+          ShareParams(files: [package], sharePositionOrigin: origin),
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not share the editable score.')),
+        );
     } finally {
       _finishPicking();
     }
@@ -1866,6 +1926,8 @@ class _ReaderState extends State<Reader> {
                         _togglePerformance();
                       case _ReaderDisplay.exportPdf:
                         _showPdfExport();
+                      case _ReaderDisplay.shareScorePackage:
+                        _shareEditableScore();
                       case _ReaderDisplay.scoreTabs:
                         if (_entry case final score?) {
                           _updateScoreTabs([
@@ -1974,6 +2036,16 @@ class _ReaderState extends State<Reader> {
                       enabled: _file != null,
                       child: const Text('Share or print PDF'),
                     ),
+                    if (_library.storage.persistent)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.shareScorePackage,
+                        enabled: _entry != null,
+                        child: Text(
+                          _itemBookmark == null
+                              ? 'Share editable score'
+                              : 'Share editable excerpt',
+                        ),
+                      ),
                     PopupMenuItem(
                       value: _ReaderDisplay.hideControls,
                       enabled:
@@ -2799,6 +2871,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                           onPressed: () => Navigator.pop(context, 'backup'),
                           icon: const Icon(Icons.settings_backup_restore),
                           label: const Text('Backup & restore'),
+                        ),
+                      if (widget.persistent)
+                        TextButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'import-package'),
+                          icon: const Icon(Icons.inventory_2_outlined),
+                          label: const Text('Import score package'),
                         ),
                     ],
                   ),
