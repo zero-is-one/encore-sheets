@@ -118,6 +118,49 @@ class ScoreLibrary {
   });
   List<Setlist> get setlists => List.unmodifiable(_setlists.values);
 
+  Future<void> batchMetadata(
+    Set<String> ids,
+    String field,
+    String value, {
+    required bool append,
+  }) => _serialize(() async {
+    final updated = {
+      for (final old in _scores.values)
+        old.id: ids.contains(old.id)
+            ? _patchScoreField(old, field, value, append: append)
+            : old,
+    };
+    await storage.writeIndex(updated.values.toList());
+    _scores.addAll(updated);
+  });
+
+  ScoreEntry _patchScoreField(
+    ScoreEntry old,
+    String field,
+    String value, {
+    required bool append,
+  }) {
+    final metadata = {...old.metadata};
+    final combined = append
+        ? {
+            for (final part in '${metadata[field] ?? ''},$value'.split(','))
+              if (part.trim().isNotEmpty) part.trim(),
+          }.join(', ')
+        : value;
+    if (combined.isEmpty) {
+      metadata.remove(field);
+    } else {
+      metadata[field] = combined;
+    }
+    return ScoreEntry(
+      id: old.id,
+      title: old.title,
+      page: old.page,
+      openedAt: old.openedAt,
+      metadata: metadata,
+    );
+  }
+
   Future<void> saveSetlist(Setlist setlist) => _serialize(() async {
     final updated = {..._setlists, setlist.id: setlist};
     await storage.writeSetlists(updated.values.toList());

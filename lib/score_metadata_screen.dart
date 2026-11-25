@@ -92,3 +92,90 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
     ],
   );
 }
+
+Future<({Set<String> ids, String field, String value, bool append})?>
+editBatchMetadata(BuildContext context, List<ScoreEntry> scores) async {
+  final ids = <String>{};
+  var field = 'tags';
+  var append = true;
+  var value = '';
+  return showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, update) => AlertDialog(
+        title: const Text('Edit multiple scores'),
+        content: SizedBox(
+          width: 460,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              DropdownButton<String>(
+                isExpanded: true,
+                value: field,
+                items: [
+                  for (final entry in scoreMetadataFields.entries)
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
+                ],
+                onChanged: (next) => update(() {
+                  field = next!;
+                  append = {
+                    'composer',
+                    'genre',
+                    'label',
+                    'tags',
+                  }.contains(field);
+                }),
+              ),
+              if ({'composer', 'genre', 'label', 'tags'}.contains(field))
+                SwitchListTile(
+                  title: const Text('Append values'),
+                  value: append,
+                  onChanged: (next) => update(() => append = next),
+                ),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: scoreMetadataFields[field],
+                ),
+                onChanged: (text) => update(() => value = text.trim()),
+              ),
+              for (final score in scores)
+                CheckboxListTile(
+                  title: Text(score.title),
+                  value: ids.contains(score.id),
+                  onChanged: (selected) => update(() {
+                    if (selected == true) {
+                      ids.add(score.id);
+                    } else {
+                      ids.remove(score.id);
+                    }
+                  }),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: ids.isEmpty || (append && value.isEmpty)
+                ? null
+                : () {
+                    Navigator.pop(context, (
+                      ids: ids,
+                      field: field,
+                      value: value,
+                      append: append,
+                    ));
+                  },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    ),
+  );
+}

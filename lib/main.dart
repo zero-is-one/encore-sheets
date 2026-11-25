@@ -405,6 +405,21 @@ class _ReaderState extends State<Reader> {
               ),
             );
       if (result == null || !mounted) return;
+      if (result == 'batch') {
+        final edit = await editBatchMetadata(context, _library.recent);
+        if (edit != null) {
+          await _library.batchMetadata(
+            edit.ids,
+            edit.field,
+            edit.value,
+            append: edit.append,
+          );
+          if (mounted && _entry != null) {
+            setState(() => _entry = _library.lookup(_entry!.id));
+          }
+        }
+        return;
+      }
       if (result.startsWith('edit:')) {
         final score = _library.lookup(result.substring(5));
         if (score != null) await _editScore(score);
@@ -1189,7 +1204,8 @@ class _ReaderState extends State<Reader> {
                     tooltip: 'Pen style',
                     icon: const Icon(Icons.color_lens_outlined),
                     onSelected: (style) => setState(() {
-                      (_penWidth, _penColor) = style;
+                      _penWidth = style.$1;
+                      _penColor = style.$2;
                     }),
                     itemBuilder: (_) => const [
                       PopupMenuItem(
@@ -1440,7 +1456,18 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             )
             .toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Score library')),
+      appBar: AppBar(
+        title: const Text('Score library'),
+        actions: [
+          IconButton(
+            tooltip: 'Edit multiple scores',
+            onPressed: widget.scores.isEmpty
+                ? null
+                : () => Navigator.pop(context, 'batch'),
+            icon: const Icon(Icons.edit_note),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
