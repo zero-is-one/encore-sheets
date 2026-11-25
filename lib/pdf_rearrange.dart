@@ -147,6 +147,13 @@ Future<XFile> writeRearrangedPdf(String name, List<EditedPdfPage> pages) async {
           if (source.pageNotes[page.originalPage] case final note?)
             index + 1: note,
       },
+      actions: [
+        for (final action in source.actions)
+          for (final page in destination[action.page] ?? const <int>[])
+            if (pages[page - 1].transform(action.x, action.y)
+                case final position)
+              action.reposition(page, position.dx, position.dy),
+      ],
       crops: {
         for (final (index, page) in pages.indexed)
           if (source.crops[page.originalPage] case final crop?)

@@ -7,6 +7,7 @@ import 'package:file_selector/file_selector.dart';
 import 'library_sync.dart';
 import 'page_crop.dart';
 import 'program_duration.dart';
+import 'score_action.dart';
 import 'library_storage_memory.dart'
     if (dart.library.io) 'library_storage_native.dart'
     as platform;
@@ -80,6 +81,7 @@ class ScoreEntry {
     this.halfSplits = const {},
     this.crops = const {},
     this.pageNotes = const {},
+    this.actions = const [],
     this.pdfSourceId,
     this.deletedAt,
   });
@@ -124,6 +126,10 @@ class ScoreEntry {
         if (int.tryParse(row.key.toString()) case final page? when page > 0)
           if (row.value case final String text when text.isNotEmpty) page: text,
     },
+    actions: [
+      for (final raw in (json['actions'] as List? ?? const []))
+        if (ScoreAction.fromJson(raw) case final action?) action,
+    ],
   );
 
   final String id;
@@ -139,6 +145,7 @@ class ScoreEntry {
   final Map<int, double> halfSplits;
   final Map<int, PageCrop> crops;
   final Map<int, String> pageNotes;
+  final List<ScoreAction> actions;
   final String? pdfSourceId;
   String get storedPdfId => pdfSourceId ?? id;
 
@@ -155,6 +162,7 @@ class ScoreEntry {
     Map<int, double>? halfSplits,
     Map<int, PageCrop>? crops,
     Map<int, String>? pageNotes,
+    List<ScoreAction>? actions,
     String? pdfSourceId,
     bool detachPdf = false,
     DateTime? deletedAt,
@@ -172,6 +180,7 @@ class ScoreEntry {
     halfSplits: halfSplits ?? this.halfSplits,
     crops: crops ?? this.crops,
     pageNotes: pageNotes ?? this.pageNotes,
+    actions: actions ?? this.actions,
     pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
@@ -202,6 +211,8 @@ class ScoreEntry {
       'pageNotes': {
         for (final row in pageNotes.entries) '${row.key}': row.value,
       },
+    if (actions.isNotEmpty)
+      'actions': [for (final action in actions) action.toJson()],
   };
 }
 

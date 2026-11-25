@@ -30,6 +30,8 @@ import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
 import 'score_library.dart';
+import 'score_action.dart';
+import 'score_actions_screen.dart';
 import 'scan_cleanup_screen.dart';
 import 'score_management_screen.dart';
 import 'score_metadata_screen.dart';
@@ -47,6 +49,7 @@ enum _ReaderDisplay {
   nowPlaying,
   findInScore,
   pageNote,
+  pageActions,
   fit,
   zoomIn,
   zoomOut,
@@ -930,6 +933,20 @@ class _ReaderState extends State<Reader> {
 
   bool _followJumpAt(Offset position) {
     if (_picking || _inking || !_viewer.isReady || _pages == 0) return false;
+    for (final action in (_entry?.actions ?? const <ScoreAction>[]).reversed) {
+      if (action.page > _pages ||
+          action.page < _firstPage ||
+          action.page > _lastPage ||
+          _halfPreview && action.page == _page && action.y < _splitFor(_page))
+        continue;
+      final marker = JumpPoint(action.page, action.x, action.y);
+      if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
+              .distance <=
+          22) {
+        _runScoreAction(action);
+        return true;
+      }
+    }
     for (final (_, marker, target, _) in _jumpMarkers()) {
       if (_halfPreview && marker.page == _page && marker.y < _splitFor(_page))
         continue;
@@ -941,6 +958,68 @@ class _ReaderState extends State<Reader> {
       }
     }
     return false;
+  }
+
+  Future<void> _runScoreAction(ScoreAction action) async {
+    if (_picking || _inking) return;
+    if (action.kind == ScoreActionKind.note) {
+      await _editPageNote(action.page);
+      return;
+    }
+    final destination = _library.lookupSelection(action.selection ?? '');
+    if (destination == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The destination score is unavailable.')),
+      );
+      return;
+    }
+    setState(() => _picking = true);
+    try {
+      await _openLibraryScore(
+        destination.$1,
+        startPage: destination.$2?.page,
+        item: destination.$2,
+      );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open the destination score.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _editScoreActions() async {
+    final score = _entry;
+    if (_picking || score == null || !_viewer.isReady) return;
+    setState(() => _picking = true);
+    try {
+      final actions = await _openReaderPanel<List<ScoreAction>>(
+        (_) => ScoreActionsScreen(
+          document: _viewer.document,
+          page: _page,
+          library: _library,
+          actions: score.actions,
+        ),
+      );
+      if (!mounted || actions == null) return;
+      await _library.updateScore(
+        score.id,
+        (old) => old.copyWith(actions: actions),
+      );
+      if (mounted && _entry?.id == score.id)
+        setState(() => _entry = _library.lookup(score.id));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save action buttons.')),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   void _followJump(JumpPoint target) {
@@ -2120,6 +2199,36 @@ class _ReaderState extends State<Reader> {
         return true;
       },
       pageOverlaysBuilder: (context, rect, page) => [
+        if (!_inking)
+          for (final action in _entry?.actions ?? const <ScoreAction>[])
+            if (action.page == page.pageNumber)
+              Positioned(
+                left: action.x * rect.width - 18,
+                top: action.y * rect.height - 18,
+                child: Semantics(
+                  button: true,
+                  label: action.title,
+                  onTap: () => _runScoreAction(action),
+                  child: IgnorePointer(
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Color(action.color),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: Icon(
+                        action.kind == ScoreActionKind.note
+                            ? Icons.sticky_note_2_outlined
+                            : Icons.open_in_new,
+                        color: Colors.white,
+                        size: 19,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
         Positioned.fill(
           child: ClipRect(
             clipper: _PageCropClipper(_cropFor(page.pageNumber)),
@@ -2407,6 +2516,8 @@ class _ReaderState extends State<Reader> {
                         _findInScore();
                       case _ReaderDisplay.pageNote:
                         _editPageNote(_page);
+                      case _ReaderDisplay.pageActions:
+                        _editScoreActions();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -2529,6 +2640,11 @@ class _ReaderState extends State<Reader> {
                             ? 'Open page note'
                             : 'Add page note',
                       ),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.pageActions,
+                      enabled: _entry != null,
+                      child: const Text('On-page actions'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,

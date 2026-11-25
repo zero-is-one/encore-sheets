@@ -203,6 +203,18 @@ void _exportBackup(
       scores.add(old.copyWith(id: id, detachPdf: true));
     }
 
+    for (final (index, score) in scores.indexed) {
+      if (score.actions.isEmpty) continue;
+      scores[index] = score.copyWith(
+        actions: [
+          for (final action in score.actions)
+            if (mapped[action.selection] case final target?)
+              action.retarget(target)
+            else
+              action,
+        ],
+      );
+    }
     final listIds = existingSetlists.map((setlist) => setlist.id).toSet();
     final setlists = <Setlist>[];
     for (final old in sourceSetlists) {

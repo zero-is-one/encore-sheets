@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:encoresheets/library_storage_native.dart';
+import 'package:encoresheets/score_action.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,17 @@ void main() {
             ScoreJump('Repeat', JumpPoint(3, .4, .6), JumpPoint(2, .2, .4)),
           ],
           halfSplits: {2: .6},
+          actions: [
+            ScoreAction(
+              title: 'Open first score',
+              page: 3,
+              x: .3,
+              y: .4,
+              color: 0xff254a73,
+              kind: ScoreActionKind.score,
+              selection: first.id,
+            ),
+          ],
         ),
       );
       await original.createCollection('Choir');
@@ -115,6 +127,7 @@ void main() {
       expect(score.flags, [3]);
       expect(score.jumps.single.target.page, 2);
       expect(score.halfSplits, {2: .6});
+      expect(score.actions.single.selection, ids[1]);
       final originalReopened = ScoreLibrary(
         NativeLibraryStorage(directory: root),
       );
