@@ -24,8 +24,18 @@ void main() {
       const movement = ScoreBookmark('movement', 'Movement', 2, endPage: 3);
       await original.updateScore(
         second.id,
-        (score) => score.copyWith(bookmarks: [movement]),
+        (score) => score.copyWith(
+          bookmarks: [movement],
+          flags: [3],
+          jumps: const [
+            ScoreJump('Repeat', JumpPoint(3, .4, .6), JumpPoint(2, .2, .4)),
+          ],
+          halfSplits: {2: .6},
+        ),
       );
+      await original.createCollection('Choir');
+      await original.createCollection('Empty library');
+      await original.assignCollections(second.id, ['Choir']);
       final annotation = {
         '3': [
           {
@@ -58,6 +68,16 @@ void main() {
       final ids = reopened.setlists.single.scores;
       expect(reopened.lookupSelection(ids.last)?.$1.id, ids.first);
       expect(reopened.lookupSelection(ids.last)?.$2?.endPage, 3);
+      final score = reopened.lookup(ids.first)!;
+      expect(score.collections, ['Choir']);
+      expect(score.flags, [3]);
+      expect(score.jumps.single.target.page, 2);
+      expect(score.halfSplits, {2: .6});
+      final originalReopened = ScoreLibrary(
+        NativeLibraryStorage(directory: root),
+      );
+      await originalReopened.load();
+      expect(originalReopened.collections, ['Choir', 'Empty library']);
       expect(ids.map((id) => reopened.lookupSelection(id)?.$1.title), [
         'Second',
         'First',

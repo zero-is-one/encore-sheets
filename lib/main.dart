@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -11,6 +12,7 @@ import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
+import 'half_page_turn.dart';
 import 'score_library.dart';
 import 'score_metadata_screen.dart';
 import 'setlists_screen.dart';
@@ -28,6 +30,9 @@ enum _ReaderDisplay {
   previousScore,
   bookmarks,
   jumpLinks,
+  halfTurns,
+  halfSplit,
+  halfIndicator,
   performance,
   hideControls,
   gestures,
@@ -96,6 +101,9 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   int _setIndex = 0;
   bool _performance = false;
+  bool _halfPreview = false;
+  final _sampleSplits = <int, double>{};
+  Duration? _lastHalfScroll;
   ReaderPreferences _preferences = const ReaderPreferences();
   static const _sharedImports = MethodChannel('encoresheets/import');
   bool _sharedWaiting = false;
@@ -172,9 +180,9 @@ class _ReaderState extends State<Reader> {
           };
     switch (action) {
       case ReaderTapAction.previous:
-        _go(_page - 1);
+        _turn(-1);
       case ReaderTapAction.next:
-        _go(_page + 1);
+        _turn(1);
       case ReaderTapAction.controls:
         setState(() => _showControls = !_showControls);
       case ReaderTapAction.markup:
@@ -224,9 +232,10 @@ class _ReaderState extends State<Reader> {
               TextButton(
                 onPressed: () => Navigator.pop(
                   context,
-                  ReaderPreferences(
-                    keepAwake: _preferences.keepAwake,
-                    showNextTitle: _preferences.showNextTitle,
+                  _preferences.copyWith(
+                    left: ReaderTapAction.previous,
+                    center: ReaderTapAction.controls,
+                    right: ReaderTapAction.next,
                   ),
                 ),
                 child: const Text('Reset'),
@@ -234,7 +243,7 @@ class _ReaderState extends State<Reader> {
               FilledButton(
                 onPressed: () => Navigator.pop(
                   context,
-                  ReaderPreferences(
+                  _preferences.copyWith(
                     left: left,
                     center: center,
                     right: right,
@@ -257,7 +266,13 @@ class _ReaderState extends State<Reader> {
     try {
       await _library.updatePreferences(configured.toJson());
       if (mounted) {
-        setState(() => _preferences = configured);
+        final enabledHalfTurns =
+            configured.halfPageTurns && !_preferences.halfPageTurns;
+        setState(() {
+          if (!configured.halfPageTurns) _halfPreview = false;
+          _preferences = configured;
+        });
+        if (enabledHalfTurns) _fit();
         _keepScreenAwake(_performance || _preferences.keepAwake);
       }
     } catch (_) {
@@ -605,6 +620,8 @@ class _ReaderState extends State<Reader> {
   bool _followJumpAt(Offset position) {
     if (_picking || _inking || !_viewer.isReady || _pages == 0) return false;
     for (final (_, marker, target, _) in _jumpMarkers()) {
+      if (_halfPreview && marker.page == _page && marker.y < _splitFor(_page))
+        continue;
       if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
               .distance <=
           22) {
@@ -761,6 +778,7 @@ class _ReaderState extends State<Reader> {
     setState(() {
       _entry = entry;
       _itemBookmark = item;
+      _halfPreview = false;
       _file = file;
       _bytes = bytes;
       _revision++;
@@ -790,13 +808,37 @@ class _ReaderState extends State<Reader> {
     _jumpToPage(page);
   }
 
+  void _turn(int step) {
+    if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (!_preferences.halfPageTurns || _inking) {
+      _go(_page + step);
+      return;
+    }
+    final turn = advanceHalfTurn(
+      page: _page,
+      first: _firstPage,
+      last: _lastPage,
+      preview: _halfPreview,
+      step: step,
+    );
+    if (turn.page != _page) _go(turn.page);
+    if (_halfPreview != turn.preview)
+      setState(() => _halfPreview = turn.preview);
+  }
+
   void _jumpToPage(int page) {
     if (!_viewer.isReady || _pages == 0) return;
     final target = page.clamp(_firstPage, _lastPage);
-    if (target == _page) return;
+    if (target == _page) {
+      if (_halfPreview) setState(() => _halfPreview = false);
+      return;
+    }
     _ink[_page]?.finish(commit: false);
     _previousPage = _page;
-    setState(() => _page = target);
+    setState(() {
+      _page = target;
+      _halfPreview = false;
+    });
     _viewer.goToPage(pageNumber: target, duration: Duration.zero);
     _remember(_entry?.id, target);
   }
@@ -845,7 +887,7 @@ class _ReaderState extends State<Reader> {
     }
     final step = pageTurnForKey(key);
     if (step == 0 || _picking || _pages == 0) return KeyEventResult.ignored;
-    if (event is KeyDownEvent) _go(_page + step);
+    if (event is KeyDownEvent) _turn(step);
     return KeyEventResult.handled;
   }
 
@@ -854,6 +896,7 @@ class _ReaderState extends State<Reader> {
     _ink[_page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
+      _halfPreview = false;
       _showControls = true;
     });
     _focus.requestFocus();
@@ -863,6 +906,106 @@ class _ReaderState extends State<Reader> {
     if (!_viewer.isReady) return;
     _viewer.goTo(_viewer.calcMatrixForFit(pageNumber: _page));
     _focus.requestFocus();
+  }
+
+  double _splitFor(int page) =>
+      (_entry?.halfSplits ?? _sampleSplits)[page] ?? .5;
+
+  Future<void> _setHalfSplit() async {
+    final page = _page;
+    final scoreId = _entry?.id;
+    var fraction = _splitFor(page);
+    final selected = await showDialog<double>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: Text('Page $page split'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Reveal the top ${(fraction * 100).round()}% of the next page',
+              ),
+              Slider(
+                min: .2,
+                max: .8,
+                divisions: 12,
+                value: fraction,
+                onChanged: (value) => refresh(() => fraction = value),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, fraction),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || !mounted || scoreId != _entry?.id) return;
+    if (scoreId == null) {
+      setState(() => _sampleSplits[page] = selected);
+      return;
+    }
+    try {
+      await _library.updateScore(
+        scoreId,
+        (old) => old.copyWith(halfSplits: {...old.halfSplits, page: selected}),
+      );
+      if (mounted && _entry?.id == scoreId)
+        setState(() => _entry = _library.lookup(scoreId));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the page split.')),
+        );
+    }
+  }
+
+  Widget? _previewBand() {
+    if (!_preferences.halfPageTurns ||
+        _inking ||
+        !_viewer.isReady ||
+        _pages == 0 ||
+        _page >= _lastPage)
+      return null;
+    final rect = _viewer.layout.pageLayouts[_page - 1];
+    final topLeft = _viewer.documentToLocal(rect.topLeft);
+    final bottomRight = _viewer.documentToLocal(rect.bottomRight);
+    final delta = bottomRight - topLeft;
+    final size = Size(delta.dx, delta.dy);
+    if (size.isEmpty) return null;
+    final next = _page + 1;
+    return Positioned(
+      left: topLeft.dx,
+      top: topLeft.dy,
+      width: size.width,
+      height: size.height * _splitFor(_page),
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: _halfPreview ? 1 : 0,
+          child: HalfPageBand(
+            key: ValueKey(next),
+            document: _viewer.document,
+            page: next,
+            fullSize: size,
+            indicator: _preferences.halfPageIndicator,
+            overlay: InkSurface(
+              ink: _ink.putIfAbsent(next, () => PageInk(onChanged: _saveInk)),
+              enabled: false,
+              allowFinger: false,
+              tool: InkTool.pen,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _score() {
@@ -882,8 +1025,9 @@ class _ReaderState extends State<Reader> {
         blurRadius: 14,
         offset: Offset(0, 6),
       ),
-      panEnabled: !_inking,
-      scaleEnabled: !_inking && !_performance,
+      panEnabled: !_inking && !_preferences.halfPageTurns,
+      scaleEnabled: !_inking && !_performance && !_preferences.halfPageTurns,
+      scrollByMouseWheel: _preferences.halfPageTurns ? null : .2,
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
       maxImageBytesCachedOnMemory: 72 * 1024 * 1024,
@@ -916,18 +1060,41 @@ class _ReaderState extends State<Reader> {
               size.width,
               canAdvance:
                   !_inking &&
-                  _hasNextScore &&
-                  _pages > 0 &&
-                  _page == _lastPage &&
-                  _viewer.isReady &&
-                  _viewer.currentZoom <= _viewer.coverScale * 1.02,
+                  (_preferences.halfPageTurns ||
+                      (_hasNextScore &&
+                          _pages > 0 &&
+                          _page == _lastPage &&
+                          _viewer.isReady &&
+                          _viewer.currentZoom <= _viewer.coverScale * 1.02)),
+              allowBackward: _preferences.halfPageTurns && !_inking,
             ),
             onPointerMove: _edgeTaps.move,
             onPointerCancel: _edgeTaps.cancel,
+            onPointerSignal: (event) {
+              if (!_preferences.halfPageTurns ||
+                  _inking ||
+                  event is! PointerScrollEvent)
+                return;
+              final delta = event.scrollDelta.dy == 0
+                  ? event.scrollDelta.dx
+                  : event.scrollDelta.dy;
+              final last = _lastHalfScroll;
+              if (delta == 0 ||
+                  (last != null &&
+                      event.timeStamp - last <
+                          const Duration(milliseconds: 180)))
+                return;
+              _lastHalfScroll = event.timeStamp;
+              _turn(delta > 0 ? 1 : -1);
+            },
             onPointerUp: (event) {
-              final (step, forwardSwipe) = _edgeTaps.up(event);
-              if (forwardSwipe) {
-                _nextScore();
+              final (step, swipe) = _edgeTaps.up(event);
+              if (swipe != 0) {
+                if (_preferences.halfPageTurns) {
+                  _turn(swipe);
+                } else {
+                  _nextScore();
+                }
                 return;
               }
               if (step == 0 || _inking || !_viewer.isReady) return;
@@ -945,6 +1112,7 @@ class _ReaderState extends State<Reader> {
             },
           ),
         ),
+        if (_previewBand() case final band?) band,
       ],
       onViewerReady: (document, controller) {
         if (!mounted || revision != _revision) return;
@@ -981,7 +1149,10 @@ class _ReaderState extends State<Reader> {
           return;
         }
         _previousPage = _page;
-        setState(() => _page = page);
+        setState(() {
+          _page = page;
+          _halfPreview = false;
+        });
         _remember(_entry?.id, page);
       },
       onGeneralTap: (context, controller, details) {
@@ -999,6 +1170,7 @@ class _ReaderState extends State<Reader> {
         );
         if (step != 0) return true;
         if (details.type == PdfViewerGeneralTapType.doubleTap) {
+          if (_preferences.halfPageTurns) return true;
           if (controller.currentZoom > controller.coverScale * 1.02) {
             _fit();
           } else {
@@ -1232,6 +1404,20 @@ class _ReaderState extends State<Reader> {
                         _showBookmarks();
                       case _ReaderDisplay.jumpLinks:
                         _showJumpLinks();
+                      case _ReaderDisplay.halfTurns:
+                        _savePreferences(
+                          _preferences.copyWith(
+                            halfPageTurns: !_preferences.halfPageTurns,
+                          ),
+                        );
+                      case _ReaderDisplay.halfSplit:
+                        _setHalfSplit();
+                      case _ReaderDisplay.halfIndicator:
+                        _savePreferences(
+                          _preferences.copyWith(
+                            halfPageIndicator: !_preferences.halfPageIndicator,
+                          ),
+                        );
                       case _ReaderDisplay.performance:
                         _togglePerformance();
                       case _ReaderDisplay.hideControls:
@@ -1240,7 +1426,7 @@ class _ReaderState extends State<Reader> {
                         _configureGestures();
                       case _ReaderDisplay.keepAwake:
                         _savePreferences(
-                          ReaderPreferences(
+                          _preferences.copyWith(
                             left: _preferences.left,
                             center: _preferences.center,
                             right: _preferences.right,
@@ -1250,7 +1436,7 @@ class _ReaderState extends State<Reader> {
                         );
                       case _ReaderDisplay.nextTitle:
                         _savePreferences(
-                          ReaderPreferences(
+                          _preferences.copyWith(
                             left: _preferences.left,
                             center: _preferences.center,
                             right: _preferences.right,
@@ -1265,13 +1451,15 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.fit,
                       child: Text('Fit page'),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _ReaderDisplay.zoomIn,
-                      child: Text('Zoom in'),
+                      enabled: !_preferences.halfPageTurns,
+                      child: const Text('Zoom in'),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: _ReaderDisplay.zoomOut,
-                      child: Text('Zoom out'),
+                      enabled: !_preferences.halfPageTurns,
+                      child: const Text('Zoom out'),
                     ),
                     PopupMenuItem(
                       value: _ReaderDisplay.previousPage,
@@ -1292,6 +1480,21 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.jumpLinks,
                       enabled: _entry != null,
                       child: const Text('Repeat & coda links'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.halfTurns,
+                      checked: _preferences.halfPageTurns,
+                      child: const Text('Half-page turns'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.halfSplit,
+                      enabled: _preferences.halfPageTurns && _page < _lastPage,
+                      child: const Text('Adjust current page split'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: _ReaderDisplay.halfIndicator,
+                      checked: _preferences.halfPageIndicator,
+                      child: const Text('Show half-page indicator'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.performance,
@@ -1483,7 +1686,9 @@ class _ReaderState extends State<Reader> {
             children: [
               IconButton(
                 tooltip: 'Previous page',
-                onPressed: _page <= _firstPage ? null : () => _go(_page - 1),
+                onPressed: _page <= _firstPage && !_halfPreview
+                    ? null
+                    : () => _turn(-1),
                 icon: const Icon(Icons.chevron_left),
               ),
               Expanded(
@@ -1525,7 +1730,7 @@ class _ReaderState extends State<Reader> {
                     : 'Next page',
                 onPressed: _pages == 0 || (_page >= _lastPage && !_hasNextScore)
                     ? null
-                    : () => _go(_page + 1),
+                    : () => _turn(1),
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
@@ -1552,6 +1757,7 @@ class _EdgeTapTracker {
   int _step = 0;
   bool _moved = false;
   bool _canAdvance = false;
+  bool _allowBackward = false;
   bool handled = false;
 
   static int direction(double x, double width) {
@@ -1560,7 +1766,12 @@ class _EdgeTapTracker {
     return 0;
   }
 
-  void down(PointerDownEvent event, double width, {required bool canAdvance}) {
+  void down(
+    PointerDownEvent event,
+    double width, {
+    required bool canAdvance,
+    required bool allowBackward,
+  }) {
     _pointers.add(event.pointer);
     if (_pointers.length != 1) {
       _start = null;
@@ -1569,6 +1780,7 @@ class _EdgeTapTracker {
     handled = false;
     _moved = false;
     _canAdvance = canAdvance;
+    _allowBackward = allowBackward;
     _step = direction(event.localPosition.dx, width);
     _start = event.buttons == 1 ? event : null;
   }
@@ -1582,21 +1794,24 @@ class _EdgeTapTracker {
     }
   }
 
-  (int, bool) up(PointerUpEvent event) {
+  (int, int) up(PointerUpEvent event) {
     final start = _start;
     cancel(event);
-    if (start == null || start.pointer != event.pointer) return (0, false);
+    if (start == null || start.pointer != event.pointer) return (0, 0);
     final delta = event.position - start.position;
     if (_canAdvance && delta.dx < -45 && -delta.dx > delta.dy.abs() * 1.5) {
-      return (0, true);
+      return (0, 1);
+    }
+    if (_allowBackward && delta.dx > 45 && delta.dx > delta.dy.abs() * 1.5) {
+      return (0, -1);
     }
     if (_step == 0 ||
         _moved ||
         event.timeStamp - start.timeStamp > _maximumDuration ||
         delta.distance > _slop)
-      return (0, false);
+      return (0, 0);
     handled = true;
-    return (_step, false);
+    return (_step, 0);
   }
 
   void cancel(PointerEvent event) {

@@ -70,6 +70,7 @@ class ScoreEntry {
     this.bookmarks = const [],
     this.flags = const [],
     this.jumps = const [],
+    this.halfSplits = const {},
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -88,6 +89,15 @@ class ScoreEntry {
       for (final item in (json['jumps'] as List? ?? const []))
         ScoreJump.fromJson(item as Map<String, dynamic>),
     ],
+    halfSplits: {
+      for (final entry in (json['halfSplits'] as Map? ?? const {}).entries)
+        if (int.tryParse(entry.key.toString()) case final page?)
+          if (entry.value is num &&
+              (entry.value as num).isFinite &&
+              (entry.value as num) >= .2 &&
+              (entry.value as num) <= .8)
+            page: (entry.value as num).toDouble(),
+    },
   );
 
   final String id;
@@ -99,6 +109,7 @@ class ScoreEntry {
   final List<ScoreBookmark> bookmarks;
   final List<int> flags;
   final List<ScoreJump> jumps;
+  final Map<int, double> halfSplits;
 
   ScoreEntry copyWith({
     String? id,
@@ -110,6 +121,7 @@ class ScoreEntry {
     List<ScoreBookmark>? bookmarks,
     List<int>? flags,
     List<ScoreJump>? jumps,
+    Map<int, double>? halfSplits,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -120,6 +132,7 @@ class ScoreEntry {
     bookmarks: bookmarks ?? this.bookmarks,
     flags: flags ?? this.flags,
     jumps: jumps ?? this.jumps,
+    halfSplits: halfSplits ?? this.halfSplits,
   );
 
   Map<String, dynamic> toJson() => {
@@ -133,6 +146,11 @@ class ScoreEntry {
       'bookmarks': bookmarks.map((item) => item.toJson()).toList(),
     if (flags.isNotEmpty) 'flags': flags,
     if (jumps.isNotEmpty) 'jumps': jumps.map((item) => item.toJson()).toList(),
+    if (halfSplits.isNotEmpty)
+      'halfSplits': {
+        for (final entry in halfSplits.entries)
+          entry.key.toString(): entry.value,
+      },
   };
 }
 
