@@ -75,8 +75,10 @@ Future<List<ReflowZone>> scanReflowPage(PdfPage page) async {
 Future<ui.Image?> renderReflowZone(
   PdfPage page,
   ReflowZone zone,
-  double requestedWidth,
-) async {
+  double requestedWidth, {
+  PdfAnnotationRenderingMode annotations =
+      PdfAnnotationRenderingMode.annotationAndForms,
+}) async {
   final width = requestedWidth.round().clamp(200, 3000);
   final height = width * page.height / page.width;
   final top = (zone.top * height).floor();
@@ -87,6 +89,7 @@ Future<ui.Image?> renderReflowZone(
     y: top,
     fullWidth: width.toDouble(),
     fullHeight: height,
+    annotationRenderingMode: annotations,
   );
   if (image == null) return null;
   try {

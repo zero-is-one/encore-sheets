@@ -42,6 +42,7 @@ import 'practice_recordings_dialog.dart';
 import 'metronome_dialog.dart';
 import 'metadata_csv_screen.dart';
 import 'cloud_files_screen.dart';
+import 'embedded_pdf_info.dart';
 import 'midi_devices_dialog.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
@@ -76,6 +77,7 @@ enum _ReaderDisplay {
   accessibility,
   reflow,
   panelOptions,
+  embeddedPdf,
   fit,
   zoomIn,
   zoomOut,
@@ -1354,7 +1356,12 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _editScore(ScoreEntry score) async {
-    final updated = await editScoreMetadata(context, score);
+    final updated = await editScoreMetadata(
+      context,
+      score,
+      loadPdfInfo: () async =>
+          readEmbeddedPdfInfo(await _library.storage.openScore(score.id)),
+    );
     if (updated == null || !mounted) return;
     try {
       await _library.editMetadata(score.id, updated.title, updated.fields);
@@ -2132,6 +2139,67 @@ class _ReaderState extends State<Reader> {
     if (mounted && result != null) await _savePreferences(result);
   }
 
+  PdfAnnotationRenderingMode get _embeddedAnnotationMode =>
+      switch (_preferences.embeddedPdfContent) {
+        EmbeddedPdfContent.all => PdfAnnotationRenderingMode.annotationAndForms,
+        EmbeddedPdfContent.annotations => PdfAnnotationRenderingMode.annotation,
+        EmbeddedPdfContent.hidden => PdfAnnotationRenderingMode.none,
+      };
+
+  Future<void> _showEmbeddedPdfSettings() async {
+    var mode = _preferences.embeddedPdfContent;
+    var links = _preferences.embeddedPdfLinks;
+    final result = await showDialog<(EmbeddedPdfContent, bool)>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (_, refresh) => AlertDialog(
+          title: const Text('Embedded PDF content'),
+          scrollable: true,
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButton<EmbeddedPdfContent>(
+                  isExpanded: true,
+                  value: mode,
+                  items: [
+                    for (final item in EmbeddedPdfContent.values)
+                      DropdownMenuItem(value: item, child: Text(item.label)),
+                  ],
+                  onChanged: (value) => refresh(() => mode = value!),
+                ),
+                SwitchListTile(
+                  title: const Text('Follow embedded PDF links'),
+                  value: links,
+                  onChanged: (value) => refresh(() => links = value),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, (mode, links)),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mounted && result != null) {
+      await _savePreferences(
+        _preferences.copyWith(
+          embeddedPdfContent: result.$1,
+          embeddedPdfLinks: result.$2,
+        ),
+      );
+    }
+  }
+
   Future<void> _showReflow() async {
     if (_picking || !_viewer.isReady || _pages == 0) return;
     final score = _entry;
@@ -2146,6 +2214,7 @@ class _ReaderState extends State<Reader> {
             last: last,
             initialPage: _page,
             saved: score?.reflowZones ?? const [],
+            annotations: _embeddedAnnotationMode,
           ),
         ),
       );
@@ -2523,6 +2592,7 @@ class _ReaderState extends State<Reader> {
             indicator: _preferences.halfPageIndicator,
             tint: _preferences.sepia ? _sepiaTint : Colors.white,
             dimming: _preferences.pageDimming,
+            annotations: _embeddedAnnotationMode,
             overlay: InkSurface(
               ink: _ink.putIfAbsent(next, _newPageInk),
               enabled: false,
@@ -2619,7 +2689,8 @@ class _ReaderState extends State<Reader> {
               },
             ]
           : null,
-      linkHandlerParams: _inking
+      annotationRenderingMode: _embeddedAnnotationMode,
+      linkHandlerParams: _inking || !_preferences.embeddedPdfLinks
           ? null
           : PdfLinkHandlerParams(
               enableAutoLinkDetection: false,
@@ -3155,6 +3226,8 @@ class _ReaderState extends State<Reader> {
                         _showReflow();
                       case _ReaderDisplay.panelOptions:
                         _showPanelOptions();
+                      case _ReaderDisplay.embeddedPdf:
+                        _showEmbeddedPdfSettings();
                       case _ReaderDisplay.fit:
                         _fit();
                       case _ReaderDisplay.zoomIn:
@@ -3329,6 +3402,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.panelOptions,
                       child: Text('Sidebar and lists'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.embeddedPdf,
+                      child: Text('Embedded PDF content'),
                     ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.fit,

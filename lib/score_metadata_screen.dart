@@ -18,16 +18,18 @@ const scoreMetadataFields = {
 
 Future<({String title, Map<String, String> fields})?> editScoreMetadata(
   BuildContext context,
-  ScoreEntry score,
-) => showDialog(
+  ScoreEntry score, {
+  Future<Map<String, String>> Function()? loadPdfInfo,
+}) => showDialog(
   context: context,
-  builder: (_) => _ScoreMetadataDialog(score: score),
+  builder: (_) => _ScoreMetadataDialog(score: score, loadPdfInfo: loadPdfInfo),
 );
 
 class _ScoreMetadataDialog extends StatefulWidget {
-  const _ScoreMetadataDialog({required this.score});
+  const _ScoreMetadataDialog({required this.score, this.loadPdfInfo});
 
   final ScoreEntry score;
+  final Future<Map<String, String>> Function()? loadPdfInfo;
 
   @override
   State<_ScoreMetadataDialog> createState() => _ScoreMetadataDialogState();
@@ -39,6 +41,37 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
     for (final key in scoreMetadataFields.keys)
       key: TextEditingController(text: widget.score.metadata[key] ?? ''),
   };
+  bool _loading = false;
+  String? _status;
+
+  Future<void> _usePdfInfo() async {
+    setState(() {
+      _loading = true;
+      _status = null;
+    });
+    try {
+      final info = await widget.loadPdfInfo!();
+      if (!mounted) return;
+      setState(() {
+        if (info['Title'] case final title?) _title.text = title;
+        for (final (pdf, key) in [
+          ('Author', 'composer'),
+          ('Subject', 'reference'),
+          ('Keywords', 'tags'),
+        ]) {
+          if (info[pdf] case final value?) _fields[key]!.text = value;
+        }
+        _status = info.isEmpty
+            ? 'This PDF has no usable details.'
+            : 'Review the imported details before saving.';
+      });
+    } catch (_) {
+      if (mounted)
+        setState(() => _status = 'Could not read the embedded PDF details.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -57,6 +90,13 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
       child: ListView(
         shrinkWrap: true,
         children: [
+          if (widget.loadPdfInfo != null)
+            TextButton(
+              onPressed: _loading ? null : _usePdfInfo,
+              child: const Text('Use embedded PDF details'),
+            ),
+          if (_loading) const LinearProgressIndicator(),
+          if (_status case final status?) Text(status),
           TextField(
             controller: _title,
             decoration: const InputDecoration(labelText: 'Title'),
@@ -81,7 +121,7 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
         child: const Text('Cancel'),
       ),
       FilledButton(
-        onPressed: _title.text.trim().isEmpty
+        onPressed: _loading || _title.text.trim().isEmpty
             ? null
             : () {
                 Navigator.pop(context, (

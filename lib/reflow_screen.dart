@@ -13,10 +13,12 @@ class ReflowScreen extends StatefulWidget {
     required this.last,
     required this.initialPage,
     required this.saved,
+    this.annotations = PdfAnnotationRenderingMode.annotationAndForms,
   });
   final PdfDocument document;
   final int first, last, initialPage;
   final List<ReflowZone> saved;
+  final PdfAnnotationRenderingMode annotations;
 
   @override
   State<ReflowScreen> createState() => _ReflowScreenState();
@@ -272,10 +274,11 @@ class _ReflowScreenState extends State<ReflowScreen> {
                             child: OverflowBox(
                               minWidth: renderWidth,
                               maxWidth: renderWidth,
-                              child: _ZoneImage(
+                              child: PdfRegionImage(
                                 page: widget.document.pages[zone.page - 1],
                                 zone: zone,
                                 width: renderWidth,
+                                annotations: widget.annotations,
                               ),
                             ),
                           ),
@@ -293,21 +296,24 @@ class _ReflowScreenState extends State<ReflowScreen> {
   );
 }
 
-class _ZoneImage extends StatefulWidget {
-  const _ZoneImage({
+class PdfRegionImage extends StatefulWidget {
+  const PdfRegionImage({
+    super.key,
     required this.page,
     required this.zone,
     required this.width,
+    this.annotations = PdfAnnotationRenderingMode.annotationAndForms,
   });
   final PdfPage page;
   final ReflowZone zone;
   final double width;
+  final PdfAnnotationRenderingMode annotations;
 
   @override
-  State<_ZoneImage> createState() => _ZoneImageState();
+  State<PdfRegionImage> createState() => _ZoneImageState();
 }
 
-class _ZoneImageState extends State<_ZoneImage> {
+class _ZoneImageState extends State<PdfRegionImage> {
   ui.Image? _image;
   int _revision = 0;
   bool _failed = false;
@@ -319,16 +325,25 @@ class _ZoneImageState extends State<_ZoneImage> {
   }
 
   @override
-  void didUpdateWidget(_ZoneImage old) {
+  void didUpdateWidget(PdfRegionImage old) {
     super.didUpdateWidget(old);
-    if (old.zone != widget.zone || old.width != widget.width) _render();
+    if (old.page != widget.page ||
+        old.zone != widget.zone ||
+        old.width != widget.width ||
+        old.annotations != widget.annotations)
+      _render();
   }
 
   Future<void> _render() async {
     final revision = ++_revision;
     ui.Image? image;
     try {
-      image = await renderReflowZone(widget.page, widget.zone, widget.width);
+      image = await renderReflowZone(
+        widget.page,
+        widget.zone,
+        widget.width,
+        annotations: widget.annotations,
+      );
     } catch (_) {
       // An individual render failure should not prevent other sections from opening.
     }

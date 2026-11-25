@@ -9,6 +9,15 @@ enum ReaderTapAction {
   final String label;
 }
 
+enum EmbeddedPdfContent {
+  all('Annotations and form fields'),
+  annotations('Annotations'),
+  hidden('Hide annotations and form fields');
+
+  const EmbeddedPdfContent(this.label);
+  final String label;
+}
+
 class ReaderPreferences {
   const ReaderPreferences({
     this.left = ReaderTapAction.previous,
@@ -28,6 +37,8 @@ class ReaderPreferences {
     this.softMetronome = false,
     this.dockPanels = false,
     this.compactLibrary = false,
+    this.embeddedPdfContent = EmbeddedPdfContent.all,
+    this.embeddedPdfLinks = true,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -57,6 +68,12 @@ class ReaderPreferences {
       softMetronome: json['softMetronome'] == true,
       dockPanels: json['dockPanels'] == true,
       compactLibrary: json['compactLibrary'] == true,
+      embeddedPdfContent:
+          EmbeddedPdfContent.values
+              .where((mode) => mode.name == json['embeddedPdfContent'])
+              .firstOrNull ??
+          EmbeddedPdfContent.all,
+      embeddedPdfLinks: json['embeddedPdfLinks'] != false,
       pageDimming: switch (json['pageDimming']) {
         final num value when value.isFinite => value.toDouble().clamp(0.0, .75),
         _ => 0,
@@ -77,6 +94,8 @@ class ReaderPreferences {
   final double pageDimming;
   final bool fullScreenPanels, largePageButtons, complexGestures, softMetronome;
   final bool dockPanels, compactLibrary;
+  final EmbeddedPdfContent embeddedPdfContent;
+  final bool embeddedPdfLinks;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -96,6 +115,8 @@ class ReaderPreferences {
     bool? softMetronome,
     bool? dockPanels,
     bool? compactLibrary,
+    EmbeddedPdfContent? embeddedPdfContent,
+    bool? embeddedPdfLinks,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -114,6 +135,8 @@ class ReaderPreferences {
     softMetronome: softMetronome ?? this.softMetronome,
     dockPanels: dockPanels ?? this.dockPanels,
     compactLibrary: compactLibrary ?? this.compactLibrary,
+    embeddedPdfContent: embeddedPdfContent ?? this.embeddedPdfContent,
+    embeddedPdfLinks: embeddedPdfLinks ?? this.embeddedPdfLinks,
   );
 
   Map<String, dynamic> toJson() => {
@@ -134,5 +157,7 @@ class ReaderPreferences {
     'softMetronome': softMetronome,
     'dockPanels': dockPanels,
     'compactLibrary': compactLibrary,
+    'embeddedPdfContent': embeddedPdfContent.name,
+    'embeddedPdfLinks': embeddedPdfLinks,
   };
 }
