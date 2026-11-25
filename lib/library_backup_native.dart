@@ -34,7 +34,13 @@ void _exportBackup(
           'format': _archiveFormat(kind),
           'version': 1,
           if (!includeScores) 'referencesOnly': true,
-          ..._catalog(scores, setlists, preferences: preferences),
+          ..._catalog(
+            scores,
+            setlists,
+            preferences: preferences == null
+                ? null
+                : (Map.of(preferences)..remove('readerRestrictions')),
+          ),
         }),
       ),
     );
@@ -267,7 +273,8 @@ void _exportBackup(
       if (kind == LibraryArchive.library &&
           existingScores.isEmpty &&
           savedPreferences is Map)
-        ...savedPreferences.cast<String, dynamic>(),
+        ...(Map<String, dynamic>.from(savedPreferences)
+          ..remove('readerRestrictions')),
       ...existingPreferences,
       if (metadataOnly && savedPreferences is Map)
         for (final key in savedPreferences.keys.whereType<String>())
@@ -278,6 +285,7 @@ void _exportBackup(
             'librarySyncState',
             'localScoreAudio',
             'practiceRecordings',
+            'readerRestrictions',
           }.contains(key))
             key: savedPreferences[key],
     };

@@ -20,9 +20,14 @@ String _durationText(ScoreLibrary library, Iterable<String> selections) {
 }
 
 class SetlistsScreen extends StatefulWidget {
-  const SetlistsScreen({super.key, required this.library});
+  const SetlistsScreen({
+    super.key,
+    required this.library,
+    this.allowTransfers = true,
+  });
 
   final ScoreLibrary library;
+  final bool allowTransfers;
 
   @override
   State<SetlistsScreen> createState() => _SetlistsScreenState();
@@ -207,11 +212,12 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
           enabled: list.scores.isNotEmpty,
           child: const Text('Choose play order'),
         ),
-        PopupMenuItem(
-          value: _SetlistAction.share,
-          enabled: !_transferring,
-          child: const Text('Share setlist'),
-        ),
+        if (widget.allowTransfers)
+          PopupMenuItem(
+            value: _SetlistAction.share,
+            enabled: !_transferring,
+            child: const Text('Share setlist'),
+          ),
         if (_sort == SetlistOrder.manual) ...[
           PopupMenuItem(
             value: _SetlistAction.earlier,
@@ -255,7 +261,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       appBar: AppBar(
         title: const Text('Setlists'),
         actions: [
-          if (widget.library.storage.persistent)
+          if (widget.library.storage.persistent && widget.allowTransfers)
             IconButton(
               tooltip: 'Import setlist package',
               onPressed: _transferring ? null : _importPackage,

@@ -54,6 +54,7 @@ import 'pdf_template.dart';
 import 'text_score_pdf.dart';
 import 'practice_activity.dart';
 import 'practice_dashboard.dart';
+import 'reader_restrictions.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -80,6 +81,7 @@ enum _ReaderDisplay {
   scoreAudio,
   practiceRecordings,
   practiceActivity,
+  restrictions,
   metronome,
   tuner,
   piano,
@@ -190,6 +192,8 @@ class _ReaderState extends State<Reader> {
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
   late final _practice = PracticeActivity(_library);
+  ReaderRestrictions? _restrictions;
+  late final Future<void> _startupPreferences;
   EnsembleSession? _ensemble;
   bool _leadingSpread = false;
   bool _followingSpread = false;
@@ -263,12 +267,38 @@ class _ReaderState extends State<Reader> {
           defaultTargetPlatform == TargetPlatform.iOS);
   bool get _isAppleMobile =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  bool get _autoStylus => _drawing.autoEnter && !_performance && !_picking;
+  bool get _autoStylus =>
+      _drawing.autoEnter &&
+      !_performance &&
+      !_picking &&
+      !_restricted(RestrictedTool.markup);
+
+  bool _restricted(RestrictedTool tool) =>
+      _restrictions?.tools.contains(tool) ?? false;
+
+  bool _readerActionAllowed(_ReaderDisplay? action) => switch (action) {
+    _ReaderDisplay.pageNote ||
+    _ReaderDisplay.pageActions ||
+    _ReaderDisplay.jumpLinks ||
+    _ReaderDisplay.crop ||
+    _ReaderDisplay.drawingSettings ||
+    _ReaderDisplay.halfSplit => !_restricted(RestrictedTool.markup),
+    _ReaderDisplay.exportPdf ||
+    _ReaderDisplay.shareScorePackage ||
+    _ReaderDisplay.practiceRecordings ||
+    _ReaderDisplay.scoreAudio => !_restricted(RestrictedTool.transfers),
+    _ReaderDisplay.ensemble ||
+    _ReaderDisplay.presentation ||
+    _ReaderDisplay.midiAutomation ||
+    _ReaderDisplay.midiDevices ||
+    _ReaderDisplay.inputShortcuts => !_restricted(RestrictedTool.connections),
+    _ => true,
+  };
 
   @override
   void initState() {
     super.initState();
-    _restorePreferences();
+    _startupPreferences = _restorePreferences();
     if (_isAppleMobile) {
       _stylusChannel.setMethodCallHandler((call) async {
         if (call.method == 'switchTool') _switchStylusTool();
@@ -310,6 +340,9 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
           _practice.enabled = data['practiceTracking'] == true;
+          _restrictions = ReaderRestrictions.fromJson(
+            data['readerRestrictions'],
+          );
           _midiPiano = data['midiPiano'] == true;
           if (data['readerShortcuts'] case final Map saved) {
             _shortcuts = {
@@ -505,6 +538,8 @@ class _ReaderState extends State<Reader> {
     try {
       final paths = await _sharedImports.invokeListMethod<String>('take') ?? [];
       if (paths.isEmpty || !mounted) return;
+      await _startupPreferences;
+      if (_restricted(RestrictedTool.transfers) || !mounted) return;
       await _libraryReady;
       await _importScores(paths.map(XFile.new).toList());
     } catch (_) {
@@ -526,7 +561,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _open() async {
-    if (_picking) return;
+    if (_picking || _restricted(RestrictedTool.transfers)) return;
     setState(() => _picking = true);
     try {
       final files = await openFiles(
@@ -715,6 +750,8 @@ class _ReaderState extends State<Reader> {
                 persistent: _library.storage.persistent,
                 canScan: _supportsSharedImport,
                 canSync: _isAppleMobile,
+                transferRestricted: _restricted(RestrictedTool.transfers),
+                connectionsRestricted: _restricted(RestrictedTool.connections),
                 onScoreQueue: (ids) => selectedQueue = ids,
                 onPinScore: (id) => _updateScoreTabs([
                   ..._scoreTabIds.where((value) => value != id),
@@ -731,6 +768,24 @@ class _ReaderState extends State<Reader> {
         }
       }
       if (result == null) return;
+      if (_restricted(RestrictedTool.transfers) &&
+          (const {
+                'import',
+                'import-images',
+                'create-template',
+                'import-text',
+                'scan',
+                'backup',
+                'cloud-files',
+                'metadata-csv',
+                'import-package',
+                'combine',
+              }.contains(result) ||
+              result.startsWith('extract:')))
+        return;
+      if (_restricted(RestrictedTool.connections) &&
+          const {'sync', 'cloud-files'}.contains(result))
+        return;
       if (result == 'combine' || result.startsWith('extract:')) {
         final source = result == 'combine'
             ? null
@@ -868,7 +923,10 @@ class _ReaderState extends State<Reader> {
       }
       if (result == 'setlists') {
         final setlist = await _openReaderPanel<Setlist>(
-          (_) => SetlistsScreen(library: _library),
+          (_) => SetlistsScreen(
+            library: _library,
+            allowTransfers: !_restricted(RestrictedTool.transfers),
+          ),
         );
         if (setlist != null && mounted) await _playScore(setlist, 0);
         return;
@@ -980,7 +1038,12 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _syncIfReady() async {
-    if (!mounted || _picking || _inking || _stylusDrawing || _performance)
+    if (!mounted ||
+        _picking ||
+        _inking ||
+        _stylusDrawing ||
+        _performance ||
+        _restricted(RestrictedTool.connections))
       return;
     try {
       if (await _syncEndpoint.configured &&
@@ -1287,6 +1350,7 @@ class _ReaderState extends State<Reader> {
             int.parse(action.parameter!),
           );
         case ScoreActionKind.midi:
+          if (_restricted(RestrictedTool.connections)) return;
           final devices = await _midi.devices ?? [];
           final targets = devices.where((device) => device.connected).toList();
           if (targets.isEmpty) throw StateError('Connect a MIDI device first.');
@@ -1317,7 +1381,11 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _editScoreActions() async {
     final score = _entry;
-    if (_picking || score == null || !_viewer.isReady) return;
+    if (_picking ||
+        score == null ||
+        !_viewer.isReady ||
+        _restricted(RestrictedTool.markup))
+      return;
     setState(() => _picking = true);
     try {
       final actions = await _openReaderPanel<List<ScoreAction>>(
@@ -1483,6 +1551,43 @@ class _ReaderState extends State<Reader> {
     ], opened: opened);
   }
 
+  Future<void> _showRestrictions() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final current = _restrictions;
+      final draft = await showDialog<RestrictionDraft>(
+        context: context,
+        builder: (_) => RestrictionsDialog(current: current),
+      );
+      if (!mounted || draft == null) return;
+      final next = draft.tools.isEmpty
+          ? null
+          : current == null
+          ? await ReaderRestrictions.create(draft.passcode, draft.tools)
+          : ReaderRestrictions(current.salt, current.digest, draft.tools);
+      await _library.updatePreferences({'readerRestrictions': next?.toJson()});
+      if (!mounted) return;
+      setState(() {
+        _restrictions = next;
+        if (_restricted(RestrictedTool.markup)) _inking = false;
+      });
+      if (_restricted(RestrictedTool.connections)) {
+        await _ensemble?.close();
+        if (!mounted) return;
+        setState(() => _followingSpread = _missingFacingPage = false);
+        if (_presenting) await _togglePresentation();
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not apply the restrictions.')),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
   Future<void> _showPracticeActivity() async {
     if (_picking) return;
     setState(() => _picking = true);
@@ -1491,7 +1596,11 @@ class _ReaderState extends State<Reader> {
       await _practice.suspend();
       if (!mounted) return;
       await _openReaderPanel<void>(
-        (_) => PracticeDashboard(activity: _practice, library: _library),
+        (_) => PracticeDashboard(
+          activity: _practice,
+          library: _library,
+          allowExport: !_restricted(RestrictedTool.transfers),
+        ),
       );
     } catch (_) {
       if (mounted)
@@ -1831,7 +1940,11 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _editPageNote(int page) async {
     final score = _entry;
-    if (_picking || score == null || page < _firstPage || page > _lastPage)
+    if (_picking ||
+        score == null ||
+        page < _firstPage ||
+        page > _lastPage ||
+        _restricted(RestrictedTool.markup))
       return;
     setState(() => _picking = true);
     try {
@@ -2310,7 +2423,7 @@ class _ReaderState extends State<Reader> {
     if (!ScoreAudioSession.supported || _midiInput != null) return;
     final stream = _midi.onMidiPacketReceived;
     _midiInput = stream?.listen((packet) {
-      if (!mounted) return;
+      if (!mounted || _restricted(RestrictedTool.connections)) return;
       final bytes = packet.data;
       if (_midiPiano &&
           bytes.length == 3 &&
@@ -2353,6 +2466,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _sendScoreMidi(ScoreEntry score) async {
+    if (_restricted(RestrictedTool.connections)) return;
     final commands = score.metadata['midiSend'];
     if (commands == null || commands.isEmpty) return;
     final devices = await _midi.devices ?? [];
@@ -2586,7 +2700,7 @@ class _ReaderState extends State<Reader> {
   }
 
   void _handleControllerShortcut(String key) {
-    if (!mounted) return;
+    if (!mounted || _restricted(RestrictedTool.connections)) return;
     _midiShortcuts.add(key);
     if (_picking || _pages == 0) return;
     final action =
@@ -3021,7 +3135,7 @@ class _ReaderState extends State<Reader> {
   }
 
   void _toggleInk() {
-    if (_pages == 0) return;
+    if (_pages == 0 || _restricted(RestrictedTool.markup)) return;
     _ink[_page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
@@ -3846,17 +3960,19 @@ class _ReaderState extends State<Reader> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IconButton(
-                  tooltip: _inking ? 'Done marking up' : 'Mark up score',
-                  onPressed: _pages == 0 ? null : _toggleInk,
-                  color: _inking ? _brass : null,
-                  icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
-                ),
+                if (!_restricted(RestrictedTool.markup))
+                  IconButton(
+                    tooltip: _inking ? 'Done marking up' : 'Mark up score',
+                    onPressed: _pages == 0 ? null : _toggleInk,
+                    color: _inking ? _brass : null,
+                    icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
+                  ),
                 PopupMenuButton<_ReaderDisplay>(
                   tooltip: 'Display options',
                   enabled: _pages > 0 && !_picking,
                   icon: const Icon(Icons.tune),
                   onSelected: (action) async {
+                    if (!_readerActionAllowed(action)) return;
                     switch (action) {
                       case _ReaderDisplay.nowPlaying:
                         _showNowPlaying();
@@ -3872,6 +3988,8 @@ class _ReaderState extends State<Reader> {
                         _showPracticeRecordings();
                       case _ReaderDisplay.practiceActivity:
                         _showPracticeActivity();
+                      case _ReaderDisplay.restrictions:
+                        _showRestrictions();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4004,7 +4122,7 @@ class _ReaderState extends State<Reader> {
                         );
                     }
                   },
-                  itemBuilder: (_) => [
+                  itemBuilder: (_) => <PopupMenuItem<_ReaderDisplay>>[
                     PopupMenuItem(
                       value: _ReaderDisplay.nowPlaying,
                       enabled: _entry != null,
@@ -4043,6 +4161,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.practiceActivity,
                       child: Text('Practice activity'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.restrictions,
+                      child: Text('Shared-device restrictions'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
@@ -4233,7 +4355,7 @@ class _ReaderState extends State<Reader> {
                       checked: _preferences.showNextTitle,
                       child: const Text('Show next score title'),
                     ),
-                  ],
+                  ].where((item) => _readerActionAllowed(item.value)).toList(),
                 ),
               ],
             ),
@@ -4685,6 +4807,8 @@ class _LibraryScreen extends StatefulWidget {
     required this.persistent,
     required this.canScan,
     required this.canSync,
+    required this.transferRestricted,
+    required this.connectionsRestricted,
     required this.onScoreQueue,
     required this.onPinScore,
     required this.compact,
@@ -4696,6 +4820,8 @@ class _LibraryScreen extends StatefulWidget {
   final bool persistent;
   final bool canScan;
   final bool canSync;
+  final bool transferRestricted;
+  final bool connectionsRestricted;
   final ValueChanged<List<String>> onScoreQueue;
   final Future<void> Function(String) onPinScore;
   final bool compact;
@@ -5015,6 +5141,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             .where(
               (entry) =>
                   _query.isNotEmpty &&
+                  (!widget.transferRestricted ||
+                      !const {
+                        'import',
+                        'create-template',
+                        'import-text',
+                        'backup',
+                      }.contains(entry.key)) &&
                   entry.value.toLowerCase().contains(_query),
             )
             .toList();
@@ -5113,69 +5246,81 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   Wrap(
                     spacing: 8,
                     children: [
-                      FilledButton.icon(
-                        onPressed: () => Navigator.pop(context, 'import'),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Import PDF'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () =>
-                            Navigator.pop(context, 'create-template'),
-                        icon: const Icon(Icons.note_add_outlined),
-                        label: const Text('Create from template'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context, 'import-text'),
-                        icon: const Icon(Icons.text_snippet_outlined),
-                        label: const Text('Import text or Word'),
-                      ),
-                      TextButton.icon(
-                        onPressed: () =>
-                            Navigator.pop(context, 'import-images'),
-                        icon: const Icon(Icons.image_outlined),
-                        label: const Text('Import images'),
-                      ),
-                      if (widget.canScan)
+                      if (!widget.transferRestricted)
+                        FilledButton.icon(
+                          onPressed: () => Navigator.pop(context, 'import'),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Import PDF'),
+                        ),
+                      if (!widget.transferRestricted)
+                        OutlinedButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'create-template'),
+                          icon: const Icon(Icons.note_add_outlined),
+                          label: const Text('Create from template'),
+                        ),
+                      if (!widget.transferRestricted)
+                        OutlinedButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'import-text'),
+                          icon: const Icon(Icons.text_snippet_outlined),
+                          label: const Text('Import text or Word'),
+                        ),
+                      if (!widget.transferRestricted)
+                        TextButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'import-images'),
+                          icon: const Icon(Icons.image_outlined),
+                          label: const Text('Import images'),
+                        ),
+                      if (widget.canScan && !widget.transferRestricted)
                         TextButton.icon(
                           onPressed: () => Navigator.pop(context, 'scan'),
                           icon: const Icon(Icons.document_scanner_outlined),
                           label: const Text('Scan sheet music'),
                         ),
-                      if (widget.canSync)
+                      if (widget.canSync && !widget.connectionsRestricted)
                         TextButton.icon(
                           onPressed: () => Navigator.pop(context, 'sync'),
                           icon: const Icon(Icons.cloud_sync_outlined),
                           label: const Text('Device sync'),
                         ),
-                      TextButton.icon(
-                        onPressed: () => Navigator.pop(context, 'metadata-csv'),
-                        icon: const Icon(Icons.table_chart_outlined),
-                        label: const Text('CSV metadata'),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => Navigator.pop(context, 'cloud-files'),
-                        icon: const Icon(Icons.cloud_outlined),
-                        label: const Text('Cloud files'),
-                      ),
+                      if (!widget.transferRestricted)
+                        TextButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'metadata-csv'),
+                          icon: const Icon(Icons.table_chart_outlined),
+                          label: const Text('CSV metadata'),
+                        ),
+                      if (!widget.transferRestricted &&
+                          !widget.connectionsRestricted)
+                        TextButton.icon(
+                          onPressed: () =>
+                              Navigator.pop(context, 'cloud-files'),
+                          icon: const Icon(Icons.cloud_outlined),
+                          label: const Text('Cloud files'),
+                        ),
                       TextButton.icon(
                         onPressed: () => Navigator.pop(context, 'setlists'),
                         icon: const Icon(Icons.queue_music),
                         label: const Text('Setlists'),
                       ),
-                      if (widget.scores.length > 1)
+                      if (!widget.transferRestricted &&
+                          widget.scores.length > 1)
                         TextButton.icon(
                           onPressed: () => Navigator.pop(context, 'combine'),
                           icon: const Icon(Icons.merge_type),
                           label: const Text('Combine PDFs'),
                         ),
-                      if (widget.persistent ||
-                          widget.library.recentlyDeleted.isNotEmpty)
+                      if (!widget.transferRestricted &&
+                          (widget.persistent ||
+                              widget.library.recentlyDeleted.isNotEmpty))
                         TextButton.icon(
                           onPressed: () => Navigator.pop(context, 'backup'),
                           icon: const Icon(Icons.settings_backup_restore),
                           label: const Text('Backup & restore'),
                         ),
-                      if (widget.persistent)
+                      if (widget.persistent && !widget.transferRestricted)
                         TextButton.icon(
                           onPressed: () =>
                               Navigator.pop(context, 'import-package'),
@@ -5332,28 +5477,29 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                       );
                                     }
                                   },
-                                  itemBuilder: (_) => const [
-                                    PopupMenuItem(
+                                  itemBuilder: (_) => [
+                                    const PopupMenuItem(
                                       value: 'details',
                                       child: Text('Rename or edit details'),
                                     ),
-                                    PopupMenuItem(
+                                    const PopupMenuItem(
                                       value: 'libraries',
                                       child: Text('Assign to libraries'),
                                     ),
-                                    PopupMenuItem(
+                                    const PopupMenuItem(
                                       value: 'trash',
                                       child: Text('Delete score'),
                                     ),
-                                    PopupMenuItem(
-                                      value: 'extract',
-                                      child: Text('Extract pages'),
-                                    ),
-                                    PopupMenuItem(
+                                    if (!widget.transferRestricted)
+                                      const PopupMenuItem(
+                                        value: 'extract',
+                                        child: Text('Extract pages'),
+                                      ),
+                                    const PopupMenuItem(
                                       value: 'rearrange',
                                       child: Text('Rearrange pages'),
                                     ),
-                                    PopupMenuItem(
+                                    const PopupMenuItem(
                                       value: 'clone',
                                       child: Text('Duplicate score'),
                                     ),

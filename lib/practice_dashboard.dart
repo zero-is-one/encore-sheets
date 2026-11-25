@@ -37,9 +37,11 @@ class PracticeDashboard extends StatefulWidget {
     super.key,
     required this.activity,
     required this.library,
+    this.allowExport = true,
   });
   final PracticeActivity activity;
   final ScoreLibrary library;
+  final bool allowExport;
 
   @override
   State<PracticeDashboard> createState() => _PracticeDashboardState();
@@ -221,11 +223,12 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
       appBar: AppBar(
         title: const Text('Practice activity'),
         actions: [
-          IconButton(
-            tooltip: 'Export practice report',
-            onPressed: _busy ? null : _exportReport,
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-          ),
+          if (widget.allowExport)
+            IconButton(
+              tooltip: 'Export practice report',
+              onPressed: _busy ? null : _exportReport,
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
         ],
       ),
       body: SafeArea(
