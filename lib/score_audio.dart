@@ -8,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'score_library.dart';
+import 'audio_page_cues.dart';
 
 typedef LinkedAudio = ({String? file, String? musicId, String name});
 
@@ -22,6 +23,27 @@ class ScoreAudioSession {
   Duration? loopStart;
   Duration? loopEnd;
   bool get looping => loopEnd != null;
+  String? get loadedFile => _loaded;
+  Duration get timelinePosition =>
+      player.position + (looping ? loopStart ?? Duration.zero : Duration.zero);
+
+  Future<List<AudioPageCue>> pageCues(String file) async {
+    final prefs = await library.storage.readPreferences();
+    return readAudioPageCues((prefs['audioPageCues'] as Map?)?[file]);
+  }
+
+  Future<void> savePageCues(String file, List<AudioPageCue> cues) async {
+    final prefs = await library.storage.readPreferences();
+    final all = Map<String, dynamic>.from(prefs['audioPageCues'] as Map? ?? {});
+    if (cues.isEmpty) {
+      all.remove(file);
+    } else {
+      all[file] = [
+        for (final cue in cues) {'ms': cue.milliseconds, 'page': cue.page},
+      ];
+    }
+    await library.updatePreferences({'audioPageCues': all});
+  }
 
   static bool get supported =>
       !kIsWeb &&

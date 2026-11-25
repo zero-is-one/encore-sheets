@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'program_duration.dart';
 import 'score_audio.dart';
+import 'audio_page_cues.dart';
 
 class ScoreAudioDialog extends StatefulWidget {
   const ScoreAudioDialog({
@@ -13,11 +14,13 @@ class ScoreAudioDialog extends StatefulWidget {
     required this.audio,
     required this.selection,
     required this.title,
+    required this.cueMode,
   });
 
   final ScoreAudioSession audio;
   final String selection;
   final String title;
+  final AudioPageCueMode cueMode;
 
   @override
   State<ScoreAudioDialog> createState() => _ScoreAudioDialogState();
@@ -29,6 +32,7 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
   String? _musicId;
   bool _musicPlaying = false;
   String? _error;
+  List<AudioPageCue> _cues = [];
   late double _speed = widget.audio.player.speed;
   late double _pitch = 12 * math.log(widget.audio.player.pitch) / math.ln2;
   String get _selection => widget.audio.pinnedSelection ?? widget.selection;
@@ -44,6 +48,8 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
     _track = track?.name;
     _musicId = track?.musicId;
     await widget.audio.open(_selection);
+    final file = track?.file;
+    _cues = file == null ? [] : await widget.audio.pageCues(file);
     _musicPlaying =
         _musicId != null && await widget.audio.musicPlaying(_musicId!);
   }
@@ -95,6 +101,37 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
 
   Future<void> _attachMusic() => _run(() async {
     if (await widget.audio.attachMusic(_selection)) await _loadTrack();
+  });
+
+  Future<void> _editCue(AudioPageCue cue) => _run(() async {
+    final time = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('Page ${cue.page} cue'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(
+              context,
+              widget.audio.timelinePosition.inMilliseconds,
+            ),
+            child: const Text('Move to current playback position'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, -1),
+            child: const Text('Remove cue'),
+          ),
+        ],
+      ),
+    );
+    final file = widget.audio.loadedFile;
+    if (time == null || file == null || !mounted) return;
+    final updated = [
+      for (final item in _cues)
+        if (item != cue && item.milliseconds != time) item,
+      if (time >= 0) (milliseconds: time, page: cue.page),
+    ]..sort((a, b) => a.milliseconds.compareTo(b.milliseconds));
+    await widget.audio.savePageCues(file, updated);
+    _cues = updated;
   });
 
   @override
@@ -244,6 +281,56 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
                   'A ${formatProgramDuration(start)}'
                   '${widget.audio.loopEnd == null ? '' : ' · B ${formatProgramDuration(widget.audio.loopEnd!)}'}',
                 ),
+              if (_selection == widget.selection) ...[
+                const Divider(),
+                const Text('Audio-synced page turns'),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.pop(
+                              context,
+                              widget.cueMode == AudioPageCueMode.record
+                                  ? AudioPageCueMode.off
+                                  : AudioPageCueMode.record,
+                            ),
+                      child: Text(
+                        widget.cueMode == AudioPageCueMode.record
+                            ? 'Finish recording'
+                            : 'Record page turns',
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _busy || _cues.isEmpty
+                          ? null
+                          : () => Navigator.pop(
+                              context,
+                              widget.cueMode == AudioPageCueMode.replay
+                                  ? AudioPageCueMode.off
+                                  : AudioPageCueMode.replay,
+                            ),
+                      child: Text(
+                        widget.cueMode == AudioPageCueMode.replay
+                            ? 'Stop automatic turns'
+                            : 'Play with automatic turns',
+                      ),
+                    ),
+                  ],
+                ),
+                for (final cue in _cues)
+                  ListTile(
+                    title: Text('Page ${cue.page}'),
+                    subtitle: Text(
+                      formatProgramDuration(
+                        Duration(milliseconds: cue.milliseconds),
+                      ),
+                    ),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: _busy ? null : () => _editCue(cue),
+                  ),
+              ],
             ],
             if (_track != null)
               SwitchListTile(

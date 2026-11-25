@@ -45,6 +45,7 @@ import 'cloud_files_screen.dart';
 import 'embedded_pdf_info.dart';
 import 'midi_devices_dialog.dart';
 import 'turn_touch.dart';
+import 'audio_page_cues.dart';
 import 'rehearsal_metronome.dart';
 import 'reference_tone.dart';
 import 'reflow_screen.dart';
@@ -174,6 +175,12 @@ class _ReaderState extends State<Reader> {
   int _pdfLinkNavigations = 0;
   Setlist? _playing;
   ScoreAudioSession? _scoreAudio;
+  AudioPageCueMode _audioCueMode = AudioPageCueMode.off;
+  StreamSubscription<Duration>? _audioCuePlayback;
+  String? _audioCueFile;
+  List<AudioPageCue> _audioCues = [];
+  AudioPageCue? _lastAudioCue;
+  Future<void> _audioCueWrite = Future.value();
   RehearsalMetronome? _metronome;
   ReferenceTone? _referenceTone;
   Map<String, ReaderShortcut> _shortcuts = {};
@@ -429,6 +436,7 @@ class _ReaderState extends State<Reader> {
     unawaited(_referenceTone?.dispose());
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
+    unawaited(_audioCuePlayback?.cancel());
     _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
@@ -1204,17 +1212,99 @@ class _ReaderState extends State<Reader> {
     if (!ScoreAudioSession.supported || _picking || score == null) return;
     final selection = _itemBookmark?.selectionId(score.id) ?? score.id;
     final audio = _scoreAudio ??= ScoreAudioSession(_library);
+    AudioPageCueMode? mode;
     setState(() => _picking = true);
     try {
-      await showDialog<void>(
+      await _audioCueWrite;
+      if (!mounted) return;
+      mode = await showDialog<AudioPageCueMode>(
         context: context,
         barrierDismissible: false,
-        builder: (_) =>
-            ScoreAudioDialog(audio: audio, selection: selection, title: _title),
+        builder: (_) => ScoreAudioDialog(
+          audio: audio,
+          selection: selection,
+          title: _title,
+          cueMode: _audioCueMode,
+        ),
       );
     } finally {
       _finishPicking();
     }
+    if (!mounted) return;
+    if (audio.loadedFile != _audioCueFile || mode != null) {
+      _stopAudioCues();
+    }
+    if (mode == AudioPageCueMode.off) return;
+    if (mode == null && _audioCueMode != AudioPageCueMode.replay) return;
+    final file = audio.loadedFile;
+    if (file == null) return;
+    try {
+      final cues = await audio.pageCues(file);
+      if (!mounted || audio.loadedFile != file || _entry?.id != score.id)
+        return;
+      if (mode == null) {
+        _audioCues = cues;
+        return;
+      }
+      _audioCueFile = file;
+      _audioCueMode = mode;
+      _audioCues = cues;
+      if (mode == AudioPageCueMode.record) {
+        _recordAudioCue(_page, starting: true);
+      } else {
+        _audioCuePlayback = audio.player.positionStream.listen((_) {
+          if (_picking || audio.loadedFile != _audioCueFile) return;
+          final cue = audioCueAt(_audioCues, audio.timelinePosition);
+          if (cue == _lastAudioCue) return;
+          _lastAudioCue = cue;
+          if (cue != null) _jumpToPage(cue.page);
+        });
+      }
+      if (!audio.player.playing) await audio.toggle(selection);
+    } catch (_) {
+      _stopAudioCues();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start audio page turns.')),
+        );
+      }
+    }
+  }
+
+  void _stopAudioCues() {
+    unawaited(_audioCuePlayback?.cancel());
+    _audioCuePlayback = null;
+    _audioCueMode = AudioPageCueMode.off;
+    _audioCueFile = null;
+    _lastAudioCue = null;
+  }
+
+  void _recordAudioCue(int page, {bool starting = false}) {
+    final audio = _scoreAudio;
+    final file = _audioCueFile;
+    if (_audioCueMode != AudioPageCueMode.record ||
+        audio == null ||
+        file == null ||
+        audio.loadedFile != file ||
+        (!starting && !audio.player.playing))
+      return;
+    final ms = audio.timelinePosition.inMilliseconds;
+    final cues = [
+      for (final cue in _audioCues)
+        if (cue.milliseconds != ms) cue,
+      (milliseconds: ms, page: page),
+    ]..sort((a, b) => a.milliseconds.compareTo(b.milliseconds));
+    _audioCues = cues;
+    _audioCueWrite = _audioCueWrite
+        .then((_) => audio.savePageCues(file, cues))
+        .catchError((Object _) {
+          _stopAudioCues();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not save the page cue.')),
+            );
+          }
+        });
   }
 
   Future<void> _showPracticeRecordings() async {
@@ -1658,6 +1748,7 @@ class _ReaderState extends State<Reader> {
     ScoreBookmark? item,
   }) {
     final audio = _scoreAudio;
+    _stopAudioCues();
     if (audio != null && audio.pinnedSelection == null) {
       unawaited(audio.stop().catchError((Object _) {}));
     }
@@ -1892,6 +1983,7 @@ class _ReaderState extends State<Reader> {
       }
     }
     _remember(_entry?.id, target);
+    _recordAudioCue(target);
   }
 
   Future<void> _returnToPreviousScore() async {
@@ -2847,6 +2939,7 @@ class _ReaderState extends State<Reader> {
           _halfPreview = false;
         });
         _remember(_entry?.id, page);
+        _recordAudioCue(page);
         if (_pdfLinkNavigations == 0 && _cropFor(page) != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && revision == _revision && _page == page) {
