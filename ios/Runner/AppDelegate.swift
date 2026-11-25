@@ -14,6 +14,7 @@ import MediaPlayer
   private var folderResult: FlutterResult?
   private var musicPickerResult: FlutterResult?
   private var musicTrackID: MPMediaEntityPersistentID?
+  var presentedScore: (path: String, page: Int)?
   nonisolated private let syncBookmark = "librarySyncFolder"
   private let syncQueue = DispatchQueue(label: "app.encoresheets.library-sync")
   override func application(
@@ -97,6 +98,32 @@ import MediaPlayer
       }
       result(nil)
     }
+    let presentation = FlutterMethodChannel(
+      name: "encoresheets/presentation",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    presentation.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      switch call.method {
+      case "hide":
+        self.presentedScore = nil
+      case "show":
+        guard let data = call.arguments as? [String: Any],
+          let path = data["path"] as? String,
+          let page = data["page"] as? Int else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        self.presentedScore = (path, page)
+      default:
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      for scene in UIApplication.shared.connectedScenes {
+        (scene.delegate as? ScorePresentationSceneDelegate)?.refresh()
+      }
+      result(nil)
+    }
   }
 
   func application(
@@ -104,6 +131,11 @@ import MediaPlayer
     configurationForConnecting connectingSceneSession: UISceneSession,
     options: UIScene.ConnectionOptions
   ) -> UISceneConfiguration {
+    if connectingSceneSession.role == .windowExternalDisplayNonInteractive {
+      let configuration = UISceneConfiguration(name: "Score presentation", sessionRole: connectingSceneSession.role)
+      configuration.delegateClass = ScorePresentationSceneDelegate.self
+      return configuration
+    }
     if options.userActivities.contains(where: { $0.activityType == ScoreWindowSceneDelegate.activityType }) {
       let configuration = UISceneConfiguration(name: "Score window", sessionRole: connectingSceneSession.role)
       configuration.delegateClass = ScoreWindowSceneDelegate.self

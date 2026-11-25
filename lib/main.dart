@@ -81,6 +81,7 @@ enum _ReaderDisplay {
   midiAutomation,
   ensemble,
   scoreWindow,
+  presentation,
   appearance,
   accessibility,
   reflow,
@@ -185,6 +186,11 @@ class _ReaderState extends State<Reader> {
   bool _leadingSpread = false;
   bool _followingSpread = false;
   bool _missingFacingPage = false;
+  bool _presenting = false;
+  int _presentationUpdate = 0;
+  static const _presentationChannel = MethodChannel(
+    'encoresheets/presentation',
+  );
   AudioPageCueMode _audioCueMode = AudioPageCueMode.off;
   StreamSubscription<Duration>? _audioCuePlayback;
   String? _audioCueFile;
@@ -449,6 +455,13 @@ class _ReaderState extends State<Reader> {
     _metronome?.dispose();
     unawaited(_scoreAudio?.dispose());
     unawaited(_ensemble?.close());
+    if (_presenting) {
+      unawaited(
+        _presentationChannel
+            .invokeMethod<void>('hide')
+            .catchError((Object _) {}),
+      );
+    }
     unawaited(_audioCuePlayback?.cancel());
     _syncTimer?.cancel();
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
@@ -1682,6 +1695,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _remember(String? id, int page, {bool opened = false}) async {
+    if (_presenting) unawaited(_updatePresentation());
     if (id == null) return;
     try {
       await _library.record(id, page, opened: opened);
@@ -1881,6 +1895,7 @@ class _ReaderState extends State<Reader> {
     if (scoreChanged && entry != null && ScoreAudioSession.supported) {
       unawaited(_sendScoreMidi(entry).catchError((Object _) {}));
     }
+    if (_presenting) unawaited(_updatePresentation());
   }
 
   PageInk _newPageInk() => PageInk(
@@ -2295,6 +2310,34 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not open another score window.')),
         );
+    }
+  }
+
+  Future<void> _togglePresentation() async {
+    setState(() => _presenting = !_presenting);
+    await _updatePresentation();
+  }
+
+  Future<void> _updatePresentation() async {
+    final update = ++_presentationUpdate;
+    final file = _file;
+    try {
+      if (_presenting && file != null) {
+        await _presentationChannel.invokeMethod<void>('show', {
+          'path': file.path,
+          'page': _page,
+        });
+      } else {
+        await _presentationChannel.invokeMethod<void>('hide');
+      }
+    } catch (_) {
+      if (!mounted || update != _presentationUpdate) return;
+      setState(() => _presenting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not send the score to a second display.'),
+        ),
+      );
     }
   }
 
@@ -3646,6 +3689,8 @@ class _ReaderState extends State<Reader> {
                         _showEnsemble();
                       case _ReaderDisplay.scoreWindow:
                         _openScoreWindow();
+                      case _ReaderDisplay.presentation:
+                        _togglePresentation();
                       case _ReaderDisplay.appearance:
                         _showAppearance();
                       case _ReaderDisplay.accessibility:
@@ -3831,6 +3876,16 @@ class _ReaderState extends State<Reader> {
                         value: _ReaderDisplay.scoreWindow,
                         enabled: _file != null,
                         child: const Text('Open score in another window'),
+                      ),
+                    if (_supportsSharedImport)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.presentation,
+                        enabled: _file != null || _presenting,
+                        child: Text(
+                          _presenting
+                              ? 'Stop external display'
+                              : 'Present on external display',
+                        ),
                       ),
                     const PopupMenuItem(
                       value: _ReaderDisplay.appearance,

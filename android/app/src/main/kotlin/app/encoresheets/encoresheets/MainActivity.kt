@@ -2,6 +2,7 @@ package app.encoresheets.encoresheets
 
 import android.app.Activity
 import android.content.Intent
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -16,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var pendingBackup: Pair<File, MethodChannel.Result>? = null
     private var pendingScan: MethodChannel.Result? = null
     private var importChannel: MethodChannel? = null
+    private var scorePresentation: ScorePresentation? = null
     private val sharedPdfs = mutableListOf<Uri>()
 
     @Suppress("DEPRECATION")
@@ -38,6 +40,12 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         collectPdfs(intent)
+    }
+
+    override fun onDestroy() {
+        scorePresentation?.dismiss()
+        scorePresentation = null
+        super.onDestroy()
     }
 
     @Suppress("DEPRECATION")
@@ -102,6 +110,39 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/presentation")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "hide" -> {
+                            scorePresentation?.dismiss()
+                            scorePresentation = null
+                            result.success(null)
+                        }
+                        "show" -> {
+                            val path = requireNotNull(call.argument<String>("path"))
+                            val page = call.argument<Int>("page") ?: 1
+                            val manager = getSystemService(DisplayManager::class.java)
+                            val display = manager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+                                .firstOrNull()
+                            if (display == null) {
+                                result.error("missing_display", "Connect a supported second display.", null)
+                                return@setMethodCallHandler
+                            }
+                            val presentation = scorePresentation?.takeIf { it.isShowing }
+                                ?: ScorePresentation(this, display).also { it.show() }
+                            scorePresentation = presentation
+                            presentation.showPage(path, page - 1)
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) {
+                    scorePresentation?.dismiss()
+                    scorePresentation = null
+                    result.error("presentation_unavailable", error.message, null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/score-windows")
             .setMethodCallHandler { call, result ->
                 val path = call.argument<String>("path")

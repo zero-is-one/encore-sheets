@@ -96,3 +96,49 @@ final class ScoreWindowSceneDelegate: UIResponder, UIWindowSceneDelegate {
     return activity
   }
 }
+
+final class ScorePresentationSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+  private weak var scene: UIWindowScene?
+  private var view: PDFView?
+  private var path: String?
+
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+             options: UIScene.ConnectionOptions) {
+    self.scene = scene as? UIWindowScene
+    refresh()
+  }
+
+  func refresh() {
+    guard let scene,
+      let state = (UIApplication.shared.delegate as? AppDelegate)?.presentedScore else {
+      window?.isHidden = true
+      window?.windowScene = nil
+      window = nil
+      view = nil
+      path = nil
+      return
+    }
+    if view == nil {
+      let pdf = PDFView()
+      pdf.autoScales = true
+      pdf.displayMode = .singlePage
+      pdf.isUserInteractionEnabled = false
+      pdf.backgroundColor = .black
+      let controller = UIViewController()
+      controller.view = pdf
+      let window = UIWindow(windowScene: scene)
+      window.rootViewController = controller
+      window.isHidden = false
+      self.window = window
+      view = pdf
+    }
+    if path != state.path {
+      view?.document = PDFDocument(url: URL(fileURLWithPath: state.path))
+      path = state.path
+    }
+    if let page = view?.document?.page(at: max(0, state.page - 1)) {
+      view?.go(to: page)
+    }
+  }
+}
