@@ -71,6 +71,7 @@ class ScoreEntry {
     this.flags = const [],
     this.jumps = const [],
     this.halfSplits = const {},
+    this.deletedAt,
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -78,6 +79,7 @@ class ScoreEntry {
     title: json['title'] as String,
     page: json['page'] as int,
     openedAt: DateTime.parse(json['openedAt'] as String),
+    deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
     metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
     collections: (json['collections'] as List?)?.cast<String>() ?? const [],
     bookmarks: [
@@ -104,6 +106,7 @@ class ScoreEntry {
   final String title;
   final int page;
   final DateTime openedAt;
+  final DateTime? deletedAt;
   final Map<String, String> metadata;
   final List<String> collections;
   final List<ScoreBookmark> bookmarks;
@@ -122,6 +125,8 @@ class ScoreEntry {
     List<int>? flags,
     List<ScoreJump>? jumps,
     Map<int, double>? halfSplits,
+    DateTime? deletedAt,
+    bool recover = false,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -133,6 +138,7 @@ class ScoreEntry {
     flags: flags ?? this.flags,
     jumps: jumps ?? this.jumps,
     halfSplits: halfSplits ?? this.halfSplits,
+    deletedAt: recover ? null : deletedAt ?? this.deletedAt,
   );
 
   Map<String, dynamic> toJson() => {
@@ -140,6 +146,7 @@ class ScoreEntry {
     'title': title,
     'page': page,
     'openedAt': openedAt.toIso8601String(),
+    if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (collections.isNotEmpty) 'collections': collections,
     if (bookmarks.isNotEmpty)
@@ -187,6 +194,7 @@ abstract class LibraryStorage {
   Future<List<Setlist>> readSetlists();
   Future<void> writeSetlists(List<Setlist> setlists);
   Future<XFile> createBackup(List<ScoreEntry> scores, List<Setlist> setlists);
+  Future<XFile?> latestBackup();
   Future<({List<ScoreEntry> scores, List<Setlist> setlists})> restoreBackup(
     XFile source,
     List<ScoreEntry> scores,
@@ -204,9 +212,32 @@ class ScoreLibrary {
   Future<void> _pending = Future.value();
 
   List<ScoreEntry> get recent =>
-      _scores.values.toList()..sort((a, b) => b.openedAt.compareTo(a.openedAt));
+      _scores.values.where((score) => score.deletedAt == null).toList()
+        ..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
-  ScoreEntry? lookup(String id) => _scores[id];
+  List<ScoreEntry> get recentlyDeleted =>
+      _scores.values.where((score) => score.deletedAt != null).toList()
+        ..sort((a, b) => b.deletedAt!.compareTo(a.deletedAt!));
+
+  ScoreEntry? lookup(String id) {
+    final score = _scores[id];
+    return score?.deletedAt == null ? score : null;
+  }
+
+  Future<void> trashScores(Iterable<String> ids) => _serialize(() async {
+    final deletedAt = DateTime.now();
+    final next = Map.of(_scores);
+    for (final id in ids) {
+      if (lookup(id) case final score?) {
+        next[id] = score.copyWith(deletedAt: deletedAt);
+      }
+    }
+    await storage.writeIndex(next.values.toList());
+    _scores.addAll(next);
+  });
+
+  Future<void> recoverScore(String id) =>
+      updateScore(id, (score) => score.copyWith(recover: true));
   (ScoreEntry, ScoreBookmark?)? lookupSelection(String id) {
     final parts = id.split(':');
     final score = lookup(parts.first);

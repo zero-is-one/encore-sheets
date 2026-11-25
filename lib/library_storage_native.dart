@@ -115,7 +115,17 @@ class NativeLibraryStorage implements LibraryStorage {
         '${folder.path}/EncoreSheets-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
     await Isolate.run(() => _exportBackup(root, path, scores, setlists));
+    final staged = await File(path).copy('$root/latest-backup.zip.tmp');
+    await staged.rename('$root/latest-backup.zip');
     return XFile(path, mimeType: 'application/zip');
+  }
+
+  @override
+  Future<XFile?> latestBackup() async {
+    final file = await _file('latest-backup.zip');
+    return await file.exists()
+        ? XFile(file.path, mimeType: 'application/zip')
+        : null;
   }
 
   @override

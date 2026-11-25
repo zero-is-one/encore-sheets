@@ -167,7 +167,7 @@ class _ReaderState extends State<Reader> {
         final ids = indexedTabs is List
             ? indexedTabs.whereType<String>().toSet().toList()
             : <String>[];
-        if (ids.isNotEmpty) await _library.load();
+        if (ids.isNotEmpty) await _libraryReady;
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
@@ -449,7 +449,14 @@ class _ReaderState extends State<Reader> {
                 persistent: _library.storage.persistent,
               ),
             );
-      if (result == null || !mounted) return;
+      if (!mounted) return;
+      if (_entry case final current?) {
+        if (_library.lookup(current.id) == null) {
+          _playing = null;
+          _load(null, null, null);
+        }
+      }
+      if (result == null) return;
       if (result == 'batch') {
         final edit = await editBatchMetadata(context, _library.recent);
         if (edit != null) {
@@ -571,7 +578,7 @@ class _ReaderState extends State<Reader> {
     if (_picking) return;
     setState(() => _picking = true);
     try {
-      await _library.load();
+      await _libraryReady;
       final score = _library.lookup(id);
       if (score == null) {
         await _updateScoreTabs(_scoreTabIds.where((tab) => tab != id).toList());
@@ -699,6 +706,14 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _playScore(Setlist setlist, int index) async {
+    if (index == 0) {
+      setlist = Setlist(
+        setlist.id,
+        setlist.name,
+        setlist.scores.where((id) => _library.lookupSelection(id) != null),
+      );
+      if (setlist.scores.isEmpty) return;
+    }
     final selection = _library.lookupSelection(setlist.scores[index]);
     if (selection == null) throw StateError('Setlist score is missing');
     final (entry, item) = selection;
@@ -2200,6 +2215,39 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     }
   }
 
+  Future<void> _trashScore(ScoreEntry score) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Delete ${score.title}?'),
+        content: const Text(
+          'You can recover this score from Backup & restore.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Move to Recently deleted'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.library.trashScores([score.id]);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete the score.')),
+        );
+      }
+    }
+  }
+
   static const _fields = {
     'Composer': 'composer',
     'Genre': 'genre',
@@ -2358,7 +2406,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         icon: const Icon(Icons.queue_music),
                         label: const Text('Setlists'),
                       ),
-                      if (widget.persistent)
+                      if (widget.persistent ||
+                          widget.library.recentlyDeleted.isNotEmpty)
                         TextButton.icon(
                           onPressed: () => Navigator.pop(context, 'backup'),
                           icon: const Icon(Icons.settings_backup_restore),
@@ -2447,6 +2496,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                   onSelected: (action) {
                                     if (action == 'libraries') {
                                       _assignCollections(score);
+                                    } else if (action == 'trash') {
+                                      _trashScore(score);
                                     } else {
                                       Navigator.pop(
                                         context,
@@ -2462,6 +2513,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     PopupMenuItem(
                                       value: 'libraries',
                                       child: Text('Assign to libraries'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'trash',
+                                      child: Text('Delete score'),
                                     ),
                                   ],
                                 ),

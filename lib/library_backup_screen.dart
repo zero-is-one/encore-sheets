@@ -78,6 +78,35 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
     return 'Restored ${result.scores} scores and ${result.setlists} setlists.';
   }
 
+  Future<String?> _recoverSnapshot() async {
+    final snapshot = await widget.library.storage.latestBackup();
+    if (!mounted) return null;
+    if (snapshot == null)
+      return 'Create a backup to save a local recovery snapshot.';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Restore latest local backup?'),
+        content: const Text(
+          'The saved scores and setlists will be added as copies.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Restore copies'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return null;
+    final restored = await widget.library.restoreBackup(snapshot);
+    return 'Restored ${restored.scores} scores and ${restored.setlists} setlists.';
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: _operation == null,
@@ -92,7 +121,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: _operation == null
+              onPressed: _operation == null && widget.library.storage.persistent
                   ? () => _run('Create backup', _export)
                   : null,
               icon: const Icon(Icons.save_alt),
@@ -100,7 +129,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _operation == null
+              onPressed: _operation == null && widget.library.storage.persistent
                   ? () => _run('Restore backup', _restore)
                   : null,
               icon: const Icon(Icons.settings_backup_restore),
@@ -110,6 +139,36 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
             const Text(
               'Restore adds copies to your library and preserves existing items.',
             ),
+            if (widget.library.storage.persistent)
+              TextButton.icon(
+                onPressed: _operation == null
+                    ? () =>
+                          _run('Restore latest local backup', _recoverSnapshot)
+                    : null,
+                icon: const Icon(Icons.history),
+                label: const Text('Restore latest local backup'),
+              ),
+            const SizedBox(height: 24),
+            Text(
+              'Recently deleted',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            if (widget.library.recentlyDeleted.isEmpty)
+              const Text('No deleted scores.'),
+            for (final score in widget.library.recentlyDeleted)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(score.title),
+                trailing: TextButton(
+                  onPressed: _operation != null
+                      ? null
+                      : () => _run('Recover score', () async {
+                          await widget.library.recoverScore(score.id);
+                          return 'Recovered ${score.title}.';
+                        }),
+                  child: const Text('Recover'),
+                ),
+              ),
             if (_operation != null) ...[
               const SizedBox(height: 16),
               const LinearProgressIndicator(),

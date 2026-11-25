@@ -53,6 +53,9 @@ class _MemoryLibraryStorage implements LibraryStorage {
   bool get persistent => false;
 
   @override
+  Future<XFile?> latestBackup() async => null;
+
+  @override
   Future<List<ScoreEntry>> readIndex() async => [];
 
   @override

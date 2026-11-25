@@ -6,6 +6,32 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('recovers a deleted score with its PDF and setlist reference', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'encoresheets_test',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = await File('${directory.path}/Music.pdf')
+        .writeAsString('music');
+    final library = ScoreLibrary(NativeLibraryStorage(directory: directory));
+    final (score, _) = await library.import(XFile(source.path));
+    await library.saveSetlist(Setlist('concert', 'Concert', [score.id]));
+    await library.trashScores([score.id]);
+
+    final reopened = ScoreLibrary(NativeLibraryStorage(directory: directory));
+    await reopened.load();
+    expect(reopened.recent, isEmpty);
+    expect(reopened.lookupSelection(score.id), isNull);
+    expect(reopened.recentlyDeleted.single.id, score.id);
+    await reopened.recoverScore(score.id);
+    expect(reopened.recent.single.id, score.id);
+    expect(reopened.setlists.single.scores, [score.id]);
+    expect(
+      await (await reopened.storage.openScore(score.id)).readAsString(),
+      'music',
+    );
+  });
+
   test('copies two scores and restores separate page positions', () async {
     final directory = await Directory.systemTemp.createTemp(
       'encoresheets_test',
