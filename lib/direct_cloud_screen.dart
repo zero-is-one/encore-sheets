@@ -1,0 +1,196 @@
+import 'package:material_ui/material_ui.dart';
+
+import 'cloud_provider.dart';
+import 'score_library.dart';
+
+class DirectCloudScreen extends StatefulWidget {
+  const DirectCloudScreen({
+    super.key,
+    required this.provider,
+    required this.library,
+  });
+  final DirectCloudProvider provider;
+  final ScoreLibrary library;
+
+  @override
+  State<DirectCloudScreen> createState() => _DirectCloudScreenState();
+}
+
+class _DirectCloudScreenState extends State<DirectCloudScreen> {
+  final _token = TextEditingController();
+  late final _path = <CloudItem>[
+    (id: widget.provider.root, name: widget.provider.label, folder: true),
+  ];
+  CloudProviderSession? _session;
+  List<CloudItem> _items = [];
+  bool _busy = false;
+  String? _status;
+  ScoreEntry? _latest;
+
+  @override
+  void dispose() {
+    _token.dispose();
+    _session?.close();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<void> Function() operation) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    try {
+      await operation();
+    } catch (error) {
+      _status = error is CloudTransferError
+          ? error.message
+          : 'Could not complete the cloud transfer.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _connect() => _run(() async {
+    final token = _token.text.trim();
+    if (token.isEmpty)
+      throw const CloudTransferError('Enter a provider access token.');
+    final session = CloudProviderSession(widget.provider, token);
+    try {
+      final items = await session.folder(widget.provider.root);
+      if (!mounted) {
+        session.close();
+        return;
+      }
+      _token.clear();
+      _session = session;
+      _items = items;
+    } catch (_) {
+      session.close();
+      rethrow;
+    }
+  });
+
+  Future<void> _open(CloudItem item) => _run(() async {
+    if (item.folder) {
+      final next = await _session!.folder(item.id);
+      _path.add(item);
+      _items = next;
+      return;
+    }
+    final file = await _session!.download(item);
+    if (!mounted) return;
+    final (score, _) = await widget.library.import(file);
+    _latest = score;
+    _status = 'Imported ${score.title}.';
+  });
+
+  Future<void> _up() => _run(() async {
+    final next = await _session!.folder(_path[_path.length - 2].id);
+    _path.removeLast();
+    _items = next;
+  });
+
+  Future<void> _upload() => _run(() async {
+    final score = await showDialog<ScoreEntry>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: Text('Upload a score to ${_path.last.name}'),
+        children: [
+          for (final score in widget.library.recent)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, score),
+              child: Text(score.title),
+            ),
+        ],
+      ),
+    );
+    if (score == null || !mounted) return;
+    final stem = score.title
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_')
+        .trim();
+    final name = '${stem.isEmpty ? 'Score' : stem}.pdf';
+    await _session!.upload(
+      _path.last.id,
+      name,
+      await widget.library.storage.openScore(score.id),
+    );
+    _items = await _session!.folder(_path.last.id);
+    _status = 'Uploaded $name.';
+  });
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: Scaffold(
+      appBar: AppBar(title: Text(widget.provider.label)),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (_busy) const LinearProgressIndicator(),
+            if (_status case final status?) Text(status),
+            if (_session == null) ...[
+              const Text(
+                'Use a provider access token with file access. The token is cleared when you close this screen.',
+              ),
+              TextField(
+                controller: _token,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                enabled: !_busy,
+                decoration: const InputDecoration(labelText: 'Access token'),
+                onSubmitted: (_) => _connect(),
+              ),
+              FilledButton(
+                onPressed: _busy ? null : _connect,
+                child: const Text('Connect'),
+              ),
+            ] else ...[
+              Text(_path.map((entry) => entry.name).join(' / ')),
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (_path.length > 1)
+                    TextButton(
+                      onPressed: _busy ? null : _up,
+                      child: const Text('Parent folder'),
+                    ),
+                  TextButton(
+                    onPressed: _busy || widget.library.recent.isEmpty
+                        ? null
+                        : _upload,
+                    child: const Text('Upload score'),
+                  ),
+                  if (_latest case final score?)
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.pop(context, score),
+                      child: const Text('Open last imported'),
+                    ),
+                ],
+              ),
+              for (final item in _items)
+                ListTile(
+                  leading: Icon(
+                    item.folder
+                        ? Icons.folder_outlined
+                        : Icons.picture_as_pdf_outlined,
+                  ),
+                  title: Text(item.name),
+                  trailing: Icon(
+                    item.folder ? Icons.chevron_right : Icons.download_outlined,
+                  ),
+                  onTap: _busy ? null : () => _open(item),
+                ),
+              if (_items.isEmpty && !_busy)
+                const Text('No folders or PDFs in this location.'),
+            ],
+          ],
+        ),
+      ),
+    ),
+  );
+}

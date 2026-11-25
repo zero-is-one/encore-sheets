@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 
 import 'score_library.dart';
+import 'cloud_provider.dart';
+import 'direct_cloud_screen.dart';
 
 class CloudFilesScreen extends StatefulWidget {
   const CloudFilesScreen({super.key, required this.library});
@@ -59,6 +61,16 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
           'Imported $count scores.${failed == 0 ? '' : ' $failed could not be copied.'}';
   });
 
+  Future<void> _openProvider(DirectCloudProvider provider) => _run(() async {
+    final score = await Navigator.of(context).push<ScoreEntry>(
+      MaterialPageRoute(
+        builder: (_) =>
+            DirectCloudScreen(provider: provider, library: widget.library),
+      ),
+    );
+    if (score != null && mounted) Navigator.pop(context, score);
+  });
+
   Future<void> _export() => _run(() async {
     final score = _selection == null
         ? null
@@ -112,6 +124,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
             const Text(
               'Use the file picker to browse services connected to your device. On a tablet, choose a storage provider from the share sheet when saving a PDF.',
             ),
+            for (final provider in DirectCloudProvider.values)
+              TextButton(
+                onPressed: _busy ? null : () => _openProvider(provider),
+                child: Text('Browse ${provider.label} directly'),
+              ),
             FilledButton(
               onPressed: _busy ? null : _import,
               child: const Text('Browse and import PDFs'),
