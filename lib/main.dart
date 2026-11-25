@@ -102,6 +102,8 @@ class _ReaderState extends State<Reader> {
   bool _editingText = false;
   InkTool _tool = InkTool.pen;
   InkShape? _shape;
+  bool _freeformSelection = false;
+  List<Map<String, dynamic>> _inkClipboard = [];
   String? _stamp;
   List<String> _personalStamps = [];
   double? _penWidth;
@@ -1449,6 +1451,7 @@ class _ReaderState extends State<Reader> {
             color: _tool == InkTool.pen ? _penColor : null,
             onTextTap: (point, size) => _editText(page.pageNumber, point, size),
             shape: _shape,
+            freeformSelection: _freeformSelection,
           ),
         ),
         if (!_inking)
@@ -2056,8 +2059,37 @@ class _ReaderState extends State<Reader> {
                     ),
                     PopupMenuItem(value: InkShape.oval, child: Text('Oval')),
                     PopupMenuItem(value: InkShape.arrow, child: Text('Arrow')),
+                    PopupMenuItem(
+                      value: InkShape.ruler,
+                      child: Text('Ruler · 15° steps'),
+                    ),
                   ],
                 ),
+                PopupMenuButton<bool>(
+                  tooltip: 'Select annotations',
+                  icon: Icon(
+                    Icons.select_all,
+                    color: _tool == InkTool.selection ? _brass : null,
+                  ),
+                  onSelected: (freeform) => setState(() {
+                    _tool = InkTool.selection;
+                    _stamp = null;
+                    _shape = null;
+                    _freeformSelection = freeform;
+                  }),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: false,
+                      child: Text('Rectangle selection'),
+                    ),
+                    PopupMenuItem(
+                      value: true,
+                      child: Text('Freeform selection'),
+                    ),
+                  ],
+                ),
+                if (_tool == InkTool.selection && _ink[_page] != null)
+                  _selectionActions(_ink[_page]!),
                 Semantics(
                   label: 'Allow finger drawing',
                   child: ChoiceChip(
@@ -2134,6 +2166,46 @@ class _ReaderState extends State<Reader> {
           ),
         ],
       ),
+    ),
+  );
+
+  Widget _selectionActions(PageInk ink) => ListenableBuilder(
+    listenable: ink,
+    builder: (context, _) => PopupMenuButton<String>(
+      tooltip: 'Selection actions',
+      icon: const Icon(Icons.content_paste),
+      onSelected: (action) {
+        if (action == 'paste') {
+          ink.pasteSelection(_inkClipboard);
+          return;
+        }
+        if (action == 'copy' || action == 'cut') {
+          setState(() => _inkClipboard = ink.copySelection());
+        }
+        if (action == 'cut' || action == 'delete') ink.deleteSelection();
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: 'copy',
+          enabled: ink.hasSelection,
+          child: const Text('Copy'),
+        ),
+        PopupMenuItem(
+          value: 'cut',
+          enabled: ink.hasSelection,
+          child: const Text('Cut'),
+        ),
+        PopupMenuItem(
+          value: 'paste',
+          enabled: _inkClipboard.isNotEmpty,
+          child: const Text('Paste'),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          enabled: ink.hasSelection,
+          child: const Text('Delete'),
+        ),
+      ],
     ),
   );
 

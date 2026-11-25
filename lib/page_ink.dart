@@ -3,9 +3,9 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/widgets.dart';
 
-enum InkTool { pen, highlighter, eraser, text }
+enum InkTool { pen, highlighter, eraser, text, selection }
 
-enum InkShape { line, rectangle, oval, arrow }
+enum InkShape { line, rectangle, oval, arrow, ruler }
 
 typedef PageText = ({String value, Offset position, double size});
 
@@ -28,6 +28,14 @@ class _Stroke {
   final double? width;
   final int? color;
   final String? text;
+
+  _Stroke shifted(Offset delta) => _Stroke(
+    tool,
+    [for (final point in points) point + delta],
+    width: width,
+    color: color,
+    text: text,
+  );
 
   Map<String, dynamic> toJson() => {
     'tool': tool.name,
@@ -54,10 +62,124 @@ class PageInk extends ChangeNotifier {
   final _redo = <List<_Stroke>>[];
   _Stroke? _active;
   Offset? _activeStart;
+  Set<int> _selection = {};
+  List<Offset> _outline = [];
+  bool _lasso = false;
+  bool _moving = false;
 
   List<Map<String, dynamic>> snapshot() => [
     for (final stroke in _strokes) stroke.toJson(),
   ];
+
+  bool get hasSelection => _selection.isNotEmpty;
+
+  List<Map<String, dynamic>> copySelection() => [
+    for (final index in _selection) _strokes[index].toJson(),
+  ];
+
+  void deleteSelection() {
+    if (!hasSelection) return;
+    _replaceStrokes([
+      for (final (index, stroke) in _strokes.indexed)
+        if (!_selection.contains(index)) stroke,
+    ]);
+  }
+
+  void pasteSelection(List<Map<String, dynamic>> clipboard) {
+    if (clipboard.isEmpty) return;
+    final strokes = clipboard.map(_Stroke.fromJson).toList();
+    final delta = _clampedDelta(const Offset(.024, .024), _bounds(strokes));
+    final start = _strokes.length;
+    _replaceStrokes(
+      [..._strokes, for (final stroke in strokes) stroke.shifted(delta)],
+      selection: {for (var i = start; i < start + strokes.length; i++) i},
+    );
+  }
+
+  Rect get _selectionBounds =>
+      _bounds(_selection.map((index) => _strokes[index]));
+
+  Rect _bounds(Iterable<_Stroke> strokes) {
+    final points = strokes.expand((stroke) => stroke.points);
+    final origin = points.first;
+    return points.fold(Rect.fromPoints(origin, origin), (bounds, point) {
+      return bounds.expandToInclude(Rect.fromPoints(point, point));
+    });
+  }
+
+  Offset _clampedDelta(Offset offset, Rect bounds) => Offset(
+    offset.dx.clamp(-bounds.left, 1 - bounds.right),
+    offset.dy.clamp(-bounds.top, 1 - bounds.bottom),
+  );
+
+  void beginSelection(Offset point, {required bool freeform}) {
+    _lasso = freeform;
+    _moving = hasSelection && _selectionBounds.inflate(.018).contains(point);
+    if (!_moving) _selection = {};
+    _outline = [point];
+    notifyListeners();
+  }
+
+  void extendSelection(Offset point) {
+    if (_outline.isEmpty) return;
+    if (_lasso && !_moving) {
+      _outline.add(point);
+    } else {
+      _outline = [_outline.first, point];
+    }
+    notifyListeners();
+  }
+
+  void finishSelection({required bool commit}) {
+    if (_outline.isEmpty) return;
+    final outline = _outline;
+    _outline = [];
+    if (commit && outline.length > 1) {
+      if (_moving && hasSelection) {
+        final delta = _clampedDelta(
+          outline.last - outline.first,
+          _selectionBounds,
+        );
+        if (delta != Offset.zero) {
+          _replaceStrokes([
+            for (final (index, stroke) in _strokes.indexed)
+              _selection.contains(index) ? stroke.shifted(delta) : stroke,
+          ], selection: _selection);
+          return;
+        }
+      } else {
+        final rectangle = Rect.fromPoints(outline.first, outline.last);
+        final path = _lasso ? (Path()..addPolygon(outline, true)) : null;
+        _selection = {
+          for (final (index, stroke) in _strokes.indexed)
+            if (_samples(stroke).any(path?.contains ?? rectangle.contains))
+              index,
+        };
+      }
+    }
+    notifyListeners();
+  }
+
+  Iterable<Offset> _samples(_Stroke stroke) sync* {
+    yield stroke.points.first;
+    for (var i = 1; i < stroke.points.length; i++) {
+      final start = stroke.points[i - 1];
+      final end = stroke.points[i];
+      final count = ((end - start).distance / .006).ceil();
+      for (var step = 1; step <= count; step++) {
+        yield Offset.lerp(start, end, step / count)!;
+      }
+    }
+  }
+
+  void _replaceStrokes(List<_Stroke> next, {Set<int> selection = const {}}) {
+    _undo.add(_strokes);
+    _redo.clear();
+    _strokes = next;
+    _selection = selection;
+    onChanged?.call();
+    notifyListeners();
+  }
 
   (int, PageText)? textAt(Offset point, Size size) {
     for (var index = _strokes.length - 1; index >= 0; index--) {
@@ -94,11 +216,7 @@ class PageInk extends ChangeNotifier {
         ),
       );
     }
-    _undo.add(_strokes);
-    _redo.clear();
-    _strokes = next;
-    onChanged?.call();
-    notifyListeners();
+    _replaceStrokes(next);
   }
 
   void begin(
@@ -124,6 +242,7 @@ class PageInk extends ChangeNotifier {
     final bounds = Rect.fromPoints(start, end);
     final outlined = switch (shape) {
       InkShape.line => [start, end],
+      InkShape.ruler => [start, _rulerEnd(start, end, size)],
       InkShape.rectangle => [
         start,
         Offset(end.dx, start.dy),
@@ -160,6 +279,30 @@ class PageInk extends ChangeNotifier {
     return [start, end, tip(.45), end, tip(-.45)];
   }
 
+  Offset _rulerEnd(Offset start, Offset end, Size size) {
+    final vector = Offset(
+      (end.dx - start.dx) * size.width,
+      (end.dy - start.dy) * size.height,
+    );
+    const increment = math.pi / 12;
+    final angle = (vector.direction / increment).round() * increment;
+    final direction = Offset(
+      math.cos(angle) / size.width,
+      math.sin(angle) / size.height,
+    );
+    final xLimit = direction.dx >= 0 ? 1 - start.dx : -start.dx;
+    final yLimit = direction.dy >= 0 ? 1 - start.dy : -start.dy;
+    final length = math.min(
+      vector.distance,
+      math.min(
+        direction.dx == 0 ? double.infinity : xLimit / direction.dx,
+        direction.dy == 0 ? double.infinity : yLimit / direction.dy,
+      ),
+    );
+    final point = start + direction * length;
+    return Offset(point.dx.clamp(0.0, 1.0), point.dy.clamp(0.0, 1.0));
+  }
+
   void finish({required bool commit}) {
     final stroke = _active;
     if (stroke == null) return;
@@ -170,10 +313,8 @@ class PageInk extends ChangeNotifier {
           ? _strokes.where((mark) => !_touches(mark, stroke)).toList()
           : [..._strokes, stroke];
       if (next.length != _strokes.length) {
-        _undo.add(_strokes);
-        _redo.clear();
-        _strokes = next;
-        onChanged?.call();
+        _replaceStrokes(next);
+        return;
       }
     }
     notifyListeners();
@@ -189,6 +330,7 @@ class PageInk extends ChangeNotifier {
       return;
     }
     _redo.add(previous);
+    _selection = {};
     onChanged?.call();
     notifyListeners();
   }
@@ -197,6 +339,7 @@ class PageInk extends ChangeNotifier {
     if (_redo.isEmpty) return;
     _undo.add(_strokes);
     _strokes = _redo.removeLast();
+    _selection = {};
     onChanged?.call();
     notifyListeners();
   }
@@ -243,6 +386,7 @@ class InkSurface extends StatefulWidget {
     this.color,
     this.onTextTap,
     this.shape,
+    this.freeformSelection = false,
   });
 
   final PageInk ink;
@@ -253,6 +397,7 @@ class InkSurface extends StatefulWidget {
   final int? color;
   final void Function(Offset point, Size pageSize)? onTextTap;
   final InkShape? shape;
+  final bool freeformSelection;
 
   @override
   State<InkSurface> createState() => _InkSurfaceState();
@@ -268,17 +413,29 @@ class _InkSurfaceState extends State<InkSurface> {
 
   void _end(bool commit) {
     _pointer = null;
-    widget.ink.finish(commit: commit);
+    if (widget.tool == InkTool.selection) {
+      widget.ink.finishSelection(commit: commit);
+    } else {
+      widget.ink.finish(commit: commit);
+    }
   }
 
   @override
   void didUpdateWidget(InkSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_pointer != null && (!widget.enabled || oldWidget.ink != widget.ink)) {
+    if (_pointer != null &&
+        (!widget.enabled ||
+            oldWidget.ink != widget.ink ||
+            oldWidget.tool != widget.tool ||
+            oldWidget.shape != widget.shape)) {
       _pointer = null;
       final ink = oldWidget.ink;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        ink.finish(commit: false);
+        if (oldWidget.tool == InkTool.selection) {
+          ink.finishSelection(commit: false);
+        } else {
+          ink.finish(commit: false);
+        }
       });
     }
   }
@@ -286,7 +443,12 @@ class _InkSurfaceState extends State<InkSurface> {
   @override
   Widget build(BuildContext context) {
     final canvas = RepaintBoundary(
-      child: CustomPaint(painter: _InkPainter(widget.ink)),
+      child: CustomPaint(
+        painter: _InkPainter(
+          widget.ink,
+          showSelection: widget.enabled && widget.tool == InkTool.selection,
+        ),
+      ),
     );
     if (!widget.enabled) return IgnorePointer(child: canvas);
 
@@ -299,6 +461,14 @@ class _InkSurfaceState extends State<InkSurface> {
             if (_pointer != null || event.buttons != 1 || size.isEmpty) return;
             if (widget.tool == InkTool.text) {
               widget.onTextTap?.call(_point(event, size), size);
+              return;
+            }
+            if (widget.tool == InkTool.selection) {
+              _pointer = event.pointer;
+              widget.ink.beginSelection(
+                _point(event, size),
+                freeform: widget.freeformSelection,
+              );
               return;
             }
             final accepted = switch (event.kind) {
@@ -320,7 +490,9 @@ class _InkSurfaceState extends State<InkSurface> {
           onPointerMove: (event) {
             if (event.pointer == _pointer && !size.isEmpty) {
               final point = _point(event, size);
-              if (widget.shape case final shape?) {
+              if (widget.tool == InkTool.selection) {
+                widget.ink.extendSelection(point);
+              } else if (widget.shape case final shape?) {
                 widget.ink.extendShape(shape, point, size);
               } else {
                 widget.ink.extend(point);
@@ -329,7 +501,9 @@ class _InkSurfaceState extends State<InkSurface> {
           },
           onPointerUp: (event) {
             if (event.pointer == _pointer) {
-              if (widget.shape case final shape? when !size.isEmpty) {
+              if (widget.tool == InkTool.selection && !size.isEmpty) {
+                widget.ink.extendSelection(_point(event, size));
+              } else if (widget.shape case final shape? when !size.isEmpty) {
                 widget.ink.extendShape(shape, _point(event, size), size);
               }
               _end(true);
@@ -364,9 +538,10 @@ TextPainter _layoutText(
 }
 
 class _InkPainter extends CustomPainter {
-  _InkPainter(this.ink) : super(repaint: ink);
+  _InkPainter(this.ink, {required this.showSelection}) : super(repaint: ink);
 
   final PageInk ink;
+  final bool showSelection;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -436,8 +611,43 @@ class _InkPainter extends CustomPainter {
         cursor,
       );
     }
+    if (showSelection) {
+      final guide = Paint()
+        ..color = const Color(0xff315af4)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      final outline = ink._outline;
+      if (ink.hasSelection) {
+        var bounds = ink._selectionBounds;
+        if (ink._moving && outline.length > 1) {
+          bounds = bounds.shift(
+            ink._clampedDelta(outline.last - outline.first, bounds),
+          );
+        }
+        canvas.drawRect(
+          Rect.fromPoints(
+            position(bounds.topLeft),
+            position(bounds.bottomRight),
+          ).inflate(5),
+          guide,
+        );
+      } else if (outline.length > 1) {
+        if (ink._lasso) {
+          canvas.drawPath(
+            Path()..addPolygon(outline.map(position).toList(), true),
+            guide,
+          );
+        } else {
+          canvas.drawRect(
+            Rect.fromPoints(position(outline.first), position(outline.last)),
+            guide,
+          );
+        }
+      }
+    }
   }
 
   @override
-  bool shouldRepaint(_InkPainter oldDelegate) => oldDelegate.ink != ink;
+  bool shouldRepaint(_InkPainter oldDelegate) =>
+      oldDelegate.ink != ink || oldDelegate.showSelection != showSelection;
 }

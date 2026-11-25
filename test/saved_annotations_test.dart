@@ -6,6 +6,36 @@ import 'package:encoresheets/score_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('selects a crossed stroke, moves it, and pastes it to another page', () {
+    final source = PageInk();
+    final target = PageInk();
+    addTearDown(source.dispose);
+    addTearDown(target.dispose);
+    source.begin(const Offset(.1, .3));
+    source.extend(const Offset(.8, .3));
+    source.finish(commit: true);
+
+    source.beginSelection(const Offset(.4, .2), freeform: false);
+    source.extendSelection(const Offset(.5, .4));
+    source.finishSelection(commit: true);
+    expect(source.hasSelection, isTrue);
+    source.beginSelection(const Offset(.4, .3), freeform: false);
+    source.extendSelection(const Offset(.4, .5));
+    source.finishSelection(commit: true);
+    expect(source.snapshot().single['points'], [
+      [.1, .5],
+      [.8, .5],
+    ]);
+
+    target.pasteSelection(source.copySelection());
+    expect(target.hasSelection, isTrue);
+    source.deleteSelection();
+    expect(source.snapshot(), isEmpty);
+    expect(target.snapshot(), hasLength(1));
+    source.undo();
+    expect(source.snapshot(), hasLength(1));
+  });
+
   test(
     'restores annotation tools and keeps pages and scores separate',
     () async {
