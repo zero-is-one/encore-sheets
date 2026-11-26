@@ -60,6 +60,7 @@ import 'face_page_turn.dart';
 import 'measure_clipboard.dart';
 import 'quick_reader_tools.dart';
 import 'settings_profiles.dart';
+import 'metadata_symbols.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -95,6 +96,7 @@ enum _ReaderDisplay {
   support,
   language,
   profiles,
+  metadataSymbols,
   metronome,
   tuner,
   piano,
@@ -232,6 +234,7 @@ class _ReaderState extends State<Reader> {
   FacePageTurn? _faceTurns;
   MeasureClip? _measureClipboard;
   Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
+  Map<String, String> _metadataSymbols = {};
   bool _faceReverse = false;
   double _faceSensitivity = 23;
   ReaderRestrictions? _restrictions;
@@ -410,6 +413,7 @@ class _ReaderState extends State<Reader> {
           _preferences = ReaderPreferences.fromJson(data);
           _practice.enabled = data['practiceTracking'] == true;
           _quickTools = readQuickReaderTools(data['quickReaderTools']);
+          _metadataSymbols = readMetadataSymbols(data['metadataSymbols']);
           final language = data['readerLanguage'];
           _language =
               language is String && readerLanguageNames.containsKey(language)
@@ -1183,6 +1187,7 @@ class _ReaderState extends State<Reader> {
                   id,
                 ]),
                 compact: _preferences.compactLibrary,
+                metadataIconKeys: _metadataSymbols,
               ),
             );
       if (!mounted) return;
@@ -2114,6 +2119,20 @@ class _ReaderState extends State<Reader> {
         );
     } finally {
       _finishPicking();
+    }
+  }
+
+  Future<void> _editMetadataSymbols() async {
+    final selected = await chooseMetadataSymbols(context, _metadataSymbols);
+    if (!mounted || selected == null) return;
+    try {
+      await _library.updatePreferences({'metadataSymbols': selected});
+      if (mounted) setState(() => _metadataSymbols = selected);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the metadata symbols.')),
+        );
     }
   }
 
@@ -4600,6 +4619,8 @@ class _ReaderState extends State<Reader> {
                         _chooseLanguage();
                       case _ReaderDisplay.profiles:
                         _showSettingsProfiles();
+                      case _ReaderDisplay.metadataSymbols:
+                        _editMetadataSymbols();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4795,6 +4816,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.profiles,
                       child: Text('Settings profiles'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.metadataSymbols,
+                      child: Text('Metadata symbols'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
@@ -5183,6 +5208,11 @@ class _ReaderState extends State<Reader> {
                         value: entry.key,
                         child: Text('${entry.key}   ${entry.value}'),
                       ),
+                    for (final entry in additionalMusicStamps.entries)
+                      PopupMenuItem(
+                        value: entry.key,
+                        child: Text('${entry.key}   ${entry.value}'),
+                      ),
                   ],
                 ),
                 PopupMenuButton<InkShape>(
@@ -5468,6 +5498,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.onScoreQueue,
     required this.onPinScore,
     required this.compact,
+    required this.metadataIconKeys,
   });
 
   final List<ScoreEntry> scores;
@@ -5481,6 +5512,7 @@ class _LibraryScreen extends StatefulWidget {
   final ValueChanged<List<String>> onScoreQueue;
   final Future<void> Function(String) onPinScore;
   final bool compact;
+  final Map<String, String> metadataIconKeys;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -5900,7 +5932,17 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       for (final mode in ['Recent', 'Title', ..._fields.keys])
                         DropdownMenuItem(
                           value: mode,
-                          child: Text('Browse by $mode'),
+                          child: Row(
+                            children: [
+                              if (metadataSymbols[widget
+                                      .metadataIconKeys[_fields[mode]]]
+                                  case final icon?) ...[
+                                Icon(icon, size: 20),
+                                const SizedBox(width: 8),
+                              ],
+                              Text('Browse by $mode'),
+                            ],
+                          ),
                         ),
                     ],
                     onChanged: (value) => setState(() {
