@@ -1,66 +1,74 @@
-# EncoreSheets reader prototype
+# EncoreSheets
 
-Requires Flutter 3.50 or later. Alongside the Android and iPad runners, the
-project includes a browser target for quick reader checks.
+An offline sheet music reader for Android and iPad, built with Flutter. Import
+PDF scores, mark them up, and organize them into setlists for rehearsal and
+performance.
+
+[Build from source](#build-from-source) · [File formats](#file-formats) · [Report an issue](https://github.com/zero-is-one/encoresheets/issues)
+
+## What works
+
+- **Read and perform.** Open a score at its last page, jump with the page slider,
+  or turn pages by tapping, swiping, or using a keyboard or compatible pedal.
+  Use facing pages, half-page turns, or performance mode when you need a
+  different view of the music.
+- **Mark up a score.** Draw, highlight, add text or notation stamps, and organize
+  annotations into layers. Copy a passage from the PDF and place it on the same
+  page or another page. The app saves markup separately from the source PDF.
+- **Organize your music.** Browse by title or metadata, search scores and
+  bookmarks, and arrange setlists in performance order. Add bookmarks, page
+  flags, and repeat or coda links to navigate within a score.
+- **Rehearse.** Attach a local audio track, record takes, or use the metronome,
+  tuner, and virtual piano. Set practice goals and export practice reports as PDFs.
+- **Play together.** Share page turns and score changes over local Wi-Fi or use
+  a second device to show the facing page.
+- **Move and back up your library.** Share editable scores and setlists, export
+  PDFs with flattened markup, or save a library backup. Import and export files
+  through the system picker or browse Dropbox and Box with a session access token.
+
+## Build from source
+
+Requires Flutter 3.50 or later. Android development requires the Android SDK.
+To run on an iPad or iPad simulator, use macOS with Xcode.
 
 ```sh
+git clone https://github.com/zero-is-one/encoresheets.git
+cd encoresheets
 flutter pub get
+flutter devices
 flutter run -d <device-id>
 ```
 
-Run `flutter devices` to find a connected Android tablet or iPad. Local iPad
-builds require macOS and Xcode. Use `flutter run -d edge` for a browser preview
-on Windows.
+Run `flutter run -d edge` on Windows for a browser preview. The browser library
+lasts for the current session. The app opens with a bundled sample score.
+On an installed device, open **Score library → Import PDF** to add your own music.
 
-The app opens with a bundled three-page demonstration score. Open the score
-library from the top bar to import a PDF, search by title, or reopen a score at
-its last page. The library opens beside the score on a wide screen. The list is ordered by most recently
-opened. Imported PDFs on Android and iPad are copied into app storage so moving
-the original does not affect the library. The browser preview keeps its library
-for the current session.
+```sh
+flutter analyze
+flutter test
+```
 
-Swipe or tap the outer quarters to turn pages, and tap the
-middle to show or hide controls. Pinch to zoom and use Fit page to reset the view.
-The bottom slider jumps to a page when released. The reader accepts arrows,
-Page Up, Page Down, Space, and Enter from a keyboard or keyboard-mode pedal.
+## File formats
 
-Use the pen button or long-press the page to mark it up. A stylus or mouse draws
-by default. Turn on Finger for touch-only input. Tap Done to resume pan and zoom.
-Choose Pen, Highlighter, or Erase strokes. The eraser removes whole strokes it
-touches. Undo reverses the latest edit on the current page. Completed edits to
-imported scores are saved independently of the source PDF and restored when the
-score reopens. Ink on the bundled sample is temporary. The browser preview
-keeps imported scores and ink for the current session.
+| Format | Use |
+| --- | --- |
+| PDF | Import a score, export the original, or export a PDF with annotations flattened into the pages. |
+| `.encorescore.zip` | Share an editable score with its EncoreSheets annotations and metadata. |
+| `.encoreset.zip` | Share an editable setlist with scores or placeholders. |
+| Library backup ZIP | Save the catalog with its PDFs, or export just the catalog for use with separately stored scores. |
 
-To check the offline library, import two PDFs and leave them on different
-pages. Force-close the app, turn on airplane mode, then reopen each score from
-the library and check that it resumes at the saved page.
-Mark up both scores before switching between them, then check that their ink
-reappears on the correct pages after restarting offline.
+The library also imports scanned pages and creates PDFs from templates or
+from TXT, RTF, DOC, and DOCX documents.
 
-Open **Score library → Setlists** to name a setlist, add scores, and drag them
-into performance order. Tap a setlist to start at page one of its first score.
-At the end of a score, turn forward again to start the next score at page one.
-Choose **Display options → Performance mode** in the reader. It keeps the screen
-awake and leaves page turning available with the editing controls hidden.
+## Desktop backup utility
 
-In the installed app, choose **Score library → Backup & restore** to save a ZIP
-with your imported PDFs, annotations, setlists, and last pages. On Android,
-choose a location in the system file picker, such as Downloads. Restore adds
-copies alongside existing scores and setlists. On a fresh install, restore the
-ZIP, turn on airplane mode, and reopen a setlist to check the scores and ink.
-
-On Windows, macOS, or Linux, use Python 3 to inspect or verify a backup ZIP.
-The copy command checks the copied archive and preserves any existing file
-with the same name.
+Use [the backup utility](tools/library_backups.py) with Python 3 on Windows,
+macOS, or Linux. Export a ZIP from **Score library → Tools → Backup & restore** in the
+app first. The copy command verifies the destination and preserves an existing
+file with the same name.
 
 ```sh
 python tools/library_backups.py inspect "EncoreSheets backup.zip"
 python tools/library_backups.py verify "EncoreSheets backup.zip"
 python tools/library_backups.py copy "EncoreSheets backup.zip" "Backups"
 ```
-
-On both tablets, try a large scanned PDF in airplane mode, repeat page turns
-with a pedal, and draw while resting your palm on the screen. Verify that ink
-stays aligned after zooming and rotating, and check pedal input again after
-returning from the file picker.
