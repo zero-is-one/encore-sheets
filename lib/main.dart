@@ -63,6 +63,7 @@ import 'settings_profiles.dart';
 import 'metadata_symbols.dart';
 import 'share_reader_link.dart';
 import 'reader_appearance_options.dart';
+import 'library_search_options.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -4666,7 +4667,7 @@ class _ReaderState extends State<Reader> {
                 child: Text(
                   _title,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 22,
                     fontFamily: 'serif',
                     color: _paper,
@@ -5668,6 +5669,44 @@ class _LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<_LibraryScreen> {
+  LibrarySearchOptions _searchOptions = const LibrarySearchOptions();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreSearchOptions());
+  }
+
+  Future<void> _restoreSearchOptions() async {
+    try {
+      final prefs = await widget.library.storage.readPreferences();
+      if (mounted)
+        setState(
+          () => _searchOptions = LibrarySearchOptions.fromJson(
+            prefs['searchOptions'],
+          ),
+        );
+    } catch (_) {
+      // Default sorting remains available if the preference file is unavailable.
+    }
+  }
+
+  Future<void> _configureSearchOptions() async {
+    final result = await chooseSearchOptions(context, _searchOptions);
+    if (!mounted || result == null) return;
+    try {
+      await widget.library.updatePreferences({
+        'searchOptions': result.toJson(),
+      });
+      if (mounted) setState(() => _searchOptions = result);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save search preferences.')),
+        );
+    }
+  }
+
   String _query = '';
   String _browseBy = 'Recent';
   String? _category;
@@ -5974,8 +6013,14 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       ..sort();
     if (_browseBy != 'Recent') {
       visible.sort(
-        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        (a, b) => _searchOptions
+            .titleKey(a.title)
+            .compareTo(_searchOptions.titleKey(b.title)),
       );
+    } else if (_query.isEmpty &&
+        _searchOptions.recentLimit > 0 &&
+        visible.length > _searchOptions.recentLimit) {
+      visible.removeRange(_searchOptions.recentLimit, visible.length);
     }
     final matchingSets = _query.isEmpty
         ? <Setlist>[]
@@ -6010,12 +6055,23 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             )
             .toList();
     final matchingBookmarks = [
-      for (final score in inCollection)
-        for (final bookmark in score.bookmarks)
-          if ((bookmark.isItem || _query.isNotEmpty) &&
-              bookmark.title.toLowerCase().contains(_query))
-            (score, bookmark),
+      if (_query.isNotEmpty ||
+          !_searchOptions.hidden.contains(LibraryResultGroup.bookmarks))
+        for (final score in inCollection)
+          for (final bookmark in score.bookmarks)
+            if ((bookmark.isItem || _query.isNotEmpty) &&
+                bookmark.title.toLowerCase().contains(_query))
+              (score, bookmark),
     ];
+    final groups = {
+      LibraryResultGroup.scores: visible.length,
+      LibraryResultGroup.bookmarks: matchingBookmarks.length,
+      LibraryResultGroup.setlists: matchingSets.length,
+      LibraryResultGroup.actions: actions.length,
+    };
+    final indices =
+        (_query.isEmpty ? const LibrarySearchOptions() : _searchOptions)
+            .orderedResults(groups);
     return Scaffold(
       appBar: AppBar(
         title: _draggingScore
@@ -6133,8 +6189,18 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       ),
                       PopupMenuButton<String>(
                         tooltip: ReaderText.tools.of(context),
-                        onSelected: (value) => Navigator.pop(context, value),
+                        onSelected: (value) {
+                          if (value == 'search-options') {
+                            _configureSearchOptions();
+                          } else {
+                            Navigator.pop(context, value);
+                          }
+                        },
                         itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'search-options',
+                            child: Text('Search and sorting'),
+                          ),
                           if (!widget.transferRestricted) ...[
                             const PopupMenuItem(
                               value: 'create-template',
@@ -6198,11 +6264,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       'Browser preview keeps scores for this session.',
                     ),
                   Expanded(
-                    child:
-                        visible.isEmpty &&
-                            matchingBookmarks.isEmpty &&
-                            matchingSets.isEmpty &&
-                            actions.isEmpty
+                    child: indices.isEmpty
                         ? Center(
                             child: Text(
                               _query.isEmpty
@@ -6211,12 +6273,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             ),
                           )
                         : ListView.builder(
-                            itemCount:
-                                visible.length +
-                                matchingBookmarks.length +
-                                matchingSets.length +
-                                actions.length,
-                            itemBuilder: (context, index) {
+                            itemCount: indices.length,
+                            itemBuilder: (context, selectionIndex) {
+                              var index = indices[selectionIndex];
                               if (index >= visible.length &&
                                   index <
                                       visible.length +
