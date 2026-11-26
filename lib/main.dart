@@ -65,6 +65,7 @@ import 'share_reader_link.dart';
 import 'reader_appearance_options.dart';
 import 'library_search_options.dart';
 import 'local_maintenance.dart';
+import 'launcher_icons.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -98,6 +99,7 @@ enum _ReaderDisplay {
   metadataSymbols,
   themeOptions,
   maintenance,
+  appIcon,
   metronome,
   tuner,
   piano,
@@ -4838,6 +4840,8 @@ class _ReaderState extends State<Reader> {
                         _changeThemeOptions();
                       case _ReaderDisplay.maintenance:
                         _showMaintenance();
+                      case _ReaderDisplay.appIcon:
+                        chooseLauncherIcon(context);
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -5057,6 +5061,12 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.maintenance,
                       child: Text('Maintenance and reset'),
                     ),
+                    if (!kIsWeb &&
+                        defaultTargetPlatform == TargetPlatform.android)
+                      const PopupMenuItem(
+                        value: _ReaderDisplay.appIcon,
+                        child: Text('Home screen icon'),
+                      ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
                         value: _ReaderDisplay.metronome,

@@ -221,6 +221,22 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val launcherIcons = LauncherIcons(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/launcher-icon")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "get" -> result.success(launcherIcons.active())
+                        "set" -> {
+                            launcherIcons.setActive(requireNotNull(call.argument<String>("icon")))
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (error: Exception) {
+                    result.error("launcher_icon", error.message, null)
+                }
+            }
         val faceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/face")
         faceCamera = HeadGestureCamera(this) { faceChannel.invokeMethod("yaw", it) }
         faceChannel.setMethodCallHandler { call, result ->
