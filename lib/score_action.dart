@@ -4,7 +4,10 @@ enum ScoreActionKind {
   audio('Play or pause linked audio'),
   tempo('Set metronome tempo'),
   pitch('Play reference pitch'),
-  midi('Send MIDI message');
+  midi('Send MIDI message'),
+  website('Open website'),
+  externalApp('Open external app'),
+  externalFile('Open file');
 
   const ScoreActionKind(this.label);
   final String label;
@@ -31,6 +34,65 @@ class ScoreAction {
   final String? selection;
   final String? parameter;
 
+  static const fileExtensions = {
+    'pdf',
+    'txt',
+    'rtf',
+    'doc',
+    'docx',
+    'png',
+    'jpg',
+    'jpeg',
+    'mp3',
+    'm4a',
+    'wav',
+    'aac',
+    'flac',
+    'ogg',
+    'mid',
+    'midi',
+  };
+
+  static Uri? destinationUri(ScoreActionKind kind, String? text) {
+    if (text == null ||
+        text.length > 4096 ||
+        RegExp(r'[\s\x00-\x1f\x7f\\]').hasMatch(text))
+      return null;
+    final uri = Uri.tryParse(text);
+    if (uri == null || uri.userInfo.isNotEmpty) return null;
+    final webAddress =
+        (uri.scheme == 'https' || uri.scheme == 'http') && uri.host.isNotEmpty;
+    if (kind == ScoreActionKind.website) return webAddress ? uri : null;
+    if (kind != ScoreActionKind.externalApp) return null;
+    if (webAddress && uri.scheme == 'https') return uri;
+    if (const {
+          'spotify',
+          'youtube',
+          'music',
+          'maps',
+          'comgooglemaps',
+          'vlc',
+        }.contains(uri.scheme) &&
+        (uri.host.isNotEmpty || uri.path.isNotEmpty || uri.hasQuery))
+      return uri;
+    return null;
+  }
+
+  static ({String id, String name})? fileReference(String? text) {
+    if (text == null) return null;
+    final parts = text.split('/');
+    if (parts.length != 2 || !RegExp(r'^[a-f0-9]{32}$').hasMatch(parts.first))
+      return null;
+    final name = parts.last;
+    if (name.length > 150 ||
+        name.startsWith('.') ||
+        RegExp(r'[<>:"\\|?*\x00-\x1f\x7f]').hasMatch(name) ||
+        !fileExtensions.contains(name.split('.').last.toLowerCase()) ||
+        !name.contains('.'))
+      return null;
+    return (id: parts.first, name: name);
+  }
+
   static List<int>? midiBytes(String value) {
     final parts = value.trim().split(RegExp(r'\s+'));
     if (parts.any((part) => !RegExp(r'^[0-9a-fA-F]{2}$').hasMatch(part)))
@@ -53,6 +115,9 @@ class ScoreAction {
       ScoreActionKind.tempo => number != null && number >= 25 && number <= 280,
       ScoreActionKind.pitch => number != null && number >= 48 && number <= 84,
       ScoreActionKind.midi => midiBytes(text ?? '') != null,
+      ScoreActionKind.website ||
+      ScoreActionKind.externalApp => destinationUri(kind, text) != null,
+      ScoreActionKind.externalFile => fileReference(text) != null,
       _ => true,
     };
   }
@@ -77,6 +142,17 @@ class ScoreAction {
     kind: kind,
     selection: id,
     parameter: parameter,
+  );
+
+  ScoreAction withParameter(String value) => ScoreAction(
+    title: title,
+    page: page,
+    x: x,
+    y: y,
+    color: color,
+    kind: kind,
+    selection: selection,
+    parameter: value,
   );
 
   static ScoreAction? fromJson(Object? value) {

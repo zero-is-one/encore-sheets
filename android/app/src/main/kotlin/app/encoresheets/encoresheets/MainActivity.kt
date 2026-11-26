@@ -1,11 +1,14 @@
 package app.encoresheets.encoresheets
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.DragEvent
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -14,9 +17,28 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
+class ScoreActionFileProvider : FileProvider()
+
 class MainActivity : FlutterActivity() {
     private var faceCamera: HeadGestureCamera? = null
     private var facePermission: MethodChannel.Result? = null
+
+    private fun openScoreActionFile(id: String, name: String): Boolean {
+        if (!id.matches(Regex("[a-f0-9]{32}")) || name.isEmpty() ||
+            name.startsWith(".") || name.contains('/') || name.contains('\\')) return false
+        val root = File(filesDir, "score-action-files").canonicalFile
+        val folder = File(root, id)
+        val file = File(folder, name).canonicalFile
+        if (file.parentFile != folder || !file.isFile) return false
+        val uri = FileProvider.getUriForFile(this, "$packageName.score-action-files", file)
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
+            ?: "application/octet-stream"
+        startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+        return true
+    }
 
     private fun startFaceCamera(result: MethodChannel.Result) {
         try {
@@ -221,6 +243,22 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/score-action-file")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "open") {
+                    result.notImplemented()
+                } else {
+                    try {
+                        val id = call.argument<String>("id")
+                        val name = call.argument<String>("name")
+                        result.success(id != null && name != null && openScoreActionFile(id, name))
+                    } catch (_: ActivityNotFoundException) {
+                        result.success(false)
+                    } catch (_: Exception) {
+                        result.error("score_action_file", "Could not open the linked file.", null)
+                    }
+                }
+            }
         val launcherIcons = LauncherIcons(this)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/launcher-icon")
             .setMethodCallHandler { call, result ->

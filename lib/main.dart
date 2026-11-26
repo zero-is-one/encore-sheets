@@ -39,6 +39,7 @@ import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
 import 'score_library.dart';
 import 'score_action.dart';
+import 'score_action_destination.dart';
 import 'score_actions_screen.dart';
 import 'score_audio.dart';
 import 'score_audio_dialog.dart';
@@ -1817,6 +1818,14 @@ class _ReaderState extends State<Reader> {
   Future<void> _runScoreAction(ScoreAction action) async {
     if (_picking || _inking) return;
     if (const {
+      ScoreActionKind.website,
+      ScoreActionKind.externalApp,
+      ScoreActionKind.externalFile,
+    }.contains(action.kind)) {
+      await _openExternalScoreAction(action);
+      return;
+    }
+    if (const {
       ScoreActionKind.tempo,
       ScoreActionKind.pitch,
       ScoreActionKind.midi,
@@ -1875,6 +1884,31 @@ class _ReaderState extends State<Reader> {
     } finally {
       _finishPicking();
     }
+  }
+
+  Future<void> _openExternalScoreAction(ScoreAction action) async {
+    final isFile = action.kind == ScoreActionKind.externalFile;
+    if (_restricted(
+      isFile ? RestrictedTool.transfers : RestrictedTool.connections,
+    ))
+      return;
+    _stopAutoScroll(rebuild: false);
+    setState(() => _picking = true);
+    try {
+      if (await openScoreActionDestination(action)) return;
+    } catch (_) {
+      // A handler may be unavailable or the linked file may have moved.
+    } finally {
+      _finishPicking();
+    }
+    if (!mounted) return;
+    final message = switch (action.kind) {
+      ScoreActionKind.externalFile => 'Could not open the file. Check the attachment and that a compatible app is installed.',
+      ScoreActionKind.externalApp => 'No installed app could open this link.',
+      _ => 'Could not open this website.',
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _runRehearsalAction(ScoreAction action) async {
@@ -1954,6 +1988,7 @@ class _ReaderState extends State<Reader> {
           page: _page,
           library: _library,
           actions: score.actions,
+          allowFiles: !_restricted(RestrictedTool.transfers),
         ),
       );
       if (!mounted || actions == null) return;
@@ -4888,6 +4923,9 @@ class _ReaderState extends State<Reader> {
                           ScoreActionKind.audio => Icons.play_arrow,
                           ScoreActionKind.tempo => Icons.speed,
                           ScoreActionKind.pitch => Icons.music_note,
+                          ScoreActionKind.website => Icons.language,
+                          ScoreActionKind.externalApp => Icons.launch,
+                          ScoreActionKind.externalFile => Icons.attach_file,
                           ScoreActionKind.midi =>
                             Icons.settings_input_component,
                         },

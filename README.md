@@ -23,6 +23,10 @@ performance.
 - **Organize your music.** Browse by title or metadata, search scores and
   bookmarks, and arrange setlists in performance order. Add bookmarks, page
   flags, and repeat or coda links to navigate within a score.
+  Add on-page buttons for websites, supported app links, or local files through
+  **Reader tools → On-page actions**. On Android and iPad, file buttons open the
+  selected attachment with a compatible app. Attachments stay on the device
+  where they were added.
 - **Rehearse.** Attach a local audio track, record takes, or use the metronome,
   tuner, and virtual piano. Set practice goals and export practice reports as PDFs.
 - **Play together.** Share page turns and score changes over local Wi-Fi or use

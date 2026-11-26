@@ -1,7 +1,10 @@
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import 'score_action.dart';
+import 'score_action_destination.dart';
 import 'pitch_detection.dart';
 import 'score_library.dart';
 
@@ -12,12 +15,14 @@ class ScoreActionsScreen extends StatefulWidget {
     required this.page,
     required this.library,
     required this.actions,
+    required this.allowFiles,
   });
 
   final PdfDocument document;
   final int page;
   final ScoreLibrary library;
   final List<ScoreAction> actions;
+  final bool allowFiles;
 
   @override
   State<ScoreActionsScreen> createState() => _ScoreActionsScreenState();
@@ -32,8 +37,10 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
   };
 
   late final _actions = [...widget.actions];
+  bool _savingAttachment = false;
 
   Future<void> _edit([ScoreAction? current]) async {
+    if (_savingAttachment) return;
     var title = current?.title ?? '';
     var kind = current?.kind ?? ScoreActionKind.note;
     var color = current?.color ?? _colors.keys.first;
@@ -41,6 +48,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
     var y = current?.y ?? .25;
     var selection = current?.selection;
     var parameter = current?.parameter ?? '';
+    XFile? attachment;
     final choices = {
       for (final score in widget.library.recent) ...{
         score.id: score.title,
@@ -49,7 +57,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
             item.selectionId(score.id): '${score.title} · ${item.title}',
       },
     };
-    final result = await showDialog<ScoreAction>(
+    final result = await showDialog<(ScoreAction, XFile?)>(
       context: context,
       builder: (dialog) => StatefulBuilder(
         builder: (_, refresh) => AlertDialog(
@@ -73,11 +81,17 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                   value: kind,
                   items: [
                     for (final item in ScoreActionKind.values)
-                      DropdownMenuItem(value: item, child: Text(item.label)),
+                      if (item == current?.kind ||
+                          (item != ScoreActionKind.externalApp || !kIsWeb) &&
+                              (item != ScoreActionKind.externalFile ||
+                                  widget.allowFiles &&
+                                      supportsExternalScoreFiles))
+                        DropdownMenuItem(value: item, child: Text(item.label)),
                   ],
                   onChanged: (value) => refresh(() {
                     kind = value!;
                     parameter = switch (kind) {
+                      _ when kind == current?.kind => current?.parameter ?? '',
                       ScoreActionKind.tempo => '96',
                       ScoreActionKind.pitch => '69',
                       _ => '',
@@ -131,6 +145,75 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                     ),
                     onChanged: (value) =>
                         refresh(() => parameter = value.trim()),
+                  ),
+                if (kind == ScoreActionKind.website ||
+                    kind == ScoreActionKind.externalApp)
+                  TextFormField(
+                    key: ValueKey(kind),
+                    initialValue: parameter,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: InputDecoration(
+                      labelText: kind == ScoreActionKind.website
+                          ? 'Website URL'
+                          : 'App link',
+                      hintText: kind == ScoreActionKind.website
+                          ? 'https://example.com'
+                          : 'HTTPS app link or spotify:…',
+                      helperText: kind == ScoreActionKind.externalApp
+                          ? 'Also supports YouTube, Music, Maps, and VLC links.'
+                          : null,
+                    ),
+                    onChanged: (value) =>
+                        refresh(() => parameter = value.trim()),
+                  ),
+                if (kind == ScoreActionKind.externalFile)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.attach_file),
+                    label: Text(
+                      attachment?.name ??
+                          ScoreAction.fileReference(parameter)?.name ??
+                          'Choose a file',
+                    ),
+                    onPressed: !widget.allowFiles || !supportsExternalScoreFiles
+                        ? null
+                        : () async {
+                            try {
+                              final selected = await openFile(
+                                acceptedTypeGroups: [
+                                  XTypeGroup(
+                                    label: 'Documents, images, and audio',
+                                    extensions: ScoreAction.fileExtensions
+                                        .toList(),
+                                    mimeTypes: const [
+                                      'application/pdf',
+                                      'text/plain',
+                                      'application/rtf',
+                                      'application/msword',
+                                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                      'image/png',
+                                      'image/jpeg',
+                                      'audio/*',
+                                    ],
+                                    uniformTypeIdentifiers: const [
+                                      'public.content',
+                                      'public.audio',
+                                    ],
+                                  ),
+                                ],
+                              );
+                              if (dialog.mounted && selected != null) {
+                                refresh(() => attachment = selected);
+                              }
+                            } catch (_) {
+                              if (dialog.mounted)
+                                ScaffoldMessenger.of(dialog).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Could not choose a file.'),
+                                  ),
+                                );
+                            }
+                          },
                   ),
                 DropdownButton<int>(
                   isExpanded: true,
@@ -209,12 +292,13 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
             FilledButton(
               onPressed:
                   title.trim().isEmpty ||
-                      !ScoreAction.validParameter(kind, parameter) ||
+                      !(kind == ScoreActionKind.externalFile &&
+                              attachment != null ||
+                          ScoreAction.validParameter(kind, parameter)) ||
                       kind == ScoreActionKind.score &&
                           !choices.containsKey(selection)
                   ? null
-                  : () => Navigator.pop(
-                      dialog,
+                  : () => Navigator.pop(dialog, (
                       ScoreAction(
                         title: title.trim(),
                         page: widget.page,
@@ -227,7 +311,8 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                             : null,
                         parameter: parameter.isEmpty ? null : parameter,
                       ),
-                    ),
+                      kind == ScoreActionKind.externalFile ? attachment : null,
+                    )),
               child: const Text('Save'),
             ),
           ],
@@ -235,47 +320,74 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
       ),
     );
     if (!mounted || result == null) return;
+    var (action, file) = result;
+    if (file != null) {
+      setState(() => _savingAttachment = true);
+      try {
+        action = action.withParameter(await storeScoreActionFile(file));
+      } catch (_) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Could not save that file. Choose a supported document, image, or audio file.',
+              ),
+            ),
+          );
+        return;
+      } finally {
+        if (mounted) setState(() => _savingAttachment = false);
+      }
+    }
+    if (!mounted) return;
     setState(() {
       if (current == null) {
-        _actions.add(result);
+        _actions.add(action);
       } else {
-        _actions[_actions.indexOf(current)] = result;
+        _actions[_actions.indexOf(current)] = action;
       }
     });
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text('Page ${widget.page} actions'),
-      actions: [
-        IconButton(
-          onPressed: _edit,
-          icon: const Icon(Icons.add),
-          tooltip: 'Add action button',
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _actions),
-          child: const Text('Done'),
-        ),
-      ],
-    ),
-    body: ListView(
-      children: [
-        for (final action in _actions)
-          if (action.page == widget.page)
-            ListTile(
-              leading: Icon(Icons.circle, color: Color(action.color)),
-              title: Text(action.title),
-              subtitle: Text(action.kind.label),
-              onTap: () => _edit(action),
-              trailing: IconButton(
-                tooltip: 'Remove ${action.title}',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => setState(() => _actions.remove(action)),
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_savingAttachment,
+    child: Scaffold(
+      appBar: AppBar(
+        title: Text('Page ${widget.page} actions'),
+        actions: [
+          IconButton(
+            onPressed: _savingAttachment ? null : _edit,
+            icon: const Icon(Icons.add),
+            tooltip: 'Add action button',
+          ),
+          TextButton(
+            onPressed: _savingAttachment
+                ? null
+                : () => Navigator.pop(context, _actions),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+      body: ListView(
+        children: [
+          for (final action in _actions)
+            if (action.page == widget.page)
+              ListTile(
+                leading: Icon(Icons.circle, color: Color(action.color)),
+                title: Text(action.title),
+                subtitle: Text(action.kind.label),
+                onTap: () => _edit(action),
+                trailing: IconButton(
+                  tooltip: 'Remove ${action.title}',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _savingAttachment
+                      ? null
+                      : () => setState(() => _actions.remove(action)),
+                ),
               ),
-            ),
-      ],
+        ],
+      ),
     ),
   );
 }

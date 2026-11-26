@@ -116,6 +116,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
   VNDocumentCameraViewControllerDelegate, UIDocumentPickerDelegate, MPMediaPickerControllerDelegate {
   private var importChannel: FlutterMethodChannel?
+  private var scoreActionDocument: UIDocumentInteractionController?
   private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
   private var headGestureCapture: HeadGestureCapture?
@@ -144,6 +145,16 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let scoreFile = FlutterMethodChannel(
+      name: "encoresheets/score-action-file",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    scoreFile.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "open" else { result(FlutterMethodNotImplemented); return }
+      guard let args = call.arguments as? [String: String],
+            let id = args["id"], let name = args["name"] else { result(false); return }
+      result(self?.openScoreActionFile(id: id, name: name) ?? false)
+    }
     let faceChannel = FlutterMethodChannel(
       name: "encoresheets/face", binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
@@ -457,6 +468,25 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
       .first(where: { $0.isKeyWindow })?.rootViewController
     while let next = controller?.presentedViewController { controller = next }
     return controller
+  }
+
+  private func openScoreActionFile(id: String, name: String) -> Bool {
+    guard id.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+          !name.isEmpty, !name.hasPrefix("."), !name.contains("/"), !name.contains("\\"),
+          let view = frontController?.view,
+          let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    else { return false }
+    let folder = support.appendingPathComponent("score-action-files").resolvingSymlinksInPath()
+      .appendingPathComponent(id)
+    let file = folder.appendingPathComponent(name).resolvingSymlinksInPath()
+    guard file.deletingLastPathComponent().path == folder.path,
+          (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    else { return false }
+    scoreActionDocument?.dismissMenu(animated: false)
+    let controller = UIDocumentInteractionController(url: file)
+    scoreActionDocument = controller
+    let anchor = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+    return controller.presentOpenInMenu(from: anchor, in: view, animated: true)
   }
 
   private func handleSync(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
