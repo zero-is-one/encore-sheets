@@ -9,7 +9,8 @@ import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/vertical_score_layout.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show SizedBox;
+import 'package:flutter/widgets.dart'
+    show GridView, SizedBox, SliverGridDelegateWithFixedCrossAxisCount;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart' show Icons, IconTheme;
 import 'package:pdfrx/pdfrx.dart';
@@ -97,6 +98,17 @@ void main() {
       IconTheme.of(tester.element(find.byIcon(Icons.chevron_left))).color,
       isNot(ReaderPalette.classic.text),
     );
+    expect(find.byTooltip('Fit page or width'), findsOneWidget);
+    await tester.tap(find.byTooltip('Page thumbnails'));
+    await tester.pumpAndSettle();
+    final thumbnails = tester.widget<GridView>(find.byType(GridView));
+    expect(
+      (thumbnails.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount)
+          .crossAxisCount,
+      2,
+    );
+    await tester.tap(find.text('Page 1'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Reader tools'));
     await tester.pumpAndSettle();
     final option = find.text('Scrolling display · Paged');
@@ -125,6 +137,9 @@ void main() {
     await tester.tap(find.text('Start scrolling'));
     final stop = find.byTooltip('Stop automatic scrolling');
     await waitUntil(() => stop.evaluate().isNotEmpty);
+    expect(find.byTooltip('Scroll slower'), findsOneWidget);
+    await tester.tap(find.byTooltip('Scroll faster'));
+    await tester.pump();
     final start = controller.visibleRect.top;
     for (var frame = 0; frame < 20; frame++) {
       await tester.pump(const Duration(milliseconds: 16));

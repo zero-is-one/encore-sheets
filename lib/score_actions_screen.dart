@@ -42,6 +42,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
   Future<void> _edit([ScoreAction? current]) async {
     if (_savingAttachment) return;
     var title = current?.title ?? '';
+    var showLabel = current?.showLabel ?? false;
     var kind = current?.kind ?? ScoreActionKind.note;
     var color = current?.color ?? _colors.keys.first;
     var x = current?.x ?? .5;
@@ -75,6 +76,12 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                   maxLength: 40,
                   decoration: const InputDecoration(labelText: 'Button label'),
                   onChanged: (value) => refresh(() => title = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show label on score'),
+                  value: showLabel,
+                  onChanged: (value) => refresh(() => showLabel = value),
                 ),
                 DropdownButton<ScoreActionKind>(
                   isExpanded: true,
@@ -310,6 +317,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                             ? selection
                             : null,
                         parameter: parameter.isEmpty ? null : parameter,
+                        showLabel: showLabel,
                       ),
                       kind == ScoreActionKind.externalFile ? attachment : null,
                     )),

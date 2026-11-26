@@ -16,6 +16,21 @@ ScoreAction action(ScoreActionKind kind, String parameter) => ScoreAction(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('optional page action labels survive persistence and editing', () {
+    final original = action(ScoreActionKind.website, 'https://example.com');
+    expect(ScoreAction.fromJson(original.toJson())?.showLabel, isFalse);
+    final labeled = ScoreAction.fromJson({
+      ...original.toJson(),
+      'showLabel': true,
+    })!;
+    expect(labeled.reposition(2, .4, .5).showLabel, isTrue);
+    expect(labeled.retarget('updated').showLabel, isTrue);
+    expect(
+      labeled.withParameter('https://example.org').toJson()['showLabel'],
+      isTrue,
+    );
+  });
+
   test(
     'website and app destinations round-trip and enforce supported schemes',
     () {

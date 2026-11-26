@@ -23,6 +23,7 @@ class ScoreAction {
     required this.kind,
     this.selection,
     this.parameter,
+    this.showLabel = false,
   });
 
   final String title;
@@ -33,6 +34,7 @@ class ScoreAction {
   final ScoreActionKind kind;
   final String? selection;
   final String? parameter;
+  final bool showLabel;
 
   static const fileExtensions = {
     'pdf',
@@ -131,6 +133,7 @@ class ScoreAction {
     kind: kind,
     selection: selection,
     parameter: parameter,
+    showLabel: showLabel,
   );
 
   ScoreAction retarget(String id) => ScoreAction(
@@ -142,6 +145,7 @@ class ScoreAction {
     kind: kind,
     selection: id,
     parameter: parameter,
+    showLabel: showLabel,
   );
 
   ScoreAction withParameter(String value) => ScoreAction(
@@ -153,6 +157,7 @@ class ScoreAction {
     kind: kind,
     selection: selection,
     parameter: value,
+    showLabel: showLabel,
   );
 
   static ScoreAction? fromJson(Object? value) {
@@ -192,6 +197,7 @@ class ScoreAction {
         kind: kind,
         selection: selection is String ? selection : null,
         parameter: parameter,
+        showLabel: value['showLabel'] == true,
       );
     }
     return null;
@@ -206,5 +212,6 @@ class ScoreAction {
     'kind': kind.name,
     if (selection != null) 'selection': selection,
     if (parameter != null) 'parameter': parameter,
+    if (showLabel) 'showLabel': true,
   };
 }

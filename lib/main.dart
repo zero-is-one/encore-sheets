@@ -1799,9 +1799,22 @@ class _ReaderState extends State<Reader> {
           _halfPreview && action.page == _page && action.y < _splitFor(_page))
         continue;
       final marker = JumpPoint(action.page, action.x, action.y);
-      if ((_viewer.documentToLocal(_jumpPosition(marker)) - position)
-              .distance <=
-          _pageTargetRadius) {
+      var hitLabel = false;
+      if (action.showLabel) {
+        final pageRect = _viewer.layout.pageLayouts[action.page - 1];
+        final label = _actionLabelRect(
+          action,
+          pageRect.size,
+        ).shift(pageRect.topLeft);
+        hitLabel = Rect.fromPoints(
+          _viewer.documentToLocal(label.topLeft),
+          _viewer.documentToLocal(label.bottomRight),
+        ).contains(position);
+      }
+      if (hitLabel ||
+          (_viewer.documentToLocal(_jumpPosition(marker)) - position)
+                  .distance <=
+              _pageTargetRadius) {
         _runScoreAction(action);
         return true;
       }
@@ -1818,6 +1831,30 @@ class _ReaderState extends State<Reader> {
     }
     return false;
   }
+
+  Rect _actionLabelRect(ScoreAction action, Size size) {
+    final text = TextPainter(
+      text: TextSpan(text: action.title, style: _actionLabelStyle),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout(maxWidth: 102);
+    final width = math.min(text.width.ceilToDouble() + 10, size.width);
+    final height = text.height.ceilToDouble() + 4;
+    text.dispose();
+    final x = (action.x * size.width - width / 2).clamp(
+      0.0,
+      size.width - width,
+    );
+    final centerY = action.y * size.height;
+    final below = centerY + _pageButtonSize / 2 + 2;
+    final y = below + height <= size.height
+        ? below
+        : centerY - _pageButtonSize / 2 - height - 2;
+    return Rect.fromLTWH(x, math.max(0, y), width, height);
+  }
+
+  static const _actionLabelStyle = TextStyle(color: Colors.white, fontSize: 12);
 
   Future<void> _runScoreAction(ScoreAction action) async {
     if (_picking || _inking) return;
@@ -3295,6 +3332,10 @@ class _ReaderState extends State<Reader> {
                   value: seconds.toDouble(),
                   onChanged: (value) => update(() => seconds = value.round()),
                 ),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [Text('Faster'), Text('Slower')],
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Continue to the next setlist score'),
@@ -3332,6 +3373,56 @@ class _ReaderState extends State<Reader> {
     }
     if (mounted && start) _toggleAutoScroll();
   }
+
+  void _adjustAutoScrollSpeed(int step) {
+    final seconds = (_preferences.autoScrollSeconds + step).clamp(5, 60);
+    if (seconds == _preferences.autoScrollSeconds) return;
+    setState(
+      () => _preferences = _preferences.copyWith(autoScrollSeconds: seconds),
+    );
+    unawaited(
+      _library.updatePreferences({'autoScrollSeconds': seconds}).catchError((
+        Object _,
+      ) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not save the scrolling speed.'),
+            ),
+          );
+      }),
+    );
+    _focus.requestFocus();
+  }
+
+  Widget _activeScrollControls() => Material(
+    color: _rail,
+    borderRadius: BorderRadius.circular(24),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Scroll slower',
+          onPressed: _preferences.autoScrollSeconds >= 60
+              ? null
+              : () => _adjustAutoScrollSpeed(5),
+          icon: const Icon(Icons.remove),
+        ),
+        IconButton.filledTonal(
+          tooltip: 'Stop automatic scrolling',
+          onPressed: _stopAutoScroll,
+          icon: const Icon(Icons.pause),
+        ),
+        IconButton(
+          tooltip: 'Scroll faster',
+          onPressed: _preferences.autoScrollSeconds <= 5
+              ? null
+              : () => _adjustAutoScrollSpeed(-5),
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    ),
+  );
 
   void _resetScoreLayout() {
     _stopAutoScroll(rebuild: false);
@@ -4378,15 +4469,17 @@ class _ReaderState extends State<Reader> {
     );
     if (!mounted || selected == null) return;
     final (override, mode) = selected;
-    if (!override) {
-      if (mode != _preferences.scrollMode) {
+    await _setScrollMode(mode, scoreId: override ? scoreId : null);
+  }
+
+  Future<void> _setScrollMode(ReaderScrollMode? mode, {String? scoreId}) async {
+    if (scoreId == null) {
+      if (mode != null && mode != _preferences.scrollMode) {
         await _savePreferences(_preferences.copyWith(scrollMode: mode));
       }
       return;
     }
-    if (scoreId == null ||
-        _entry?.id != scoreId ||
-        _entry?.scrollMode == mode) {
+    if (_entry?.id != scoreId || _entry?.scrollMode == mode) {
       return;
     }
     try {
@@ -4407,6 +4500,24 @@ class _ReaderState extends State<Reader> {
           const SnackBar(content: Text('Could not save the score display.')),
         );
       }
+    }
+  }
+
+  Future<void> _quickFit(bool width) async {
+    if (_verticalScrolling) {
+      final mode = width ? ReaderScrollMode.fitWidth : ReaderScrollMode.fitPage;
+      if (mode == _scrollMode) {
+        _fit();
+      } else {
+        await _setScrollMode(mode, scoreId: _entry?.id);
+      }
+      return;
+    }
+    final fit = width ? ReaderPageFit.zoomed : ReaderPageFit.bestFit;
+    if (fit == _preferences.pageFit) {
+      _fit();
+    } else {
+      await _savePreferences(_preferences.copyWith(pageFit: fit));
     }
   }
 
@@ -4940,6 +5051,34 @@ class _ReaderState extends State<Reader> {
                   ),
                 ),
               ),
+        if (!_inking)
+          for (final action in _entry?.actions ?? const <ScoreAction>[])
+            if (action.page == page.pageNumber && action.showLabel)
+              Positioned.fromRect(
+                rect: _actionLabelRect(action, rect.size),
+                child: ExcludeSemantics(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color(action.color),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          action.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _actionLabelStyle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
         Positioned.fill(
           child: ClipRect(
             clipper: _PageCropClipper(_cropFor(page.pageNumber)),
@@ -5127,11 +5266,7 @@ class _ReaderState extends State<Reader> {
                       PositionedDirectional(
                         end: 8,
                         bottom: 8,
-                        child: IconButton.filledTonal(
-                          tooltip: 'Stop automatic scrolling',
-                          onPressed: _stopAutoScroll,
-                          icon: const Icon(Icons.pause),
-                        ),
+                        child: _activeScrollControls(),
                       ),
                     if (_missingFacingPage)
                       GestureDetector(
@@ -5909,15 +6044,13 @@ class _ReaderState extends State<Reader> {
           ),
         ),
         Text(_pages == 0 ? '–' : '$_page / $_pages'),
-        if (_canAutoScroll)
+        if (_autoScrollTicker.isActive)
+          _activeScrollControls()
+        else if (_canAutoScroll)
           IconButton(
-            tooltip: _autoScrollTicker.isActive
-                ? 'Stop automatic scrolling'
-                : 'Start automatic scrolling',
+            tooltip: 'Start automatic scrolling',
             onPressed: _picking ? null : _toggleAutoScroll,
-            icon: Icon(
-              _autoScrollTicker.isActive ? Icons.pause : Icons.play_arrow,
-            ),
+            icon: const Icon(Icons.play_arrow),
           ),
         if (_entry != null)
           IconButton(
@@ -5945,40 +6078,42 @@ class _ReaderState extends State<Reader> {
       destination = await _openReaderPanel<int>(
         (context) => Scaffold(
           appBar: AppBar(title: const Text('Pages')),
-          body: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 142,
-              childAspectRatio: .68,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemCount: count,
-            itemBuilder: (context, index) {
-              final page = index + start;
-              return OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.all(6),
-                  side: BorderSide(color: page == _page ? _brass : _rail),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                onPressed: () => Navigator.pop(context, page),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: PdfPageView(
-                        document: document,
-                        pageNumber: page,
-                        maximumDpi: 54,
-                      ),
+          body: LayoutBuilder(
+            builder: (context, space) => GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: (space.maxWidth / 175).floor().clamp(1, 5),
+                childAspectRatio: .68,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: count,
+              itemBuilder: (context, index) {
+                final page = index + start;
+                return OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(6),
+                    side: BorderSide(color: page == _page ? _brass : _rail),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    Text('Page $page'),
-                  ],
-                ),
-              );
-            },
+                  ),
+                  onPressed: () => Navigator.pop(context, page),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: PdfPageView(
+                          document: document,
+                          pageNumber: page,
+                          maximumDpi: 90,
+                        ),
+                      ),
+                      Text('Page $page'),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ),
       );
@@ -6001,6 +6136,30 @@ class _ReaderState extends State<Reader> {
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    _stamp ??
+                        switch (_shape) {
+                          InkShape.line => 'Line',
+                          InkShape.rectangle => 'Rectangle',
+                          InkShape.oval => 'Oval',
+                          InkShape.arrow => 'Arrow',
+                          InkShape.ruler => 'Ruler',
+                          null => switch (_tool) {
+                            InkTool.pen => 'Pen',
+                            InkTool.highlighter => 'Highlighter',
+                            InkTool.eraser => 'Eraser',
+                            InkTool.text => 'Text',
+                            InkTool.selection => 'Selection',
+                          },
+                        },
+                    style: TextStyle(
+                      color: _brass,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
                 _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
                 if (_tool == InkTool.pen)
                   PopupMenuButton<int>(
@@ -6195,10 +6354,28 @@ class _ReaderState extends State<Reader> {
                   },
                 ),
               ),
-              TextButton(
-                onPressed: _pages == 0 ? null : _showThumbnails,
-                child: Text(
-                  _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
+              PopupMenuButton<bool>(
+                tooltip: 'Fit page or width',
+                enabled:
+                    _pages > 0 &&
+                    !_picking &&
+                    !_halfPageTurns &&
+                    _spreadStep == 0,
+                icon: const Icon(Icons.aspect_ratio),
+                onSelected: _quickFit,
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: false, child: Text('Fit page')),
+                  PopupMenuItem(value: true, child: Text('Fit width')),
+                ],
+              ),
+              Tooltip(
+                message: 'Page thumbnails',
+                child: OutlinedButton.icon(
+                  onPressed: _pages == 0 ? null : _showThumbnails,
+                  icon: const Icon(Icons.grid_view_outlined, size: 16),
+                  label: Text(
+                    _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
+                  ),
                 ),
               ),
               IconButton(
@@ -6266,6 +6443,9 @@ class _ReaderState extends State<Reader> {
   Widget _toolButton(InkTool tool, IconData icon, String label) => IconButton(
     tooltip: label,
     isSelected: _tool == tool && _stamp == null && _shape == null,
+    style: _tool == tool && _stamp == null && _shape == null
+        ? IconButton.styleFrom(backgroundColor: _brass.withValues(alpha: .18))
+        : null,
     color: _tool == tool && _stamp == null && _shape == null ? _brass : null,
     onPressed: () => setState(() {
       _tool = tool;
@@ -6435,6 +6615,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
 
   String _query = '';
   String _browseBy = 'Recent';
+  String? _filterField;
   String? _category;
   String? _collection;
   bool _excludeCollection = false;
@@ -6711,7 +6892,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   };
 
   Iterable<String> _categories(ScoreEntry score) =>
-      (score.metadata[_fields[_browseBy]] ?? '')
+      (score.metadata[_fields[_filterField]] ?? '')
           .split(',')
           .map((value) => value.trim())
           .where((value) => value.isNotEmpty);
@@ -6744,6 +6925,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             .compareTo(_searchOptions.titleKey(b.title)),
       );
     } else if (_query.isEmpty &&
+        _category == null &&
         _searchOptions.recentLimit > 0 &&
         visible.length > _searchOptions.recentLimit) {
       visible.removeRange(_searchOptions.recentLimit, visible.length);
@@ -6857,43 +7039,95 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      spacing: 6,
-                      children: [
-                        for (final mode in ['Recent', 'Title', ..._fields.keys])
-                          ChoiceChip(
-                            avatar: switch (metadataSymbols[widget
-                                .metadataIconKeys[_fields[mode]]]) {
-                              final IconData icon => Icon(icon, size: 16),
-                              null => null,
-                            },
-                            selected: _browseBy == mode,
-                            label: Text(mode),
-                            onSelected: (_) => setState(() {
-                              _browseBy = mode;
-                              _category = null;
-                            }),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      PopupMenuButton<String>(
+                        tooltip: 'Sort library',
+                        initialValue: _browseBy,
+                        onSelected: (value) =>
+                            setState(() => _browseBy = value),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'Recent',
+                            child: Text('Recently opened'),
                           ),
-                      ],
-                    ),
+                          PopupMenuItem(value: 'Title', child: Text('Title')),
+                        ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 4,
+                          ),
+                          child: Text(
+                            'Sort by ${_browseBy == 'Recent' ? 'recent' : 'title'} ▾',
+                          ),
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: 'Filter by metadata',
+                        onSelected: (value) => setState(() {
+                          _filterField = value.isEmpty ? null : value;
+                          _category = null;
+                        }),
+                        itemBuilder: (_) => [
+                          for (final field in _fields.keys)
+                            PopupMenuItem(value: field, child: Text(field)),
+                          if (_filterField != null)
+                            const PopupMenuItem(
+                              value: '',
+                              child: Text('Clear filter'),
+                            ),
+                        ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 4,
+                          ),
+                          child: Text(
+                            _filterField == null
+                                ? 'Filter ▾'
+                                : 'Filter by $_filterField ▾',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (categories.isNotEmpty)
                     DropdownButton<String>(
                       isExpanded: true,
-                      value: _category ?? '',
+                      value: _category,
+                      hint: Text('Choose a ${_filterField!.toLowerCase()}'),
                       items: [
-                        for (final category in ['', ...categories])
+                        for (final category in categories)
                           DropdownMenuItem(
                             value: category,
                             child: Text(
-                              category.isEmpty ? 'All values' : category,
+                              category,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                       ],
-                      onChanged: (value) => setState(
-                        () => _category = value == '' ? null : value,
+                      onChanged: (value) => setState(() => _category = value),
+                    ),
+                  if (_filterField != null && categories.isEmpty)
+                    const Text(
+                      'No values for this filter in the current library.',
+                    ),
+                  if (_category case final active?)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: InputChip(
+                        avatar: switch (metadataSymbols[widget
+                            .metadataIconKeys[_fields[_filterField]]]) {
+                          final IconData icon => Icon(icon, size: 16),
+                          null => null,
+                        },
+                        label: Text(
+                          '$_filterField: $active',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onDeleted: () => setState(() => _category = null),
                       ),
                     ),
                   Wrap(

@@ -195,63 +195,74 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     onTap: list.scores.isEmpty
         ? () => _edit(list)
         : () => Navigator.pop(context, list),
-    trailing: PopupMenuButton<_SetlistAction>(
-      tooltip: 'Options for ${list.name}',
-      onSelected: (action) {
-        switch (action) {
-          case _SetlistAction.edit:
-            _edit(list);
-          case _SetlistAction.duplicate:
-            _duplicate(list);
-          case _SetlistAction.playInOrder:
-            _choosePlayOrder(list);
-          case _SetlistAction.earlier:
-            _move(list, group[index - 1]);
-          case _SetlistAction.later:
-            _move(list, group[index + 1]);
-          case _SetlistAction.share:
-            _share(list);
-          case _SetlistAction.link:
-            copyReaderLink(context, ReaderLinkTarget.setlist, list.id);
-        }
-      },
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          value: _SetlistAction.edit,
-          child: Text('Edit setlist'),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (list.scores.isNotEmpty)
+          IconButton(
+            tooltip: 'Play ${list.name}',
+            onPressed: () => Navigator.pop(context, list),
+            icon: const Icon(Icons.play_arrow),
+          ),
+        PopupMenuButton<_SetlistAction>(
+          tooltip: 'Options for ${list.name}',
+          onSelected: (action) {
+            switch (action) {
+              case _SetlistAction.edit:
+                _edit(list);
+              case _SetlistAction.duplicate:
+                _duplicate(list);
+              case _SetlistAction.playInOrder:
+                _choosePlayOrder(list);
+              case _SetlistAction.earlier:
+                _move(list, group[index - 1]);
+              case _SetlistAction.later:
+                _move(list, group[index + 1]);
+              case _SetlistAction.share:
+                _share(list);
+              case _SetlistAction.link:
+                copyReaderLink(context, ReaderLinkTarget.setlist, list.id);
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(
+              value: _SetlistAction.edit,
+              child: Text('Edit setlist'),
+            ),
+            const PopupMenuItem(
+              value: _SetlistAction.duplicate,
+              child: Text('Duplicate setlist'),
+            ),
+            PopupMenuItem(
+              value: _SetlistAction.playInOrder,
+              enabled: list.scores.isNotEmpty,
+              child: const Text('Choose play order'),
+            ),
+            if (widget.allowTransfers)
+              PopupMenuItem(
+                value: _SetlistAction.share,
+                enabled: !_transferring,
+                child: const Text('Share setlist'),
+              ),
+            if (widget.allowTransfers)
+              const PopupMenuItem(
+                value: _SetlistAction.link,
+                child: Text('Copy setlist link'),
+              ),
+            if (_sort == SetlistOrder.manual) ...[
+              PopupMenuItem(
+                value: _SetlistAction.earlier,
+                enabled: index > 0,
+                child: const Text('Move earlier'),
+              ),
+              PopupMenuItem(
+                value: _SetlistAction.later,
+                enabled: index + 1 < group.length,
+                child: const Text('Move later'),
+              ),
+            ],
+          ],
         ),
-        const PopupMenuItem(
-          value: _SetlistAction.duplicate,
-          child: Text('Duplicate setlist'),
-        ),
-        PopupMenuItem(
-          value: _SetlistAction.playInOrder,
-          enabled: list.scores.isNotEmpty,
-          child: const Text('Choose play order'),
-        ),
-        if (widget.allowTransfers)
-          PopupMenuItem(
-            value: _SetlistAction.share,
-            enabled: !_transferring,
-            child: const Text('Share setlist'),
-          ),
-        if (widget.allowTransfers)
-          const PopupMenuItem(
-            value: _SetlistAction.link,
-            child: Text('Copy setlist link'),
-          ),
-        if (_sort == SetlistOrder.manual) ...[
-          PopupMenuItem(
-            value: _SetlistAction.earlier,
-            enabled: index > 0,
-            child: const Text('Move earlier'),
-          ),
-          PopupMenuItem(
-            value: _SetlistAction.later,
-            enabled: index + 1 < group.length,
-            child: const Text('Move later'),
-          ),
-        ],
       ],
     ),
   );
@@ -506,13 +517,10 @@ class _SetlistEditorState extends State<_SetlistEditor> {
           maxLines: 4,
           decoration: const InputDecoration(labelText: 'Program notes'),
         ),
+        const SizedBox(height: 20),
+        Text('Score order', style: Theme.of(context).textTheme.titleMedium),
         if (_scores.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(
-              _durationText(widget.library, _scores.map((row) => row.id)),
-            ),
-          ),
+          Text(_durationText(widget.library, _scores.map((row) => row.id))),
       ],
     ),
   );
@@ -529,97 +537,93 @@ class _SetlistEditorState extends State<_SetlistEditor> {
       ],
     ),
     body: SafeArea(
-      child: Column(
-        children: [
-          Expanded(
-            child: ReorderableListView.builder(
-              header: _details(),
-              buildDefaultDragHandles: false,
-              itemCount: _scores.length,
-              onReorderItem: (oldIndex, newIndex) {
-                if (_saving) return;
-                setState(() {
-                  _scores.insert(newIndex, _scores.removeAt(oldIndex));
-                });
-              },
-              itemBuilder: (context, index) => ListTile(
-                key: ObjectKey(_scores[index].key),
-                leading: ReorderableDragStartListener(
-                  index: index,
-                  enabled: !_saving,
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Icon(Icons.drag_handle),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: ReorderableListView.builder(
+            header: _details(),
+            footer: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Wrap(
+                spacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _add,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add score'),
                   ),
+                  TextButton.icon(
+                    onPressed: _saving ? null : _pasteSelection,
+                    icon: const Icon(Icons.content_paste),
+                    label: const Text('Paste score'),
+                  ),
+                ],
+              ),
+            ),
+            buildDefaultDragHandles: false,
+            itemCount: _scores.length,
+            onReorderItem: (oldIndex, newIndex) {
+              if (_saving) return;
+              setState(() {
+                _scores.insert(newIndex, _scores.removeAt(oldIndex));
+              });
+            },
+            itemBuilder: (context, index) => ListTile(
+              key: ObjectKey(_scores[index].key),
+              leading: ReorderableDragStartListener(
+                index: index,
+                enabled: !_saving,
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Icon(Icons.drag_handle),
                 ),
-                title: Text(switch (widget.library.lookupSelection(
-                  _scores[index].id,
-                )) {
-                  (final score, final bookmark) =>
-                    bookmark?.title ?? score.title,
-                  null =>
-                    widget.initial?.placeholders[_scores[index].id] ??
-                        'Missing score',
-                }),
-                subtitle:
-                    widget.initial?.placeholders.containsKey(
-                          _scores[index].id,
-                        ) ==
-                        true
-                    ? const Text('Tap to choose a score')
-                    : null,
-                onTap: _saving ? null : () => _add(index),
-                trailing: PopupMenuButton<String>(
-                  enabled: !_saving,
-                  tooltip: 'Setlist item actions',
-                  onSelected: (action) {
-                    final row = _scores[index];
-                    if (action == 'remove') {
-                      setState(() => _scores.removeAt(index));
-                    } else {
-                      _copySelection(row, action == 'cut');
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    if (widget.library.lookupSelection(_scores[index].id) !=
-                        null) ...[
-                      const PopupMenuItem(
-                        value: 'copy',
-                        child: Text('Copy score'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'cut',
-                        child: Text('Cut from setlist'),
-                      ),
-                    ],
+              ),
+              title: Text(switch (widget.library.lookupSelection(
+                _scores[index].id,
+              )) {
+                (final score, final bookmark) => bookmark?.title ?? score.title,
+                null =>
+                  widget.initial?.placeholders[_scores[index].id] ??
+                      'Missing score',
+              }),
+              subtitle:
+                  widget.initial?.placeholders.containsKey(_scores[index].id) ==
+                      true
+                  ? const Text('Tap to choose a score')
+                  : null,
+              onTap: _saving ? null : () => _add(index),
+              trailing: PopupMenuButton<String>(
+                enabled: !_saving,
+                tooltip: 'Setlist item actions',
+                onSelected: (action) {
+                  final row = _scores[index];
+                  if (action == 'remove') {
+                    setState(() => _scores.removeAt(index));
+                  } else {
+                    _copySelection(row, action == 'cut');
+                  }
+                },
+                itemBuilder: (_) => [
+                  if (widget.library.lookupSelection(_scores[index].id) !=
+                      null) ...[
                     const PopupMenuItem(
-                      value: 'remove',
-                      child: Text('Remove score'),
+                      value: 'copy',
+                      child: Text('Copy score'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'cut',
+                      child: Text('Cut from setlist'),
                     ),
                   ],
-                ),
+                  const PopupMenuItem(
+                    value: 'remove',
+                    child: Text('Remove score'),
+                  ),
+                ],
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: _saving ? null : _add,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add score'),
-                ),
-                TextButton.icon(
-                  onPressed: _saving ? null : _pasteSelection,
-                  icon: const Icon(Icons.content_paste),
-                  label: const Text('Paste score'),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     ),
   );
