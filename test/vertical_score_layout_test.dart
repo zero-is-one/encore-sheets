@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:encoresheets/main.dart';
 import 'package:encoresheets/library_storage_native.dart';
 import 'package:encoresheets/reader_input.dart';
+import 'package:encoresheets/reader_appearance_options.dart';
 import 'package:encoresheets/reader_preferences.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/vertical_score_layout.dart';
@@ -10,6 +11,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show SizedBox;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart' show Icons, IconTheme;
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
@@ -79,6 +81,22 @@ void main() {
           find.text('1 / 3').evaluate().isNotEmpty,
     );
     expect(viewer().params.paging, isNotNull);
+    final enabledIcons = [
+      Icons.library_music_outlined,
+      Icons.tune,
+      Icons.chevron_right,
+    ];
+    await waitUntil(
+      () => enabledIcons.every(
+        (icon) =>
+            IconTheme.of(tester.element(find.byIcon(icon))).color ==
+            ReaderPalette.classic.text,
+      ),
+    );
+    expect(
+      IconTheme.of(tester.element(find.byIcon(Icons.chevron_left))).color,
+      isNot(ReaderPalette.classic.text),
+    );
     await tester.tap(find.byTooltip('Reader tools'));
     await tester.pumpAndSettle();
     final option = find.text('Scrolling display · Paged');

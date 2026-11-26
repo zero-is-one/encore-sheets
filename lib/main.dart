@@ -187,8 +187,12 @@ class _EncoreSheetsState extends State<EncoreSheets> {
                     : _appearance.backdrop,
                 surface: _appearance.palette.bar,
                 onSurface: _appearance.palette.text,
+                onSurfaceVariant: _appearance.palette.text,
               ),
-      iconTheme: IconThemeData(weight: _appearance.boldIcons ? 700 : 400),
+      iconTheme: IconThemeData(
+        color: _appearance.palette.text,
+        weight: _appearance.boldIcons ? 700 : 400,
+      ),
       scaffoldBackgroundColor: _appearance.backdrop,
     ),
     home: Reader(
