@@ -234,6 +234,7 @@ class _ReaderState extends State<Reader> {
   );
   static const _faceChannel = MethodChannel('encoresheets/face');
   FacePageTurn? _faceTurns;
+  Timer? _scoreExpiry;
   MeasureClip? _measureClipboard;
   Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
   Map<String, String> _metadataSymbols = {};
@@ -332,20 +333,23 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.jumpLinks ||
     _ReaderDisplay.crop ||
     _ReaderDisplay.drawingSettings ||
-    _ReaderDisplay.copyMeasure ||
     _ReaderDisplay.pasteMeasure ||
     _ReaderDisplay.halfSplit => !_restricted(RestrictedTool.markup),
-    _ReaderDisplay.exportPdf ||
+    _ReaderDisplay.copyMeasure =>
+      !_restricted(RestrictedTool.markup) && _entry?.validUntil == null,
+    _ReaderDisplay.exportPdf =>
+      !_restricted(RestrictedTool.transfers) && _entry?.validUntil == null,
     _ReaderDisplay.shareScorePackage ||
     _ReaderDisplay.shareScoreLink ||
     _ReaderDisplay.practiceRecordings ||
     _ReaderDisplay.scoreAudio => !_restricted(RestrictedTool.transfers),
     _ReaderDisplay.ensemble ||
-    _ReaderDisplay.presentation ||
     _ReaderDisplay.midiAutomation ||
     _ReaderDisplay.midiDevices ||
     _ReaderDisplay.inputShortcuts => !_restricted(RestrictedTool.connections),
     _ReaderDisplay.faceTurns => !_restricted(RestrictedTool.connections),
+    _ReaderDisplay.presentation || _ReaderDisplay.scoreWindow =>
+      !_restricted(RestrictedTool.connections) && _entry?.validUntil == null,
     _ => true,
   };
 
@@ -365,6 +369,7 @@ class _ReaderState extends State<Reader> {
     }
     _lifecycle = AppLifecycleListener(
       onResume: () {
+        _checkScoreExpiry();
         _requestWidgetRefresh();
         _focusPractice();
         if (_supportsSharedImport) _requestScoreLinks();
@@ -585,6 +590,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    _scoreExpiry?.cancel();
     if (_supportsSharedImport) {
       _stopFaceTurns(rebuild: false);
       _faceChannel.setMethodCallHandler(null);
@@ -1223,6 +1229,7 @@ class _ReaderState extends State<Reader> {
         final source = result == 'combine'
             ? null
             : _library.lookup(result.substring('extract:'.length));
+        if (source?.validUntil != null) return;
         if (result != 'combine' && source == null) return;
         final score = await _openReaderPanel<ScoreEntry>(
           (_) => PdfAssemblyScreen(library: _library, source: source),
@@ -2642,10 +2649,39 @@ class _ReaderState extends State<Reader> {
     final origin = box.localToGlobal(Offset.zero) & box.size;
     setState(() => _picking = true);
     try {
+      final days = await showDialog<int>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('Editable score access'),
+          children: [
+            for (final (days, label) in const [
+              (0, 'No expiration'),
+              (1, 'Expires in 1 day'),
+              (7, 'Expires in 7 days'),
+              (30, 'Expires in 30 days'),
+            ])
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, days),
+                child: Text(label),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || days == null || entry.expired) return;
+      final requested = days == 0
+          ? null
+          : DateTime.now().toUtc().add(Duration(days: days));
+      final existing = entry.validUntil;
+      final expiration =
+          existing != null &&
+              (requested == null || existing.isBefore(requested))
+          ? existing
+          : requested;
+      final shared = entry.copyWith(validUntil: expiration);
       final bookmark = _itemBookmark;
       final XFile package;
       if (bookmark == null) {
-        package = await _library.createScorePackage(entry);
+        package = await _library.createScorePackage(shared);
       } else {
         final source = _viewer.document;
         final pages = [
@@ -2653,7 +2689,7 @@ class _ReaderState extends State<Reader> {
             EditedPdfPage(source.pages[page - 1], originalPage: page),
         ];
         final extracted = await writeRearrangedPdf('Excerpt.pdf', pages);
-        final remapped = remapScorePages(entry, _inkSnapshot(), pages);
+        final remapped = remapScorePages(shared, _inkSnapshot(), pages);
         package = await _library.createScorePackage(
           remapped.score.copyWith(title: bookmark.title, page: 1),
           extractedPdf: extracted,
@@ -2675,6 +2711,28 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  void _checkScoreExpiry() {
+    _scoreExpiry?.cancel();
+    final score = _entry;
+    final expiry = score?.validUntil;
+    if (!mounted || score == null || expiry == null) return;
+    final remaining = expiry.difference(DateTime.now());
+    if (remaining > Duration.zero) {
+      _scoreExpiry = Timer(
+        remaining > const Duration(minutes: 1)
+            ? const Duration(minutes: 1)
+            : remaining,
+        _checkScoreExpiry,
+      );
+      return;
+    }
+    _playing = null;
+    _load(null, null, null);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('This shared score has expired.')),
+    );
+  }
+
   void _load(
     ScoreEntry? entry,
     XFile? file,
@@ -2683,6 +2741,7 @@ class _ReaderState extends State<Reader> {
     int? startPage,
     ScoreBookmark? item,
   }) {
+    _scoreExpiry?.cancel();
     final scoreChanged = _entry?.id != entry?.id;
     final audio = _scoreAudio;
     _stopAudioCues();
@@ -2764,6 +2823,9 @@ class _ReaderState extends State<Reader> {
       unawaited(_sendScoreMidi(entry).catchError((Object _) {}));
     }
     _focusPractice();
+    if (entry?.validUntil != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkScoreExpiry());
+    }
     if (_presenting) unawaited(_updatePresentation());
   }
 

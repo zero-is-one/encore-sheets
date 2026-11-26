@@ -86,6 +86,7 @@ class ScoreEntry {
     this.reflowZones = const [],
     this.pdfSourceId,
     this.deletedAt,
+    this.validUntil,
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -98,6 +99,11 @@ class ScoreEntry {
       _ => null,
     },
     deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
+    validUntil: switch (json['validUntil']) {
+      null => null,
+      final String value => DateTime.parse(value).toUtc(),
+      _ => throw const FormatException('Invalid score expiration'),
+    },
     metadata: (json['metadata'] as Map?)?.cast<String, String>() ?? const {},
     collections: (json['collections'] as List?)?.cast<String>() ?? const [],
     bookmarks: [
@@ -145,6 +151,8 @@ class ScoreEntry {
   final int page;
   final DateTime openedAt;
   final DateTime? deletedAt;
+  final DateTime? validUntil;
+  bool get expired => validUntil?.isAfter(DateTime.now()) == false;
   final Map<String, String> metadata;
   final List<String> collections;
   final List<ScoreBookmark> bookmarks;
@@ -177,6 +185,7 @@ class ScoreEntry {
     bool detachPdf = false,
     DateTime? deletedAt,
     bool recover = false,
+    DateTime? validUntil,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -194,6 +203,7 @@ class ScoreEntry {
     reflowZones: reflowZones ?? this.reflowZones,
     pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
+    validUntil: validUntil ?? this.validUntil,
   );
 
   Map<String, dynamic> toJson() => {
@@ -203,6 +213,7 @@ class ScoreEntry {
     'openedAt': openedAt.toIso8601String(),
     if (pdfSourceId != null) 'pdfSourceId': pdfSourceId,
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+    if (validUntil != null) 'validUntil': validUntil!.toUtc().toIso8601String(),
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (collections.isNotEmpty) 'collections': collections,
     if (bookmarks.isNotEmpty)
@@ -345,7 +356,9 @@ class ScoreLibrary {
   Future<void> _pending = Future.value();
 
   List<ScoreEntry> get recent =>
-      _scores.values.where((score) => score.deletedAt == null).toList()
+      _scores.values
+          .where((score) => score.deletedAt == null && !score.expired)
+          .toList()
         ..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
   List<ScoreEntry> get recentlyDeleted =>
@@ -354,7 +367,9 @@ class ScoreLibrary {
 
   ScoreEntry? lookup(String id) {
     final score = _scores[id];
-    return score?.deletedAt == null ? score : null;
+    return score != null && score.deletedAt == null && !score.expired
+        ? score
+        : null;
   }
 
   Future<void> trashScores(Iterable<String> ids) => _serialize(() async {

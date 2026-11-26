@@ -273,8 +273,10 @@ class NativeLibraryStorage implements LibraryStorage {
   @override
   Future<XFile> openScore(String id) async {
     final scores = await readIndex();
-    final source =
-        scores.where((score) => score.id == id).firstOrNull?.storedPdfId ?? id;
+    final entry = scores.where((score) => score.id == id).firstOrNull;
+    if (entry?.expired == true)
+      throw StateError('This shared score has expired.');
+    final source = entry?.storedPdfId ?? id;
     final file = await _file('$source.pdf');
     if (!await file.exists())
       throw FileSystemException('Score is missing', file.path);

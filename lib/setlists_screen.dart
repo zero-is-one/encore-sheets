@@ -83,7 +83,10 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     final origin = box.localToGlobal(Offset.zero) & box.size;
     final canCombine =
         list.scores.isNotEmpty &&
-        list.scores.every((id) => widget.library.lookupSelection(id) != null);
+        list.scores.every((id) {
+          final item = widget.library.lookupSelection(id);
+          return item != null && item.$1.validUntil == null;
+        });
     final format = await showDialog<SetlistShareFormat>(
       context: context,
       builder: (dialog) => SimpleDialog(

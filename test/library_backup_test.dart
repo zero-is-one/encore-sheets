@@ -9,6 +9,30 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
+    'editable score packages retain and enforce their access deadline',
+    () async {
+      final folder = await Directory.systemTemp.createTemp('encore_expiry');
+      addTearDown(() => folder.delete(recursive: true));
+      final library = ScoreLibrary(NativeLibraryStorage(directory: folder));
+      final (score, _) = await library.import(XFile('assets/first_light.pdf'));
+      final future = DateTime.now().toUtc().add(const Duration(days: 7));
+      final shared = await library.createScorePackage(
+        score.copyWith(validUntil: future),
+      );
+      final restored = await library.restoreScorePackage(shared);
+      expect(restored.validUntil, future);
+      final expired = await library.createScorePackage(
+        score.copyWith(
+          validUntil: DateTime.now().toUtc().subtract(const Duration(days: 1)),
+        ),
+      );
+      await expectLater(
+        library.restoreScorePackage(expired),
+        throwsFormatException,
+      );
+    },
+  );
+  test(
     'backup restores PDFs, annotations, pages and ordered setlists',
     () async {
       final root = await Directory.systemTemp.createTemp('encore_backup');

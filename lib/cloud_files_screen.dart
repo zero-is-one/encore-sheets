@@ -193,10 +193,11 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
               hint: const Text('Choose a score to save'),
               items: [
                 for (final score in widget.library.recent)
-                  DropdownMenuItem(
-                    value: score.id,
-                    child: Text(score.title, overflow: TextOverflow.ellipsis),
-                  ),
+                  if (score.validUntil == null)
+                    DropdownMenuItem(
+                      value: score.id,
+                      child: Text(score.title, overflow: TextOverflow.ellipsis),
+                    ),
               ],
               onChanged: _busy
                   ? null

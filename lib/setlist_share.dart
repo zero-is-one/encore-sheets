@@ -45,6 +45,9 @@ Future<XFile> exportSetlist(
       final item = library.lookupSelection(selection);
       if (item == null)
         throw StateError('Resolve missing scores before compiling a PDF.');
+      if (item.$1.validUntil != null) {
+        throw StateError('This setlist includes an expiring score.');
+      }
       sources.add((
         file: await library.storage.openScore(item.$1.id),
         first: item.$2?.page,

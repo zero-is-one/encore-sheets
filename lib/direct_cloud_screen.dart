@@ -99,10 +99,11 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
         title: Text('Upload a score to ${_path.last.name}'),
         children: [
           for (final score in widget.library.recent)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialog, score),
-              child: Text(score.title),
-            ),
+            if (score.validUntil == null)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, score),
+                child: Text(score.title),
+              ),
         ],
       ),
     );
@@ -194,7 +195,11 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
                       child: const Text('Parent folder'),
                     ),
                   TextButton(
-                    onPressed: _busy || widget.library.recent.isEmpty
+                    onPressed:
+                        _busy ||
+                            !widget.library.recent.any(
+                              (score) => score.validUntil == null,
+                            )
                         ? null
                         : _upload,
                     child: const Text('Upload score'),

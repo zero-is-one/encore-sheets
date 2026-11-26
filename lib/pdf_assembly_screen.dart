@@ -106,25 +106,26 @@ class _PdfAssemblyScreenState extends State<PdfAssemblyScreen> {
                       ? 'Enter a name'
                       : null,
                 ),
-                if (source == null)
+                if (source == null) ...[
                   for (final score in widget.library.recent)
-                    CheckboxListTile(
-                      value: _selected.contains(score),
-                      secondary: _selected.contains(score)
-                          ? Text('${_selected.indexOf(score) + 1}')
-                          : null,
-                      title: Text(score.title),
-                      onChanged: _saving
-                          ? null
-                          : (selected) => setState(() {
-                              if (selected == true) {
-                                _selected.add(score);
-                              } else {
-                                _selected.remove(score);
-                              }
-                            }),
-                    )
-                else ...[
+                    if (score.validUntil == null)
+                      CheckboxListTile(
+                        value: _selected.contains(score),
+                        secondary: _selected.contains(score)
+                            ? Text('${_selected.indexOf(score) + 1}')
+                            : null,
+                        title: Text(score.title),
+                        onChanged: _saving
+                            ? null
+                            : (selected) => setState(() {
+                                if (selected == true) {
+                                  _selected.add(score);
+                                } else {
+                                  _selected.remove(score);
+                                }
+                              }),
+                      ),
+                ] else ...[
                   ListTile(
                     title: Text(source.title),
                     contentPadding: EdgeInsets.zero,

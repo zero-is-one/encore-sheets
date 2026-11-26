@@ -97,6 +97,9 @@ void _exportBackup(
     if (kind == LibraryArchive.setlist && sourceSetlists.length != 1) {
       throw const FormatException('Invalid editable setlist package');
     }
+    if (kind == LibraryArchive.score && sourceScores.single.expired) {
+      throw const FormatException('This shared score package has expired.');
+    }
     final referencesOnly =
         kind != LibraryArchive.score && manifest['referencesOnly'] == true;
     final metadataOnly = kind == LibraryArchive.library && referencesOnly;
@@ -174,11 +177,19 @@ void _exportBackup(
           }
         }
         if (metadataOnly && !scores.any((score) => score.id == target.id)) {
+          final existingExpiry = target.validUntil;
+          final incomingExpiry = old.validUntil;
           scores.add(
             old.copyWith(
               id: target.id,
               pdfSourceId: target.pdfSourceId,
               detachPdf: target.pdfSourceId == null,
+              validUntil:
+                  existingExpiry != null &&
+                      (incomingExpiry == null ||
+                          existingExpiry.isBefore(incomingExpiry))
+                  ? existingExpiry
+                  : incomingExpiry,
             ),
           );
         }

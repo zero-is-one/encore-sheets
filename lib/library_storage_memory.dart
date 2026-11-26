@@ -103,8 +103,10 @@ class _MemoryLibraryStorage implements LibraryStorage {
 
   @override
   Future<XFile> openScore(String id) async {
-    final source =
-        _index.where((score) => score.id == id).firstOrNull?.storedPdfId ?? id;
+    final entry = _index.where((score) => score.id == id).firstOrNull;
+    if (entry?.expired == true)
+      throw StateError('This shared score has expired.');
+    final source = entry?.storedPdfId ?? id;
     return _files[source]!;
   }
 
