@@ -51,7 +51,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan printed sheet music into EncoreSheets.</string>
+	<string>Scan sheet music or use head gestures to turn pages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose sheet music images to turn into a PDF.</string>
 	<key>NSMicrophoneUsageDescription</key>

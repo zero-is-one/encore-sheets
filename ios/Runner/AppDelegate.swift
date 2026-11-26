@@ -5,6 +5,64 @@ import VisionKit
 import UniformTypeIdentifiers
 import MediaPlayer
 import WidgetKit
+import AVFoundation
+import Vision
+
+private final class HeadGestureCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+  private let session = AVCaptureSession()
+  private let captureQueue = DispatchQueue(label: "app.encoresheets.face")
+  private let sample: (Double?) -> Void
+  private var lastFrame = 0.0
+  private var configured = false
+
+  init(sample: @escaping (Double?) -> Void) { self.sample = sample }
+
+  func start(orientation: AVCaptureVideoOrientation, completion: @escaping (Bool) -> Void) {
+    captureQueue.async {
+      if !self.configured {
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+          let input = try? AVCaptureDeviceInput(device: camera) else {
+          DispatchQueue.main.async { completion(false) }
+          return
+        }
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        guard self.session.canAddInput(input), self.session.canAddOutput(output) else {
+          DispatchQueue.main.async { completion(false) }
+          return
+        }
+        self.session.beginConfiguration()
+        self.session.sessionPreset = .vga640x480
+        self.session.addInput(input)
+        self.session.addOutput(output)
+        output.setSampleBufferDelegate(self, queue: self.captureQueue)
+        self.session.commitConfiguration()
+        self.configured = true
+      }
+      if let connection = self.session.outputs.first?.connection(with: .video),
+         connection.isVideoOrientationSupported {
+        connection.videoOrientation = orientation
+      }
+      self.session.startRunning()
+      let running = self.session.isRunning
+      DispatchQueue.main.async { completion(running) }
+    }
+  }
+
+  func stop() { captureQueue.async { self.session.stopRunning() } }
+
+  func captureOutput(_ output: AVCaptureOutput, didOutput buffer: CMSampleBuffer,
+                     from connection: AVCaptureConnection) {
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastFrame >= 0.085 else { return }
+    lastFrame = now
+    let request = VNDetectFaceRectanglesRequest()
+    try? VNImageRequestHandler(cmSampleBuffer: buffer).perform([request])
+    let faces = request.results ?? []
+    let yaw = faces.count == 1 ? faces.first?.yaw?.doubleValue : nil
+    DispatchQueue.main.async { self.sample(yaw.map { -$0 * 180 / .pi }) }
+  }
+}
 
 @available(iOS 16.0, *)
 enum EncoreShortcutTarget: String, AppEnum {
@@ -60,6 +118,8 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
   private var importChannel: FlutterMethodChannel?
   private var stylusChannel: FlutterMethodChannel?
   private var pendingPdfs: [String] = []
+  private var headGestureCapture: HeadGestureCapture?
+  private var faceGeneration = 0
   private var pendingScoreLinks: [String] = []
   private var linksChannel: FlutterMethodChannel?
   private var scanResult: FlutterResult?
@@ -84,6 +144,39 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let faceChannel = FlutterMethodChannel(
+      name: "encoresheets/face", binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    faceChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { result(nil); return }
+      if call.method == "stop" {
+        self.faceGeneration += 1
+        self.headGestureCapture?.stop()
+        result(nil)
+      } else if call.method == "start" {
+        self.faceGeneration += 1
+        let generation = self.faceGeneration
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+          DispatchQueue.main.async {
+            guard generation == self.faceGeneration else { result(nil); return }
+            guard granted else {
+              result(FlutterError(code: "camera_permission", message: "Allow camera access to use head gestures.", details: nil))
+              return
+            }
+            let capture = self.headGestureCapture ?? HeadGestureCapture {
+              faceChannel.invokeMethod("yaw", arguments: $0)
+            }
+            self.headGestureCapture = capture
+            let interface = self.frontController?.view.window?.windowScene?.interfaceOrientation
+            let orientation = AVCaptureVideoOrientation(rawValue: interface?.rawValue ?? 0) ?? .portrait
+            capture.start(orientation: orientation) { started in
+              if started { result(nil) }
+              else { result(FlutterError(code: "front_camera", message: "Front camera unavailable.", details: nil)) }
+            }
+          }
+        }
+      } else { result(FlutterMethodNotImplemented) }
+    }
     let practiceWidget = FlutterMethodChannel(
       name: "encoresheets/widget",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

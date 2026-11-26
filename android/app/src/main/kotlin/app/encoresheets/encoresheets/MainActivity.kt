@@ -15,6 +15,32 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    private var faceCamera: HeadGestureCamera? = null
+    private var facePermission: MethodChannel.Result? = null
+
+    private fun startFaceCamera(result: MethodChannel.Result) {
+        try {
+            faceCamera?.start()
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("front_camera", error.message, null)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, results)
+        if (requestCode != 8043) return
+        val pending = facePermission ?: return
+        facePermission = null
+        if (results.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            startFaceCamera(pending)
+        else pending.error("camera_permission", "Allow camera access to use head gestures.", null)
+    }
+
+    override fun onStop() {
+        faceCamera?.stop()
+        super.onStop()
+    }
     private var pendingBackup: Pair<File, MethodChannel.Result>? = null
     private var pendingScan: MethodChannel.Result? = null
     private var importChannel: MethodChannel? = null
@@ -195,6 +221,27 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val faceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/face")
+        faceCamera = HeadGestureCamera(this) { faceChannel.invokeMethod("yaw", it) }
+        faceChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        startFaceCamera(result)
+                    } else if (facePermission == null) {
+                        facePermission = result
+                        requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 8043)
+                    } else result.error("camera_pending", "Camera permission is pending.", null)
+                }
+                "stop" -> {
+                    facePermission?.success(null)
+                    facePermission = null
+                    faceCamera?.stop()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/widget")
             .setMethodCallHandler { call, result ->
                 if (call.method != "practice") {

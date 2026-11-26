@@ -38,6 +38,10 @@ android {
     }
 }
 
+dependencies {
+    implementation("com.google.mlkit:face-detection:16.1.7")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

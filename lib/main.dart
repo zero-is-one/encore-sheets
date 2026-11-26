@@ -56,6 +56,7 @@ import 'pdf_text_font.dart';
 import 'practice_activity.dart';
 import 'practice_dashboard.dart';
 import 'practice_goals.dart';
+import 'face_page_turn.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -94,6 +95,7 @@ enum _ReaderDisplay {
   tuner,
   piano,
   inputShortcuts,
+  faceTurns,
   midiDevices,
   midiAutomation,
   ensemble,
@@ -220,6 +222,10 @@ class _ReaderState extends State<Reader> {
     _library,
     onSaved: _requestWidgetRefresh,
   );
+  static const _faceChannel = MethodChannel('encoresheets/face');
+  FacePageTurn? _faceTurns;
+  bool _faceReverse = false;
+  double _faceSensitivity = 23;
   ReaderRestrictions? _restrictions;
   String? _language;
   late final Future<void> _startupPreferences;
@@ -323,6 +329,7 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.midiAutomation ||
     _ReaderDisplay.midiDevices ||
     _ReaderDisplay.inputShortcuts => !_restricted(RestrictedTool.connections),
+    _ReaderDisplay.faceTurns => !_restricted(RestrictedTool.connections),
     _ => true,
   };
 
@@ -348,9 +355,22 @@ class _ReaderState extends State<Reader> {
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
         if (_isAppleMobile) _syncIfReady();
       },
-      onHide: () => unawaited(_practice.suspend().catchError((Object _) {})),
+      onHide: () {
+        unawaited(_practice.suspend().catchError((Object _) {}));
+        _stopFaceTurns();
+      },
     );
     if (_supportsSharedImport) {
+      _faceChannel.setMethodCallHandler((call) async {
+        if (call.method != 'yaw' || _faceTurns == null || !mounted) return;
+        if (_picking || _inking || _restricted(RestrictedTool.connections)) {
+          _faceTurns!.update(null);
+          return;
+        }
+        final angle = call.arguments;
+        final step = _faceTurns!.update(angle is num ? angle.toDouble() : null);
+        if (step != 0) _turn(_faceReverse ? -step : step);
+      });
       _sharedImports.setMethodCallHandler((call) async {
         if (call.method == 'available') _requestSharedImport();
       });
@@ -547,6 +567,10 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    if (_supportsSharedImport) {
+      _stopFaceTurns(rebuild: false);
+      _faceChannel.setMethodCallHandler(null);
+    }
     unawaited(_midiInput?.cancel());
     unawaited(_turnTouch?.dispose().catchError((Object _) {}));
     unawaited(_midiShortcuts.close());
@@ -577,6 +601,86 @@ class _ReaderState extends State<Reader> {
       ink.dispose();
     }
     super.dispose();
+  }
+
+  void _stopFaceTurns({bool rebuild = true}) {
+    if (_faceTurns == null) return;
+    if (rebuild && mounted) {
+      setState(() => _faceTurns = null);
+    } else {
+      _faceTurns = null;
+    }
+    unawaited(
+      _faceChannel.invokeMethod<void>('stop').catchError((Object _) {}),
+    );
+  }
+
+  Future<void> _configureFaceTurns() async {
+    if (_faceTurns != null) {
+      _stopFaceTurns();
+      return;
+    }
+    var sense = _faceSensitivity;
+    var reverse = _faceReverse;
+    final enabled = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, refresh) => AlertDialog(
+          title: const Text('Turn pages with head gestures'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Face the front camera for a moment, then turn your head left or right. Camera images stay on this device.',
+              ),
+              Slider(
+                value: sense,
+                min: 15,
+                max: 35,
+                divisions: 20,
+                label: '${sense.round()}°',
+                onChanged: (value) => refresh(() => sense = value),
+              ),
+              SwitchListTile(
+                title: const Text('Reverse directions'),
+                value: reverse,
+                onChanged: (value) => refresh(() => reverse = value),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Use front camera'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || enabled != true) return;
+    final detector = FacePageTurn(threshold: sense);
+    setState(() {
+      _faceSensitivity = sense;
+      _faceReverse = reverse;
+      _faceTurns = detector;
+    });
+    try {
+      await _faceChannel.invokeMethod<void>('start');
+    } catch (_) {
+      if (!mounted || _faceTurns != detector) return;
+      _stopFaceTurns();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not start the front camera. Check camera permissions.',
+          ),
+        ),
+      );
+    }
   }
 
   void _requestSharedImport() {
@@ -1798,6 +1902,7 @@ class _ReaderState extends State<Reader> {
         if (_restricted(RestrictedTool.markup)) _inking = false;
       });
       if (_restricted(RestrictedTool.connections)) {
+        _stopFaceTurns();
         await _ensemble?.close();
         if (!mounted) return;
         setState(() => _followingSpread = _missingFacingPage = false);
@@ -4335,6 +4440,8 @@ class _ReaderState extends State<Reader> {
                         _showPiano();
                       case _ReaderDisplay.inputShortcuts:
                         _showInputShortcuts();
+                      case _ReaderDisplay.faceTurns:
+                        _configureFaceTurns();
                       case _ReaderDisplay.midiDevices:
                         _showMidiDevices();
                       case _ReaderDisplay.midiAutomation:
@@ -4532,6 +4639,15 @@ class _ReaderState extends State<Reader> {
                       value: _ReaderDisplay.inputShortcuts,
                       child: Text('Input shortcuts'),
                     ),
+                    if (_supportsSharedImport)
+                      PopupMenuItem(
+                        value: _ReaderDisplay.faceTurns,
+                        child: Text(
+                          _faceTurns == null
+                              ? 'Head gesture page turns'
+                              : 'Stop head gesture page turns',
+                        ),
+                      ),
                     if (_supportsSharedImport)
                       const PopupMenuItem(
                         value: _ReaderDisplay.midiDevices,
