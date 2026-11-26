@@ -5,11 +5,21 @@ import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'score_library.dart';
 import 'app_localization.dart';
 import 'score_clipboard.dart';
+import 'reader_deep_link.dart';
+import 'share_reader_link.dart';
 import 'program_duration.dart';
 import 'setlist_order.dart';
 import 'setlist_share.dart';
 
-enum _SetlistAction { edit, duplicate, playInOrder, earlier, later, share }
+enum _SetlistAction {
+  edit,
+  duplicate,
+  playInOrder,
+  earlier,
+  later,
+  share,
+  link,
+}
 
 String _durationText(ScoreLibrary library, Iterable<String> selections) {
   final estimate = library.estimateSetlistDuration(selections);
@@ -198,6 +208,8 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
             _move(list, group[index + 1]);
           case _SetlistAction.share:
             _share(list);
+          case _SetlistAction.link:
+            copyReaderLink(context, ReaderLinkTarget.setlist, list.id);
         }
       },
       itemBuilder: (_) => [
@@ -219,6 +231,11 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
             value: _SetlistAction.share,
             enabled: !_transferring,
             child: const Text('Share setlist'),
+          ),
+        if (widget.allowTransfers)
+          const PopupMenuItem(
+            value: _SetlistAction.link,
+            child: Text('Copy setlist link'),
           ),
         if (_sort == SetlistOrder.manual) ...[
           PopupMenuItem(

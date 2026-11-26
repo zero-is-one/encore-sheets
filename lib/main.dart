@@ -61,6 +61,7 @@ import 'measure_clipboard.dart';
 import 'quick_reader_tools.dart';
 import 'settings_profiles.dart';
 import 'metadata_symbols.dart';
+import 'share_reader_link.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -132,6 +133,7 @@ enum _ReaderDisplay {
   crop,
   drawingSettings,
   shareScorePackage,
+  shareScoreLink,
   performance,
   hideControls,
   gestures,
@@ -335,6 +337,7 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.halfSplit => !_restricted(RestrictedTool.markup),
     _ReaderDisplay.exportPdf ||
     _ReaderDisplay.shareScorePackage ||
+    _ReaderDisplay.shareScoreLink ||
     _ReaderDisplay.practiceRecordings ||
     _ReaderDisplay.scoreAudio => !_restricted(RestrictedTool.transfers),
     _ReaderDisplay.ensemble ||
@@ -4728,6 +4731,17 @@ class _ReaderState extends State<Reader> {
                         _configureDrawing();
                       case _ReaderDisplay.shareScorePackage:
                         _shareEditableScore();
+                      case _ReaderDisplay.shareScoreLink:
+                        if (_entry case final score?) {
+                          final bookmark = _itemBookmark;
+                          await copyReaderLink(
+                            context,
+                            bookmark == null
+                                ? ReaderLinkTarget.score
+                                : ReaderLinkTarget.bookmark,
+                            bookmark?.selectionId(score.id) ?? score.id,
+                          );
+                        }
                       case _ReaderDisplay.scoreTabs:
                         if (_entry case final score?) {
                           _updateScoreTabs([
@@ -5011,6 +5025,15 @@ class _ReaderState extends State<Reader> {
                               : 'Share editable excerpt',
                         ),
                       ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.shareScoreLink,
+                      enabled: _entry != null,
+                      child: Text(
+                        _itemBookmark == null
+                            ? 'Copy score link'
+                            : 'Copy bookmark link',
+                      ),
+                    ),
                     PopupMenuItem(
                       value: _ReaderDisplay.hideControls,
                       enabled:

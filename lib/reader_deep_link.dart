@@ -7,6 +7,9 @@ typedef ReaderDeepLink = ({
   int? page,
 });
 
+Uri libraryItemLink(ReaderLinkTarget target, String id) =>
+    Uri(scheme: 'encoresheets', host: target.name, pathSegments: [id]);
+
 ReaderDeepLink? parseReaderLink(String value) {
   if (value.length > 2048) return null;
   final uri = Uri.tryParse(value);

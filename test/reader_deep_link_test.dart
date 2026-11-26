@@ -2,6 +2,10 @@ import 'package:encoresheets/reader_deep_link.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('shared bookmark links resolve an encoded selection identifier', () {
+    final link = libraryItemLink(ReaderLinkTarget.bookmark, '42:bookmark-7');
+    expect(parseReaderLink(link.toString())?.id, '42:bookmark-7');
+  });
   test('only accepts read navigation to known EncoreSheets destinations', () {
     expect(parseReaderLink('encoresheets://score/42?page=8'), (
       target: ReaderLinkTarget.score,

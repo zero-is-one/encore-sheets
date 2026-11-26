@@ -4,6 +4,8 @@ import 'package:pdfrx/pdfrx.dart';
 
 import 'bookmark_import.dart';
 import 'score_library.dart';
+import 'reader_deep_link.dart';
+import 'share_reader_link.dart';
 
 typedef BookmarkDestination = ({String scoreId, int page, ScoreBookmark? item});
 
@@ -411,6 +413,12 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                     onSelected: (action) {
                       if (action == 'edit') {
                         _edit(bookmark);
+                      } else if (action == 'link') {
+                        copyReaderLink(
+                          context,
+                          ReaderLinkTarget.bookmark,
+                          bookmark.selectionId(score.id),
+                        );
                       } else {
                         _change(
                           (items) => items
@@ -421,6 +429,10 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                     },
                     itemBuilder: (_) => [
                       const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      const PopupMenuItem(
+                        value: 'link',
+                        child: Text('Copy bookmark link'),
+                      ),
                       PopupMenuItem(
                         value: 'remove',
                         enabled: !widget.library.isInSetlist(
