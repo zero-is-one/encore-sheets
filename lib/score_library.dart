@@ -584,10 +584,28 @@ class ScoreLibrary {
   }
 
   Future<void> saveSetlist(Setlist setlist) => _serialize(() async {
+    await _writeSetlist(setlist);
+  });
+
+  Future<bool> applyAssistantSetlist(Setlist setlist) => _serialize(() async {
+    if (_setlists.containsKey(setlist.id)) return true;
+    if (setlist.name.trim().isEmpty ||
+        setlist.scores.isEmpty ||
+        setlist.scores.any((id) {
+          final score = lookup(id);
+          return score == null || score.validUntil != null;
+        })) {
+      return false;
+    }
+    await _writeSetlist(setlist);
+    return true;
+  });
+
+  Future<void> _writeSetlist(Setlist setlist) async {
     final updated = {..._setlists, setlist.id: setlist};
     await storage.writeSetlists(updated.values.toList());
     _setlists[setlist.id] = setlist;
-  });
+  }
 
   Future<void> appendToSetlist(String id, String scoreId) =>
       _serialize(() async {

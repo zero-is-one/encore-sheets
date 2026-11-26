@@ -28,6 +28,8 @@ import 'reader_shortcuts_dialog.dart';
 import 'reader_preferences.dart';
 import 'library_backup_screen.dart';
 import 'library_sync.dart';
+import 'assistant_connection.dart';
+import 'assistant_connection_screen.dart';
 import 'library_sync_screen.dart';
 import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
@@ -93,6 +95,7 @@ enum _ReaderDisplay {
   practiceRecordings,
   practiceActivity,
   restrictions,
+  assistantConnections,
   support,
   language,
   profiles,
@@ -307,6 +310,8 @@ class _ReaderState extends State<Reader> {
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
   final _syncEndpoint = AppleLibrarySync();
+  late final _assistantConnection = AssistantConnection(_library);
+  Timer? _assistantTimer;
   Timer? _syncTimer;
   Future<DateTime>? _syncRunning;
   DateTime? _lastSync;
@@ -367,6 +372,8 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.midiAutomation ||
     _ReaderDisplay.midiDevices ||
     _ReaderDisplay.inputShortcuts => !_restricted(RestrictedTool.connections),
+    _ReaderDisplay.assistantConnections =>
+      !kIsWeb && !_restricted(RestrictedTool.connections),
     _ReaderDisplay.faceTurns => !_restricted(RestrictedTool.connections),
     _ReaderDisplay.presentation || _ReaderDisplay.scoreWindow =>
       !_restricted(RestrictedTool.connections) && _entry?.validUntil == null,
@@ -377,6 +384,15 @@ class _ReaderState extends State<Reader> {
   void initState() {
     super.initState();
     _startupPreferences = _restorePreferences();
+    if (!kIsWeb) {
+      _assistantTimer = Timer.periodic(
+        const Duration(seconds: 45),
+        (_) => unawaited(_syncAssistantIfReady()),
+      );
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_syncAssistantIfReady()),
+      );
+    }
     if (_isAppleMobile) {
       _stylusChannel.setMethodCallHandler((call) async {
         if (call.method == 'switchTool') _switchStylusTool();
@@ -389,6 +405,7 @@ class _ReaderState extends State<Reader> {
     }
     _lifecycle = AppLifecycleListener(
       onResume: () {
+        if (!kIsWeb) unawaited(_syncAssistantIfReady());
         _checkScoreExpiry();
         _requestWidgetRefresh();
         _focusPractice();
@@ -638,6 +655,10 @@ class _ReaderState extends State<Reader> {
     }
     unawaited(_audioCuePlayback?.cancel());
     _syncTimer?.cancel();
+    if (!kIsWeb) {
+      _assistantTimer?.cancel();
+      _assistantConnection.close();
+    }
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler(null);
@@ -1253,8 +1274,14 @@ class _ReaderState extends State<Reader> {
               result.startsWith('extract:')))
         return;
       if (_restricted(RestrictedTool.connections) &&
-          const {'sync', 'cloud-files'}.contains(result))
+          const {'sync', 'cloud-files', 'ai-connections'}.contains(result))
         return;
+      if (result == 'ai-connections') {
+        await _openReaderPanel<void>(
+          (_) => AssistantConnectionScreen(connection: _assistantConnection),
+        );
+        return;
+      }
       if (result == 'combine' || result.startsWith('extract:')) {
         final source = result == 'combine'
             ? null
@@ -1509,6 +1536,22 @@ class _ReaderState extends State<Reader> {
       _libraryQueue = queue;
     });
     _remember(entry.id, _page, opened: true);
+  }
+
+  Future<void> _syncAssistantIfReady() async {
+    try {
+      await _startupPreferences;
+      await _libraryReady;
+      if (!mounted ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+          _performance ||
+          _restricted(RestrictedTool.connections)) {
+        return;
+      }
+      await _assistantConnection.sync();
+    } catch (_) {
+      // The next foreground sync retries. AI Connections shows manual errors.
+    }
   }
 
   Future<void> _syncIfReady() async {
@@ -4941,6 +4984,10 @@ class _ReaderState extends State<Reader> {
           _showPracticeActivity();
         case _ReaderDisplay.restrictions:
           _showRestrictions();
+        case _ReaderDisplay.assistantConnections:
+          await _openReaderPanel<void>(
+            (_) => AssistantConnectionScreen(connection: _assistantConnection),
+          );
         case _ReaderDisplay.support:
           _showSupport();
         case _ReaderDisplay.language:
@@ -5156,6 +5203,10 @@ class _ReaderState extends State<Reader> {
       const PopupMenuItem(
         value: _ReaderDisplay.profiles,
         child: Text('Settings profiles'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.assistantConnections,
+        child: Text('AI Connections'),
       ),
       const PopupMenuItem(
         value: _ReaderDisplay.metadataSymbols,
@@ -6447,6 +6498,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             const PopupMenuItem(
                               value: 'sync',
                               child: Text('Device sync'),
+                            ),
+                          if (widget.persistent &&
+                              !widget.connectionsRestricted)
+                            const PopupMenuItem(
+                              value: 'ai-connections',
+                              child: Text('AI Connections'),
                             ),
                           PopupMenuItem(
                             value: 'support',

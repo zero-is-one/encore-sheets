@@ -39,7 +39,9 @@ void _exportBackup(
             setlists,
             preferences: preferences == null
                 ? null
-                : (Map.of(preferences)..remove('readerRestrictions')),
+                : (Map.of(preferences)
+                    ..remove('readerRestrictions')
+                    ..remove('assistantConnection')),
           ),
         }),
       ),
@@ -285,7 +287,8 @@ void _exportBackup(
           existingScores.isEmpty &&
           savedPreferences is Map)
         ...(Map<String, dynamic>.from(savedPreferences)
-          ..remove('readerRestrictions')),
+          ..remove('readerRestrictions')
+          ..remove('assistantConnection')),
       ...existingPreferences,
       if (metadataOnly && savedPreferences is Map)
         for (final key in savedPreferences.keys.whereType<String>())
@@ -297,6 +300,7 @@ void _exportBackup(
             'localScoreAudio',
             'practiceRecordings',
             'readerRestrictions',
+            'assistantConnection',
           }.contains(key))
             key: savedPreferences[key],
     };

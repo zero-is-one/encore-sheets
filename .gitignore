@@ -4,3 +4,5 @@ build/
 .local/
 .crash/
 /local-notes/
+/assistant.sqlite
+/assistant.sqlite-*
