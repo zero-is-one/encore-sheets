@@ -32,6 +32,7 @@ import 'library_sync.dart';
 import 'assistant_connection.dart';
 import 'assistant_connection_screen.dart';
 import 'library_sync_screen.dart';
+import 'webdav_library_sync.dart';
 import 'bookmarks_screen.dart';
 import 'jump_links_screen.dart';
 import 'half_page_turn.dart';
@@ -313,6 +314,7 @@ class _ReaderState extends State<Reader> {
   bool _sharedWaiting = false;
   late final AppLifecycleListener _lifecycle;
   final _syncEndpoint = AppleLibrarySync();
+  WebDavLibrarySync? _webDavSync;
   late final _assistantConnection = AssistantConnection(_library);
   Timer? _assistantTimer;
   Timer? _syncTimer;
@@ -395,15 +397,15 @@ class _ReaderState extends State<Reader> {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_syncAssistantIfReady()),
       );
+      _syncTimer = Timer.periodic(
+        const Duration(seconds: 45),
+        (_) => _syncIfReady(),
+      );
     }
     if (_isAppleMobile) {
       _stylusChannel.setMethodCallHandler((call) async {
         if (call.method == 'switchTool') _switchStylusTool();
       });
-      _syncTimer = Timer.periodic(
-        const Duration(seconds: 45),
-        (_) => _syncIfReady(),
-      );
       WidgetsBinding.instance.addPostFrameCallback((_) => _syncIfReady());
     }
     _lifecycle = AppLifecycleListener(
@@ -414,7 +416,7 @@ class _ReaderState extends State<Reader> {
         _focusPractice();
         if (_supportsSharedImport) _requestScoreLinks();
         if (_performance || _preferences.keepAwake) _keepScreenAwake(true);
-        if (_isAppleMobile) _syncIfReady();
+        if (_isAppleMobile || _webDavSync != null) _syncIfReady();
       },
       onHide: () {
         unawaited(_practice.suspend().catchError((Object _) {}));
@@ -665,6 +667,7 @@ class _ReaderState extends State<Reader> {
       _assistantConnection.close();
     }
     if (_isAppleMobile) _stylusChannel.setMethodCallHandler(null);
+    _webDavSync?.close();
     if (_supportsSharedImport) {
       _sharedImports.setMethodCallHandler(null);
       _linksChannel.setMethodCallHandler(null);
@@ -1241,7 +1244,7 @@ class _ReaderState extends State<Reader> {
                 setlists: _library.setlists,
                 persistent: _library.storage.persistent,
                 canScan: _supportsSharedImport,
-                canSync: _isAppleMobile,
+                canSync: _library.storage.persistent,
                 transferRestricted: _restricted(RestrictedTool.transfers),
                 connectionsRestricted: _restricted(RestrictedTool.connections),
                 onScoreQueue: (ids) => selectedQueue = ids,
@@ -1463,7 +1466,22 @@ class _ReaderState extends State<Reader> {
       if (result == 'sync') {
         await _openReaderPanel<void>(
           (_) => LibrarySyncScreen(
-            endpoint: _syncEndpoint,
+            endpoint: _isAppleMobile ? _syncEndpoint : null,
+            webDav: _webDavSync,
+            setWebDav: (endpoint) async {
+              try {
+                await _syncRunning;
+              } catch (_) {
+                // A failed refresh does not prevent switching sync folders.
+              }
+              if (!mounted) {
+                endpoint?.close();
+                return;
+              }
+              _webDavSync?.close();
+              _webDavSync = endpoint;
+              _lastSync = null;
+            },
             refresh: _syncLibrary,
             reset: _library.resetSyncState,
             lastSuccess: _lastSync,
@@ -1561,6 +1579,8 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _syncIfReady() async {
     if (!mounted ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+        (!_isAppleMobile && _webDavSync == null) ||
         _picking ||
         _inking ||
         _stylusDrawing ||
@@ -1568,7 +1588,8 @@ class _ReaderState extends State<Reader> {
         _restricted(RestrictedTool.connections))
       return;
     try {
-      if (await _syncEndpoint.configured &&
+      if ((_webDavSync != null ||
+              _isAppleMobile && await _syncEndpoint.configured) &&
           mounted &&
           !_picking &&
           !_inking &&
@@ -1588,7 +1609,7 @@ class _ReaderState extends State<Reader> {
   Future<DateTime> _runLibrarySync() async {
     await _libraryReady;
     final updated = await _library.synchronize(
-      _syncEndpoint,
+      _webDavSync ?? _syncEndpoint,
       mayApply: () => mounted && !_inking && !_stylusDrawing && !_performance,
     );
     if (_entry case final current?

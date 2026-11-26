@@ -10,6 +10,11 @@ abstract interface class LibrarySyncEndpoint {
   Future<XFile> fetchPdf(String id);
 }
 
+abstract interface class SharedLibrarySyncEndpoint
+    implements LibrarySyncEndpoint {
+  String get stateKey;
+}
+
 class AppleLibrarySync implements LibrarySyncEndpoint {
   static const _channel = MethodChannel('encoresheets/library-sync');
 

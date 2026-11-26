@@ -450,8 +450,7 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty || _saving) return;
-    final id =
-        widget.initial?.id ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final id = widget.initial?.id ?? ScoreLibrary.newRecordId();
     setState(() => _saving = true);
     try {
       await widget.library.saveSetlist(

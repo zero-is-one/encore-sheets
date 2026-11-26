@@ -628,10 +628,6 @@ class ScoreLibrary {
       });
 
   Future<void> duplicateSetlist(Setlist setlist) => _serialize(() async {
-    var sequence = DateTime.now().microsecondsSinceEpoch;
-    while (_setlists.containsKey('$sequence')) {
-      sequence++;
-    }
     final names = _setlists.values
         .where((list) => list.folder == setlist.folder)
         .map((list) => list.name.toLowerCase())
@@ -641,7 +637,7 @@ class ScoreLibrary {
     while (names.contains(name.toLowerCase())) {
       name = '${setlist.name} copy ${suffix++}';
     }
-    final copy = setlist.copyWith(id: '$sequence', name: name);
+    final copy = setlist.copyWith(id: newRecordId(), name: name);
     await storage.writeSetlists([..._setlists.values, copy]);
     _setlists[copy.id] = copy;
   });
@@ -651,10 +647,6 @@ class ScoreLibrary {
     final original = lookup(id);
     if (original == null) throw StateError('The source score is missing.');
     final now = DateTime.now().toUtc();
-    var next = now.microsecondsSinceEpoch;
-    while (_scores.containsKey('$next')) {
-      next++;
-    }
     final titles = _scores.values
         .map((score) => score.title.toLowerCase())
         .toSet();
@@ -664,7 +656,7 @@ class ScoreLibrary {
       name = '${original.title} copy ${suffix++}';
     }
     final copy = original.copyWith(
-      id: '$next',
+      id: newRecordId(),
       title: name,
       openedAt: now,
       pdfSourceId: original.storedPdfId,
@@ -684,30 +676,72 @@ class ScoreLibrary {
   Future<void> resetSyncState() =>
       updatePreferences({'librarySyncState': null});
 
+  static String newRecordId() {
+    final random = math.Random.secure();
+    return List.generate(
+      4,
+      (_) => random.nextInt(1 << 30).toRadixString(16).padLeft(8, '0'),
+    ).join();
+  }
+
+  static const _sharedScoreFields = {
+    'id',
+    'title',
+    'collections',
+    'bookmarks',
+    'deletedAt',
+  };
+  static const _sharedSetlistFields = {
+    'id',
+    'name',
+    'scores',
+    'folder',
+    'label',
+    'notes',
+    'placeholders',
+  };
+  static const _metadataFieldPrefix = 'metadata-';
+  static final _metadataField = RegExp(r'^metadata-[a-zA-Z0-9_=-]{1,1024}$');
+
   Future<Set<String>> synchronize(
     LibrarySyncEndpoint endpoint, {
     bool Function()? mayApply,
   }) => _serialize(() async {
     String fingerprint(Map<String, dynamic> data) =>
         sha256.convert(utf8.encode(jsonEncode(data))).toString();
+    final shared = endpoint is SharedLibrarySyncEndpoint;
+    final stateKey = shared ? endpoint.stateKey : 'librarySyncState';
     final preferences = await storage.readPreferences();
-    final state = preferences['librarySyncState'] as Map? ?? {};
-    final device =
-        state['device'] as String? ??
-        DateTime.now().microsecondsSinceEpoch.toString();
+    final state = preferences[stateKey] as Map? ?? {};
+    final device = state['device'] as String? ?? newRecordId();
     final known = state['known'] as Map? ?? {};
     final heads = await endpoint.readDevices();
     final latest =
         <String, ({int revision, String device, Map<String, dynamic> data})>{};
-    var sequence = DateTime.now().microsecondsSinceEpoch;
+    var sequence = shared ? 0 : DateTime.now().microsecondsSinceEpoch;
     for (final head in heads.entries) {
       for (final record in head.value.entries) {
-        if (!RegExp(r'^[sl]:[a-zA-Z0-9-]{1,80}$').hasMatch(record.key))
+        final parts = record.key.split(':');
+        if (parts.length != (shared ? 3 : 2) ||
+            (parts.first != 's' && parts.first != 'l') ||
+            !RegExp(r'^[a-zA-Z0-9-]{1,80}$').hasMatch(parts[1]))
+          continue;
+        if (shared &&
+            (parts.first == 's'
+                ? !_sharedScoreFields.contains(parts.last) &&
+                      !_metadataField.hasMatch(parts.last)
+                : !_sharedSetlistFields.contains(parts.last)))
           continue;
         if (record.value case {
           'revision': final int revision,
           'data': final Map<String, dynamic> data,
         }) {
+          if (shared &&
+              (revision < 1 ||
+                  revision >= (1 << 30) ||
+                  !data.containsKey('value'))) {
+            throw const FormatException('Invalid shared library revision');
+          }
           final existing = latest[record.key];
           if (existing == null ||
               revision > existing.revision ||
@@ -725,6 +759,21 @@ class ScoreLibrary {
     }
     final local = <String, Map<String, dynamic>>{};
     for (final score in _scores.values) {
+      if (shared) {
+        if (score.validUntil != null) continue;
+        final data = score.toJson();
+        for (final field in _sharedScoreFields) {
+          local['s:${score.id}:$field'] = {'value': data[field]};
+        }
+        for (final entry in score.metadata.entries) {
+          final field =
+              '$_metadataFieldPrefix${base64Url.encode(utf8.encode(entry.key))}';
+          if (_metadataField.hasMatch(field)) {
+            local['s:${score.id}:$field'] = {'value': entry.value};
+          }
+        }
+        continue;
+      }
       final data = score.toJson()
         ..remove('pdfSourceId')
         ..remove('openedAt')
@@ -735,21 +784,52 @@ class ScoreLibrary {
       };
     }
     for (final setlist in _setlists.values) {
-      local['l:${setlist.id}'] = setlist.toJson();
+      final data = setlist.toJson();
+      if (shared) {
+        for (final field in _sharedSetlistFields) {
+          local['l:${setlist.id}:$field'] = {'value': data[field]};
+        }
+      } else {
+        local['l:${setlist.id}'] = data;
+      }
+    }
+    if (shared) {
+      for (final key in known.keys.whereType<String>()) {
+        final parts = key.split(':');
+        if (parts.length != 3 || local.containsKey(key)) continue;
+        if (parts.first == 's' && _metadataField.hasMatch(parts.last)) {
+          if (_scores[parts[1]] case ScoreEntry(validUntil: null)) {
+            local[key] = {'value': null};
+          }
+        }
+      }
+    }
+    if (state['device'] == null) {
+      preferences[stateKey] = {'device': device, 'known': known};
+      await storage.writePreferences(preferences);
     }
     final outbound = {...?heads[device]};
     var changed = false;
     for (final row in local.entries) {
       final remote = latest[row.key]?.data;
       final serialized = fingerprint(row.value);
-      if (serialized == known[row.key] ||
-          remote != null &&
-              (serialized == fingerprint(remote) ||
-                  !known.containsKey(row.key))) {
+      final recordKey = shared
+          ? row.key.substring(0, row.key.lastIndexOf(':'))
+          : '';
+      final newMetadataField =
+          shared &&
+          row.key.startsWith('$recordKey:$_metadataFieldPrefix') &&
+          known.containsKey('$recordKey:id');
+      if (remote != null &&
+          (serialized == known[row.key] ||
+              serialized == fingerprint(remote) ||
+              !known.containsKey(row.key) && !newMetadataField)) {
         continue;
       }
-      if (remote == null && row.key.startsWith('s:')) {
-        final id = row.key.substring(2);
+      if (remote == null &&
+          row.key.startsWith('s:') &&
+          (!shared || row.key.endsWith(':id'))) {
+        final id = row.key.split(':')[1];
         await endpoint.publishPdf(id, await storage.openScore(id));
       }
       final revision = ++sequence;
@@ -767,9 +847,35 @@ class ScoreLibrary {
     final staged = <String>[];
     final previousInk = <String, Map<String, dynamic>>{};
     var receivedLists = false;
+    final incomingRecords = <String, Map<String, dynamic>>{};
+    for (final row in latest.entries) {
+      if (shared) {
+        final split = row.key.lastIndexOf(':');
+        final record = incomingRecords.putIfAbsent(
+          row.key.substring(0, split),
+          () => {},
+        );
+        final field = row.key.substring(split + 1);
+        final value = row.value.data['value'];
+        if (field.startsWith(_metadataFieldPrefix)) {
+          final key = utf8.decode(
+            base64Url.decode(field.substring(_metadataFieldPrefix.length)),
+          );
+          final metadata = record.putIfAbsent(
+            'metadata',
+            () => <String, String?>{},
+          ) as Map<String, String?>;
+          metadata[key] = value as String?;
+        } else {
+          record[field] = value;
+        }
+      } else {
+        incomingRecords[row.key] = row.value.data;
+      }
+    }
     try {
-      for (final row in latest.entries) {
-        final incoming = row.value.data;
+      for (final row in incomingRecords.entries) {
+        final incoming = row.value;
         final previous = local[row.key];
         if (previous != null && fingerprint(previous) == fingerprint(incoming))
           continue;
@@ -778,27 +884,52 @@ class ScoreLibrary {
           final setlist = Setlist.fromJson(incoming);
           if (setlist.id != id)
             throw const FormatException('Invalid shared setlist');
-          setlists[id] = setlist;
-          receivedLists = true;
+          if (!shared ||
+              fingerprint(_setlists[id]?.toJson() ?? {}) !=
+                  fingerprint(setlist.toJson())) {
+            setlists[id] = setlist;
+            receivedLists = true;
+          }
           continue;
         }
         final existing = _scores[id];
+        if (shared && existing?.validUntil != null) continue;
+        if (shared && existing == null && incoming['deletedAt'] != null)
+          continue;
+        if (incoming['metadata'] case final Map<String, String?> edits
+            when shared) {
+          final metadata = {...?existing?.metadata};
+          for (final edit in edits.entries) {
+            if (edit.value case final value?) {
+              metadata[edit.key] = value;
+            } else {
+              metadata.remove(edit.key);
+            }
+          }
+          incoming['metadata'] = metadata;
+        }
         final score = ScoreEntry.fromJson({
-          ...incoming['score'] as Map<String, dynamic>,
+          if (shared) ...?existing?.toJson(),
+          ...(shared ? incoming : incoming['score'] as Map<String, dynamic>),
           'pdfSourceId': existing?.pdfSourceId,
           'page': existing?.page ?? 1,
           'openedAt': (existing?.openedAt ?? DateTime.now()).toIso8601String(),
         });
         if (score.id != id) throw const FormatException('Invalid shared score');
-        final rawInk = incoming['ink'] as Map<String, dynamic>;
+        if (shared &&
+            existing != null &&
+            fingerprint(existing.toJson()) == fingerprint(score.toJson()))
+          continue;
         if (existing == null) {
           final pdf = await endpoint.fetchPdf(id);
           await storage.copyScore(id, pdf);
           staged.add(id);
-        } else {
+        } else if (!shared) {
           previousInk[id] = previous!['ink'] as Map<String, dynamic>;
         }
-        await storage.writeInk(id, rawInk);
+        if (!shared) {
+          await storage.writeInk(id, incoming['ink'] as Map<String, dynamic>);
+        }
         scores[id] = score;
         updated.add(id);
       }
@@ -829,7 +960,7 @@ class ScoreLibrary {
         nextKnown.entries.any((row) => known[row.key] != row.value)) {
       await storage.writePreferences({
         ...preferences,
-        'librarySyncState': {'device': device, 'known': nextKnown},
+        stateKey: {'device': device, 'known': nextKnown},
       });
     }
     return updated;
@@ -970,17 +1101,13 @@ class ScoreLibrary {
     final previous = replace && template != null ? lookup(template.id) : null;
     if (replace && previous == null)
       throw StateError('The source score is missing.');
-    var number = now.microsecondsSinceEpoch;
-    while (_scores.containsKey('$number')) {
-      number++;
-    }
     final title = source.name
         .split(RegExp(r'[/\\]'))
         .last
         .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '')
         .trim();
     var score = ScoreEntry(
-      id: '$number',
+      id: newRecordId(),
       title: title.isEmpty ? 'Untitled score' : title,
       page: 1,
       openedAt: now,

@@ -30,6 +30,26 @@ performance.
   Box, Google Drive, and OneDrive using a session access token. Google Drive
   uses the `https://www.googleapis.com/auth/drive` scope and OneDrive uses
   delegated Microsoft Graph `Files.ReadWrite`.
+- **Sync a shared library.** Use the same WebDAV folder on Android and iPad
+  to sync scores, metadata, and setlists while keeping personal annotations on
+  each device.
+
+## Shared library setup
+
+1. Create a dedicated HTTPS WebDAV folder and give each device read and write
+   access. The server must support WebDAV folder listing and file writes.
+2. On each device, open **Score library → Tools → Device sync**. Enter the
+   same folder URL and your WebDAV credentials, then tap **Connect WebDAV**.
+   Each connected device can publish its local scores and setlists to the folder.
+3. Tap **Refresh now** to send and receive changes. EncoreSheets also checks
+   periodically while the app is open and when you return to it. Reconnect
+   after restarting the app.
+
+Sync merges edits to different catalog fields, including individual metadata
+fields. Same-field conflicts use the latest published revision. If two devices
+publish the same revision concurrently, both pick the same winner by device ID.
+Ink, page notes, reading position, and reader settings stay local. WebDAV sync
+supports PDFs up to 50 MB and skips scores with an access deadline.
 
 ## Build from source
 
