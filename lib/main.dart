@@ -1195,7 +1195,10 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _showLibrary({bool setlists = false}) async {
+  Future<void> _showLibrary({
+    bool setlists = false,
+    bool focusSearch = false,
+  }) async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
@@ -1223,6 +1226,7 @@ class _ReaderState extends State<Reader> {
                 compact:
                     _preferences.compactLibrary || !_appearance.showMetadata,
                 metadataIconKeys: _metadataSymbols,
+                focusSearch: focusSearch,
               ),
             );
       if (!mounted) return;
@@ -4725,581 +4729,670 @@ class _ReaderState extends State<Reader> {
 
   Widget _header() => Material(
     color: _rail,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 96,
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: ReaderText.library.of(context),
-                  onPressed: _picking ? null : _showLibrary,
-                  icon: const Icon(Icons.library_music_outlined),
-                ),
-                IconButton(
-                  tooltip: ReaderText.setlists.of(context),
-                  onPressed: _picking
-                      ? null
-                      : () => _showLibrary(setlists: true),
-                  icon: const Icon(Icons.queue_music),
-                ),
-              ],
-            ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final navigation = <Widget>[
+          IconButton(
+            tooltip: ReaderText.library.of(context),
+            onPressed: _picking ? null : _showLibrary,
+            icon: const Icon(Icons.library_music_outlined),
           ),
-          Expanded(
-            child: GestureDetector(
-              onTap: _entry == null || _picking
-                  ? null
-                  : () => _editScore(_entry!),
-              child: Semantics(
-                header: true,
-                child: Text(
-                  _title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontFamily: 'serif',
-                    color: _paper,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
-            ),
+          IconButton(
+            tooltip: 'Bookmarks',
+            onPressed: _picking || _entry == null || _pages == 0
+                ? null
+                : _showBookmarks,
+            icon: const Icon(Icons.bookmark_outline),
           ),
-          SizedBox(
-            width: 144,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                PopupMenuButton<QuickReaderTool>(
-                  tooltip: 'Quick access',
-                  enabled: !_picking,
-                  icon: const Icon(Icons.bolt_outlined),
-                  onSelected: _runQuickTool,
-                  itemBuilder: (_) => [
-                    for (final tool in _quickTools)
-                      PopupMenuItem(
-                        value: tool,
-                        enabled: _quickToolEnabled(tool),
-                        child: ListTile(
-                          leading: Icon(tool.icon),
-                          title: Text(tool.label),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    PopupMenuItem(
-                      onTap: _pinQuickTools,
-                      child: const Text('Pin tools…'),
-                    ),
+          IconButton(
+            tooltip: ReaderText.setlists.of(context),
+            onPressed: _picking ? null : () => _showLibrary(setlists: true),
+            icon: const Icon(Icons.queue_music),
+          ),
+        ];
+        final utilities = [
+          IconButton(
+            tooltip: ReaderText.search.of(context),
+            onPressed: _picking ? null : () => _showLibrary(focusSearch: true),
+            icon: const Icon(Icons.search),
+          ),
+          _audioToolsMenu(),
+          _readerToolsMenu(),
+        ];
+        final title = _readerTitle();
+        final editing = [
+          _quickAccessMenu(),
+          if (!_restricted(RestrictedTool.markup))
+            IconButton(
+              tooltip: _inking
+                  ? 'Done marking up'
+                  : ReaderText.markup.of(context),
+              onPressed: _pages == 0 || _picking ? null : _toggleInk,
+              color: _inking ? _brass : null,
+              icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
+            ),
+        ];
+        if (constraints.maxWidth < 720) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsetsDirectional.only(start: 16, end: 4),
+                child: Row(
+                  children: [
+                    Expanded(child: title),
+                    ...editing,
                   ],
                 ),
-                if (!_restricted(RestrictedTool.markup))
-                  IconButton(
-                    tooltip: _inking
-                        ? 'Done marking up'
-                        : ReaderText.markup.of(context),
-                    onPressed: _pages == 0 ? null : _toggleInk,
-                    color: _inking ? _brass : null,
-                    icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
-                  ),
-                PopupMenuButton<_ReaderDisplay>(
-                  tooltip: ReaderText.tools.of(context),
-                  enabled: _pages > 0 && !_picking,
-                  icon: const Icon(Icons.tune),
-                  onSelected: (action) async {
-                    if (!_readerActionAllowed(action)) return;
-                    switch (action) {
-                      case _ReaderDisplay.nowPlaying:
-                        _showNowPlaying();
-                      case _ReaderDisplay.findInScore:
-                        _findInScore();
-                      case _ReaderDisplay.pageNote:
-                        _editPageNote(_page);
-                      case _ReaderDisplay.pageActions:
-                        _editScoreActions();
-                      case _ReaderDisplay.scoreAudio:
-                        _showScoreAudio();
-                      case _ReaderDisplay.practiceRecordings:
-                        _showPracticeRecordings();
-                      case _ReaderDisplay.practiceActivity:
-                        _showPracticeActivity();
-                      case _ReaderDisplay.restrictions:
-                        _showRestrictions();
-                      case _ReaderDisplay.support:
-                        _showSupport();
-                      case _ReaderDisplay.language:
-                        _chooseLanguage();
-                      case _ReaderDisplay.profiles:
-                        _showSettingsProfiles();
-                      case _ReaderDisplay.metadataSymbols:
-                        _editMetadataSymbols();
-                      case _ReaderDisplay.themeOptions:
-                        _changeThemeOptions();
-                      case _ReaderDisplay.maintenance:
-                        _showMaintenance();
-                      case _ReaderDisplay.appIcon:
-                        chooseLauncherIcon(context);
-                      case _ReaderDisplay.metronome:
-                        _showMetronome();
-                      case _ReaderDisplay.tuner:
-                        _showTuner();
-                      case _ReaderDisplay.piano:
-                        _showPiano();
-                      case _ReaderDisplay.inputShortcuts:
-                        _showInputShortcuts();
-                      case _ReaderDisplay.faceTurns:
-                        _configureFaceTurns();
-                      case _ReaderDisplay.copyMeasure:
-                        _measureRegion(paste: false);
-                      case _ReaderDisplay.pasteMeasure:
-                        _measureRegion(paste: true);
-                      case _ReaderDisplay.midiDevices:
-                        _showMidiDevices();
-                      case _ReaderDisplay.midiAutomation:
-                        _showMidiAutomation();
-                      case _ReaderDisplay.ensemble:
-                        _showEnsemble();
-                      case _ReaderDisplay.scoreWindow:
-                        _openScoreWindow();
-                      case _ReaderDisplay.presentation:
-                        _togglePresentation();
-                      case _ReaderDisplay.appearance:
-                        _showAppearance();
-                      case _ReaderDisplay.accessibility:
-                        _showAccessibility();
-                      case _ReaderDisplay.reflow:
-                        _showReflow();
-                      case _ReaderDisplay.panelOptions:
-                        _showPanelOptions();
-                      case _ReaderDisplay.embeddedPdf:
-                        _showEmbeddedPdfSettings();
-                      case _ReaderDisplay.fit:
-                        _fit();
-                      case _ReaderDisplay.fittingMode:
-                        _choosePageFit();
-                      case _ReaderDisplay.zoomIn:
-                        if (_viewer.isReady) _viewer.zoomUp();
-                      case _ReaderDisplay.zoomOut:
-                        if (_viewer.isReady) _viewer.zoomDown();
-                      case _ReaderDisplay.previousPage:
-                        if (_previousPage case final page?) _go(page);
-                      case _ReaderDisplay.previousScore:
-                        _returnToPreviousScore();
-                      case _ReaderDisplay.bookmarks:
-                        _showBookmarks();
-                      case _ReaderDisplay.jumpLinks:
-                        _showJumpLinks();
-                      case _ReaderDisplay.halfTurns:
-                        _savePreferences(
-                          _preferences.copyWith(
-                            halfPageTurns: !_preferences.halfPageTurns,
-                          ),
-                        );
-                      case _ReaderDisplay.halfSplit:
-                        _setHalfSplit();
-                      case _ReaderDisplay.halfIndicator:
-                        _savePreferences(
-                          _preferences.copyWith(
-                            halfPageIndicator: !_preferences.halfPageIndicator,
-                          ),
-                        );
-                      case _ReaderDisplay.landscapeWidth:
-                        _savePreferences(
-                          _preferences.copyWith(
-                            landscapeWidth: !_preferences.landscapeWidth,
-                          ),
-                        );
-                      case _ReaderDisplay.spreads:
-                        final step = await showDialog<int>(
-                          context: context,
-                          builder: (context) => SimpleDialog(
-                            title: const Text('Page layout'),
-                            children: [
-                              for (final (step, label) in [
-                                (0, 'Single page'),
-                                (1, 'Two pages · advance one'),
-                                (2, 'Two pages · advance two'),
-                              ])
-                                SimpleDialogOption(
-                                  onPressed: () => Navigator.pop(context, step),
-                                  child: Text(label),
-                                ),
-                            ],
-                          ),
-                        );
-                        if (step != null && mounted) {
-                          _savePreferences(
-                            _preferences.copyWith(
-                              spreadStep: step,
-                              halfPageTurns:
-                                  step == 0 && _preferences.halfPageTurns,
-                            ),
-                          );
-                        }
-                      case _ReaderDisplay.performance:
-                        _togglePerformance();
-                      case _ReaderDisplay.exportPdf:
-                        _showPdfExport();
-                      case _ReaderDisplay.crop:
-                        _showCrop();
-                      case _ReaderDisplay.drawingSettings:
-                        _configureDrawing();
-                      case _ReaderDisplay.shareScorePackage:
-                        _shareEditableScore();
-                      case _ReaderDisplay.shareScoreLink:
-                        if (_entry case final score?) {
-                          final bookmark = _itemBookmark;
-                          await copyReaderLink(
-                            context,
-                            bookmark == null
-                                ? ReaderLinkTarget.score
-                                : ReaderLinkTarget.bookmark,
-                            bookmark?.selectionId(score.id) ?? score.id,
-                          );
-                        }
-                      case _ReaderDisplay.scoreTabs:
-                        if (_entry case final score?) {
-                          _updateScoreTabs([
-                            ..._scoreTabIds.where((id) => id != score.id),
-                            if (!_scoreTabIds.contains(score.id)) score.id,
-                          ]);
-                        }
-                      case _ReaderDisplay.hideControls:
-                        setState(() => _showControls = false);
-                      case _ReaderDisplay.gestures:
-                        _configureGestures();
-                      case _ReaderDisplay.keepAwake:
-                        _savePreferences(
-                          _preferences.copyWith(
-                            left: _preferences.left,
-                            center: _preferences.center,
-                            right: _preferences.right,
-                            keepAwake: !_preferences.keepAwake,
-                            showNextTitle: _preferences.showNextTitle,
-                          ),
-                        );
-                      case _ReaderDisplay.nextTitle:
-                        _savePreferences(
-                          _preferences.copyWith(
-                            left: _preferences.left,
-                            center: _preferences.center,
-                            right: _preferences.right,
-                            keepAwake: _preferences.keepAwake,
-                            showNextTitle: !_preferences.showNextTitle,
-                          ),
-                        );
-                    }
-                  },
-                  itemBuilder: (_) => <PopupMenuItem<_ReaderDisplay>>[
-                    PopupMenuItem(
-                      value: _ReaderDisplay.nowPlaying,
-                      enabled: _entry != null,
-                      child: const Text('Now playing'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.findInScore,
-                      child: Text('Find in score'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.pageNote,
-                      enabled: _entry != null,
-                      child: Text(
-                        _entry?.pageNotes.containsKey(_page) == true
-                            ? 'Open page note'
-                            : 'Add page note',
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.pageActions,
-                      enabled: _entry != null,
-                      child: const Text('On-page actions'),
-                    ),
-                    if (ScoreAudioSession.supported)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.scoreAudio,
-                        enabled: _entry != null,
-                        child: const Text('Linked audio'),
-                      ),
-                    if (_supportsSharedImport)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.practiceRecordings,
-                        enabled: _entry != null,
-                        child: const Text('Practice recordings'),
-                      ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.practiceActivity,
-                      child: Text('Practice activity'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.restrictions,
-                      child: Text('Shared-device restrictions'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.support,
-                      child: Text(ReaderText.help.of(context)),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.language,
-                      child: Text('App language'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.profiles,
-                      child: Text('Settings profiles'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.metadataSymbols,
-                      child: Text('Metadata symbols'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.themeOptions,
-                      child: Text('Theme and menus'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.maintenance,
-                      child: Text('Maintenance and reset'),
-                    ),
-                    if (!kIsWeb &&
-                        defaultTargetPlatform == TargetPlatform.android)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.appIcon,
-                        child: Text('Home screen icon'),
-                      ),
-                    if (ScoreAudioSession.supported)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.metronome,
-                        child: Text('Metronome'),
-                      ),
-                    if (ScoreAudioSession.supported)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.tuner,
-                        child: Text('Pitch pipe & tuner'),
-                      ),
-                    if (ScoreAudioSession.supported)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.piano,
-                        child: Text('Piano and MIDI synthesizer'),
-                      ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.inputShortcuts,
-                      child: Text('Input shortcuts'),
-                    ),
-                    if (_supportsSharedImport)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.faceTurns,
-                        child: Text(
-                          _faceTurns == null
-                              ? 'Head gesture page turns'
-                              : 'Stop head gesture page turns',
-                        ),
-                      ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.copyMeasure,
-                      child: Text('Copy measure from PDF'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.pasteMeasure,
-                      enabled:
-                          _measureClipboard != null && _activeInkLayer != null,
-                      child: const Text('Paste measure'),
-                    ),
-                    if (_supportsSharedImport)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.midiDevices,
-                        child: Text('Pedals and MIDI devices'),
-                      ),
-                    if (ScoreAudioSession.supported)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.midiAutomation,
-                        enabled: _entry != null,
-                        child: const Text('MIDI score automation'),
-                      ),
-                    if (!kIsWeb)
-                      const PopupMenuItem(
-                        value: _ReaderDisplay.ensemble,
-                        child: Text('Ensemble sync'),
-                      ),
-                    if (_supportsSharedImport)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.scoreWindow,
-                        enabled: _file != null,
-                        child: const Text('Open score in another window'),
-                      ),
-                    if (_supportsSharedImport)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.presentation,
-                        enabled: _file != null || _presenting,
-                        child: Text(
-                          _presenting
-                              ? 'Stop external display'
-                              : 'Present on external display',
-                        ),
-                      ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.appearance,
-                      child: Text('Reading appearance'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.accessibility,
-                      child: Text('Accessible reader controls'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.reflow,
-                      child: Text('Score reflow'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.panelOptions,
-                      child: Text('Sidebar and lists'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.embeddedPdf,
-                      child: Text('Embedded PDF content'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.fit,
-                      child: Text('Fit page'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.fittingMode,
-                      child: Text(
-                        'Page fitting · ${_preferences.pageFit.label}',
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.zoomIn,
-                      enabled: !_preferences.halfPageTurns,
-                      child: const Text('Zoom in'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.zoomOut,
-                      enabled: !_preferences.halfPageTurns,
-                      child: const Text('Zoom out'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.previousPage,
-                      enabled: _previousPage != null,
-                      child: const Text('Jump back to previous page'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.previousScore,
-                      enabled: _previousItem != null,
-                      child: const Text('Return to previous score'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.bookmarks,
-                      enabled: _entry != null,
-                      child: const Text('Bookmarks'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.jumpLinks,
-                      enabled: _entry != null,
-                      child: const Text('Repeat & coda links'),
-                    ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.halfTurns,
-                      checked: _preferences.halfPageTurns,
-                      child: const Text('Half-page turns'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.halfSplit,
-                      enabled: _preferences.halfPageTurns && _page < _lastPage,
-                      child: const Text('Adjust current page split'),
-                    ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.halfIndicator,
-                      checked: _preferences.halfPageIndicator,
-                      child: const Text('Show half-page indicator'),
-                    ),
-                    if (_preferences.pageFit == ReaderPageFit.standard)
-                      CheckedPopupMenuItem(
-                        value: _ReaderDisplay.landscapeWidth,
-                        checked: _preferences.landscapeWidth,
-                        child: const Text('Fit width in landscape'),
-                      ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.spreads,
-                      checked: _preferences.spreadStep > 0,
-                      child: const Text('Two-page layout'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.performance,
-                      child: Text('Performance mode'),
-                    ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.scoreTabs,
-                      enabled: _entry != null && !_savingTabs,
-                      checked: _scoreTabIds.contains(_entry?.id),
-                      child: const Text('Keep score in tabs'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.exportPdf,
-                      enabled: _file != null,
-                      child: const Text('Share or print PDF'),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.crop,
-                      enabled: _entry != null,
-                      child: const Text('Crop and straighten'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.drawingSettings,
-                      child: Text('Drawing presets and stylus'),
-                    ),
-                    if (_library.storage.persistent)
-                      PopupMenuItem(
-                        value: _ReaderDisplay.shareScorePackage,
-                        enabled: _entry != null,
-                        child: Text(
-                          _itemBookmark == null
-                              ? 'Share editable score'
-                              : 'Share editable excerpt',
-                        ),
-                      ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.shareScoreLink,
-                      enabled: _entry != null,
-                      child: Text(
-                        _itemBookmark == null
-                            ? 'Copy score link'
-                            : 'Copy bookmark link',
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: _ReaderDisplay.hideControls,
-                      enabled:
-                          !_inking &&
-                          [
-                            _preferences.left,
-                            _preferences.center,
-                            _preferences.right,
-                          ].contains(ReaderTapAction.controls),
-                      child: const Text('Hide controls'),
-                    ),
-                    const PopupMenuItem(
-                      value: _ReaderDisplay.gestures,
-                      child: Text('Reader gestures'),
-                    ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.keepAwake,
-                      checked: _preferences.keepAwake,
-                      child: const Text('Keep screen awake'),
-                    ),
-                    CheckedPopupMenuItem(
-                      value: _ReaderDisplay.nextTitle,
-                      checked: _preferences.showNextTitle,
-                      child: const Text('Show next score title'),
-                    ),
-                  ].where((item) => _readerActionAllowed(item.value)).toList(),
-                ),
-              ],
-            ),
+              ),
+              const Divider(height: 1, indent: 12, endIndent: 12),
+              Row(
+                children: [
+                  for (final control in [...navigation, ...utilities])
+                    Expanded(child: Center(child: control)),
+                ],
+              ),
+            ],
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          child: Row(
+            children: [
+              ...navigation,
+              const SizedBox(width: 12),
+              Expanded(child: title),
+              ...editing,
+              const SizedBox(width: 12),
+              ...utilities,
+            ],
           ),
-        ],
-      ),
+        );
+      },
     ),
   );
+
+  Widget _readerTitle() {
+    final composer = _entry?.metadata['composer'];
+    return InkWell(
+      onTap: _entry == null || _picking ? null : () => _editScore(_entry!),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              header: true,
+              child: Text(
+                _title,
+                style: TextStyle(
+                  fontSize: 21,
+                  fontFamily: 'serif',
+                  color: _paper,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+            if (_appearance.showMetadata &&
+                composer != null &&
+                composer.isNotEmpty)
+              Text(
+                composer,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _paper.withValues(alpha: .75),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _audioToolsMenu() => PopupMenuButton<_ReaderDisplay>(
+    tooltip: 'Audio tools',
+    icon: const Icon(Icons.headphones_outlined),
+    enabled: !_picking && ScoreAudioSession.supported,
+    onSelected: (action) {
+      if (!_readerActionAllowed(action)) return;
+      switch (action) {
+        case _ReaderDisplay.scoreAudio:
+          _showScoreAudio();
+        case _ReaderDisplay.metronome:
+          _showMetronome();
+        case _ReaderDisplay.tuner:
+          _showTuner();
+        case _ReaderDisplay.piano:
+          _showPiano();
+        case _ReaderDisplay.practiceRecordings:
+          _showPracticeRecordings();
+        default:
+          break;
+      }
+    },
+    itemBuilder: (_) => <PopupMenuItem<_ReaderDisplay>>[
+      PopupMenuItem(
+        value: _ReaderDisplay.scoreAudio,
+        enabled: _entry != null,
+        child: const Text('Linked audio'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.metronome,
+        child: Text('Metronome'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.tuner,
+        child: Text('Pitch pipe & tuner'),
+      ),
+      const PopupMenuItem(value: _ReaderDisplay.piano, child: Text('Piano')),
+      if (_supportsSharedImport)
+        PopupMenuItem(
+          value: _ReaderDisplay.practiceRecordings,
+          enabled: _entry != null,
+          child: const Text('Practice recordings'),
+        ),
+    ].where((item) => _readerActionAllowed(item.value)).toList(),
+  );
+
+  Widget _quickAccessMenu() => PopupMenuButton<QuickReaderTool>(
+    tooltip: 'Quick access',
+    enabled: !_picking,
+    icon: const Icon(Icons.bolt_outlined),
+    onSelected: _runQuickTool,
+    itemBuilder: (_) => [
+      for (final tool in _quickTools)
+        PopupMenuItem(
+          value: tool,
+          enabled: _quickToolEnabled(tool),
+          child: ListTile(
+            leading: Icon(tool.icon),
+            title: Text(tool.label),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      PopupMenuItem(onTap: _pinQuickTools, child: const Text('Pin tools…')),
+    ],
+  );
+
+  Widget _readerToolsMenu() => PopupMenuButton<_ReaderDisplay>(
+    tooltip: ReaderText.tools.of(context),
+    enabled: _pages > 0 && !_picking,
+    icon: const Icon(Icons.tune),
+    onSelected: (action) async {
+      if (!_readerActionAllowed(action)) return;
+      switch (action) {
+        case _ReaderDisplay.nowPlaying:
+          _showNowPlaying();
+        case _ReaderDisplay.findInScore:
+          _findInScore();
+        case _ReaderDisplay.pageNote:
+          _editPageNote(_page);
+        case _ReaderDisplay.pageActions:
+          _editScoreActions();
+        case _ReaderDisplay.scoreAudio:
+          _showScoreAudio();
+        case _ReaderDisplay.practiceRecordings:
+          _showPracticeRecordings();
+        case _ReaderDisplay.practiceActivity:
+          _showPracticeActivity();
+        case _ReaderDisplay.restrictions:
+          _showRestrictions();
+        case _ReaderDisplay.support:
+          _showSupport();
+        case _ReaderDisplay.language:
+          _chooseLanguage();
+        case _ReaderDisplay.profiles:
+          _showSettingsProfiles();
+        case _ReaderDisplay.metadataSymbols:
+          _editMetadataSymbols();
+        case _ReaderDisplay.themeOptions:
+          _changeThemeOptions();
+        case _ReaderDisplay.maintenance:
+          _showMaintenance();
+        case _ReaderDisplay.appIcon:
+          chooseLauncherIcon(context);
+        case _ReaderDisplay.metronome:
+          _showMetronome();
+        case _ReaderDisplay.tuner:
+          _showTuner();
+        case _ReaderDisplay.piano:
+          _showPiano();
+        case _ReaderDisplay.inputShortcuts:
+          _showInputShortcuts();
+        case _ReaderDisplay.faceTurns:
+          _configureFaceTurns();
+        case _ReaderDisplay.copyMeasure:
+          _measureRegion(paste: false);
+        case _ReaderDisplay.pasteMeasure:
+          _measureRegion(paste: true);
+        case _ReaderDisplay.midiDevices:
+          _showMidiDevices();
+        case _ReaderDisplay.midiAutomation:
+          _showMidiAutomation();
+        case _ReaderDisplay.ensemble:
+          _showEnsemble();
+        case _ReaderDisplay.scoreWindow:
+          _openScoreWindow();
+        case _ReaderDisplay.presentation:
+          _togglePresentation();
+        case _ReaderDisplay.appearance:
+          _showAppearance();
+        case _ReaderDisplay.accessibility:
+          _showAccessibility();
+        case _ReaderDisplay.reflow:
+          _showReflow();
+        case _ReaderDisplay.panelOptions:
+          _showPanelOptions();
+        case _ReaderDisplay.embeddedPdf:
+          _showEmbeddedPdfSettings();
+        case _ReaderDisplay.fit:
+          _fit();
+        case _ReaderDisplay.fittingMode:
+          _choosePageFit();
+        case _ReaderDisplay.zoomIn:
+          if (_viewer.isReady) _viewer.zoomUp();
+        case _ReaderDisplay.zoomOut:
+          if (_viewer.isReady) _viewer.zoomDown();
+        case _ReaderDisplay.previousPage:
+          if (_previousPage case final page?) _go(page);
+        case _ReaderDisplay.previousScore:
+          _returnToPreviousScore();
+        case _ReaderDisplay.bookmarks:
+          _showBookmarks();
+        case _ReaderDisplay.jumpLinks:
+          _showJumpLinks();
+        case _ReaderDisplay.halfTurns:
+          _savePreferences(
+            _preferences.copyWith(halfPageTurns: !_preferences.halfPageTurns),
+          );
+        case _ReaderDisplay.halfSplit:
+          _setHalfSplit();
+        case _ReaderDisplay.halfIndicator:
+          _savePreferences(
+            _preferences.copyWith(
+              halfPageIndicator: !_preferences.halfPageIndicator,
+            ),
+          );
+        case _ReaderDisplay.landscapeWidth:
+          _savePreferences(
+            _preferences.copyWith(landscapeWidth: !_preferences.landscapeWidth),
+          );
+        case _ReaderDisplay.spreads:
+          final step = await showDialog<int>(
+            context: context,
+            builder: (context) => SimpleDialog(
+              title: const Text('Page layout'),
+              children: [
+                for (final (step, label) in [
+                  (0, 'Single page'),
+                  (1, 'Two pages · advance one'),
+                  (2, 'Two pages · advance two'),
+                ])
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, step),
+                    child: Text(label),
+                  ),
+              ],
+            ),
+          );
+          if (step != null && mounted) {
+            _savePreferences(
+              _preferences.copyWith(
+                spreadStep: step,
+                halfPageTurns: step == 0 && _preferences.halfPageTurns,
+              ),
+            );
+          }
+        case _ReaderDisplay.performance:
+          _togglePerformance();
+        case _ReaderDisplay.exportPdf:
+          _showPdfExport();
+        case _ReaderDisplay.crop:
+          _showCrop();
+        case _ReaderDisplay.drawingSettings:
+          _configureDrawing();
+        case _ReaderDisplay.shareScorePackage:
+          _shareEditableScore();
+        case _ReaderDisplay.shareScoreLink:
+          if (_entry case final score?) {
+            final bookmark = _itemBookmark;
+            await copyReaderLink(
+              context,
+              bookmark == null
+                  ? ReaderLinkTarget.score
+                  : ReaderLinkTarget.bookmark,
+              bookmark?.selectionId(score.id) ?? score.id,
+            );
+          }
+        case _ReaderDisplay.scoreTabs:
+          if (_entry case final score?) {
+            _updateScoreTabs([
+              ..._scoreTabIds.where((id) => id != score.id),
+              if (!_scoreTabIds.contains(score.id)) score.id,
+            ]);
+          }
+        case _ReaderDisplay.hideControls:
+          setState(() => _showControls = false);
+        case _ReaderDisplay.gestures:
+          _configureGestures();
+        case _ReaderDisplay.keepAwake:
+          _savePreferences(
+            _preferences.copyWith(
+              left: _preferences.left,
+              center: _preferences.center,
+              right: _preferences.right,
+              keepAwake: !_preferences.keepAwake,
+              showNextTitle: _preferences.showNextTitle,
+            ),
+          );
+        case _ReaderDisplay.nextTitle:
+          _savePreferences(
+            _preferences.copyWith(
+              left: _preferences.left,
+              center: _preferences.center,
+              right: _preferences.right,
+              keepAwake: _preferences.keepAwake,
+              showNextTitle: !_preferences.showNextTitle,
+            ),
+          );
+      }
+    },
+    itemBuilder: (_) => <PopupMenuItem<_ReaderDisplay>>[
+      PopupMenuItem(
+        value: _ReaderDisplay.nowPlaying,
+        enabled: _entry != null,
+        child: const Text('Now playing'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.findInScore,
+        child: Text('Find in score'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.pageNote,
+        enabled: _entry != null,
+        child: Text(
+          _entry?.pageNotes.containsKey(_page) == true
+              ? 'Open page note'
+              : 'Add page note',
+        ),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.pageActions,
+        enabled: _entry != null,
+        child: const Text('On-page actions'),
+      ),
+      if (ScoreAudioSession.supported)
+        PopupMenuItem(
+          value: _ReaderDisplay.scoreAudio,
+          enabled: _entry != null,
+          child: const Text('Linked audio'),
+        ),
+      if (_supportsSharedImport)
+        PopupMenuItem(
+          value: _ReaderDisplay.practiceRecordings,
+          enabled: _entry != null,
+          child: const Text('Practice recordings'),
+        ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.practiceActivity,
+        child: Text('Practice activity'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.restrictions,
+        child: Text('Shared-device restrictions'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.support,
+        child: Text(ReaderText.help.of(context)),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.language,
+        child: Text('App language'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.profiles,
+        child: Text('Settings profiles'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.metadataSymbols,
+        child: Text('Metadata symbols'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.themeOptions,
+        child: Text('Theme and menus'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.maintenance,
+        child: Text('Maintenance and reset'),
+      ),
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+        const PopupMenuItem(
+          value: _ReaderDisplay.appIcon,
+          child: Text('Home screen icon'),
+        ),
+      if (ScoreAudioSession.supported)
+        const PopupMenuItem(
+          value: _ReaderDisplay.metronome,
+          child: Text('Metronome'),
+        ),
+      if (ScoreAudioSession.supported)
+        const PopupMenuItem(
+          value: _ReaderDisplay.tuner,
+          child: Text('Pitch pipe & tuner'),
+        ),
+      if (ScoreAudioSession.supported)
+        const PopupMenuItem(
+          value: _ReaderDisplay.piano,
+          child: Text('Piano and MIDI synthesizer'),
+        ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.inputShortcuts,
+        child: Text('Input shortcuts'),
+      ),
+      if (_supportsSharedImport)
+        PopupMenuItem(
+          value: _ReaderDisplay.faceTurns,
+          child: Text(
+            _faceTurns == null
+                ? 'Head gesture page turns'
+                : 'Stop head gesture page turns',
+          ),
+        ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.copyMeasure,
+        child: Text('Copy measure from PDF'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.pasteMeasure,
+        enabled: _measureClipboard != null && _activeInkLayer != null,
+        child: const Text('Paste measure'),
+      ),
+      if (_supportsSharedImport)
+        const PopupMenuItem(
+          value: _ReaderDisplay.midiDevices,
+          child: Text('Pedals and MIDI devices'),
+        ),
+      if (ScoreAudioSession.supported)
+        PopupMenuItem(
+          value: _ReaderDisplay.midiAutomation,
+          enabled: _entry != null,
+          child: const Text('MIDI score automation'),
+        ),
+      if (!kIsWeb)
+        const PopupMenuItem(
+          value: _ReaderDisplay.ensemble,
+          child: Text('Ensemble sync'),
+        ),
+      if (_supportsSharedImport)
+        PopupMenuItem(
+          value: _ReaderDisplay.scoreWindow,
+          enabled: _file != null,
+          child: const Text('Open score in another window'),
+        ),
+      if (_supportsSharedImport)
+        PopupMenuItem(
+          value: _ReaderDisplay.presentation,
+          enabled: _file != null || _presenting,
+          child: Text(
+            _presenting
+                ? 'Stop external display'
+                : 'Present on external display',
+          ),
+        ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.appearance,
+        child: Text('Reading appearance'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.accessibility,
+        child: Text('Accessible reader controls'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.reflow,
+        child: Text('Score reflow'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.panelOptions,
+        child: Text('Sidebar and lists'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.embeddedPdf,
+        child: Text('Embedded PDF content'),
+      ),
+      const PopupMenuItem(value: _ReaderDisplay.fit, child: Text('Fit page')),
+      PopupMenuItem(
+        value: _ReaderDisplay.fittingMode,
+        child: Text('Page fitting · ${_preferences.pageFit.label}'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.zoomIn,
+        enabled: !_preferences.halfPageTurns,
+        child: const Text('Zoom in'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.zoomOut,
+        enabled: !_preferences.halfPageTurns,
+        child: const Text('Zoom out'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.previousPage,
+        enabled: _previousPage != null,
+        child: const Text('Jump back to previous page'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.previousScore,
+        enabled: _previousItem != null,
+        child: const Text('Return to previous score'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.bookmarks,
+        enabled: _entry != null,
+        child: const Text('Bookmarks'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.jumpLinks,
+        enabled: _entry != null,
+        child: const Text('Repeat & coda links'),
+      ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.halfTurns,
+        checked: _preferences.halfPageTurns,
+        child: const Text('Half-page turns'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.halfSplit,
+        enabled: _preferences.halfPageTurns && _page < _lastPage,
+        child: const Text('Adjust current page split'),
+      ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.halfIndicator,
+        checked: _preferences.halfPageIndicator,
+        child: const Text('Show half-page indicator'),
+      ),
+      if (_preferences.pageFit == ReaderPageFit.standard)
+        CheckedPopupMenuItem(
+          value: _ReaderDisplay.landscapeWidth,
+          checked: _preferences.landscapeWidth,
+          child: const Text('Fit width in landscape'),
+        ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.spreads,
+        checked: _preferences.spreadStep > 0,
+        child: const Text('Two-page layout'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.performance,
+        child: Text('Performance mode'),
+      ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.scoreTabs,
+        enabled: _entry != null && !_savingTabs,
+        checked: _scoreTabIds.contains(_entry?.id),
+        child: const Text('Keep score in tabs'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.exportPdf,
+        enabled: _file != null,
+        child: const Text('Share or print PDF'),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.crop,
+        enabled: _entry != null,
+        child: const Text('Crop and straighten'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.drawingSettings,
+        child: Text('Drawing presets and stylus'),
+      ),
+      if (_library.storage.persistent)
+        PopupMenuItem(
+          value: _ReaderDisplay.shareScorePackage,
+          enabled: _entry != null,
+          child: Text(
+            _itemBookmark == null
+                ? 'Share editable score'
+                : 'Share editable excerpt',
+          ),
+        ),
+      PopupMenuItem(
+        value: _ReaderDisplay.shareScoreLink,
+        enabled: _entry != null,
+        child: Text(
+          _itemBookmark == null ? 'Copy score link' : 'Copy bookmark link',
+        ),
+      ),
+      PopupMenuItem(
+        value: _ReaderDisplay.hideControls,
+        enabled:
+            !_inking &&
+            [
+              _preferences.left,
+              _preferences.center,
+              _preferences.right,
+            ].contains(ReaderTapAction.controls),
+        child: const Text('Hide controls'),
+      ),
+      const PopupMenuItem(
+        value: _ReaderDisplay.gestures,
+        child: Text('Reader gestures'),
+      ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.keepAwake,
+        checked: _preferences.keepAwake,
+        child: const Text('Keep screen awake'),
+      ),
+      CheckedPopupMenuItem(
+        value: _ReaderDisplay.nextTitle,
+        checked: _preferences.showNextTitle,
+        child: const Text('Show next score title'),
+      ),
+    ].where((item) => _readerActionAllowed(item.value)).toList(),
+  );
+
   Widget _performanceBar() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 12),
     child: Row(
@@ -5754,6 +5847,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.onPinScore,
     required this.compact,
     required this.metadataIconKeys,
+    required this.focusSearch,
   });
 
   final List<ScoreEntry> scores;
@@ -5768,6 +5862,7 @@ class _LibraryScreen extends StatefulWidget {
   final Future<void> Function(String) onPinScore;
   final bool compact;
   final Map<String, String> metadataIconKeys;
+  final bool focusSearch;
 
   @override
   State<_LibraryScreen> createState() => _LibraryScreenState();
@@ -6226,6 +6321,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   TextField(
+                    autofocus: widget.focusSearch,
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.search),
                       labelText: ReaderText.search.of(context),
@@ -6235,30 +6331,27 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButton<String>(
-                    isExpanded: true,
-                    value: _browseBy,
-                    items: [
-                      for (final mode in ['Recent', 'Title', ..._fields.keys])
-                        DropdownMenuItem(
-                          value: mode,
-                          child: Row(
-                            children: [
-                              if (metadataSymbols[widget
-                                      .metadataIconKeys[_fields[mode]]]
-                                  case final icon?) ...[
-                                Icon(icon, size: 20),
-                                const SizedBox(width: 8),
-                              ],
-                              Text('Browse by $mode'),
-                            ],
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      spacing: 6,
+                      children: [
+                        for (final mode in ['Recent', 'Title', ..._fields.keys])
+                          ChoiceChip(
+                            avatar: switch (metadataSymbols[widget
+                                .metadataIconKeys[_fields[mode]]]) {
+                              final IconData icon => Icon(icon, size: 16),
+                              null => null,
+                            },
+                            selected: _browseBy == mode,
+                            label: Text(mode),
+                            onSelected: (_) => setState(() {
+                              _browseBy = mode;
+                              _category = null;
+                            }),
                           ),
-                        ),
-                    ],
-                    onChanged: (value) => setState(() {
-                      _browseBy = value ?? 'Recent';
-                      _category = null;
-                    }),
+                      ],
+                    ),
                   ),
                   if (categories.isNotEmpty)
                     DropdownButton<String>(
