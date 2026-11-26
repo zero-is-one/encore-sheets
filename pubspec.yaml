@@ -39,3 +39,6 @@ flutter:
     - assets/first_light.pdf
     - assets/NotoSans-Regular.ttf
     - assets/NotoSans-OFL.txt
+    - assets/brand/app-icon-classic.png
+    - assets/brand/app-icon-midnight.png
+    - assets/brand/app-icon-paper.png

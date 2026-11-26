@@ -11,19 +11,23 @@ Future<void> chooseLauncherIcon(BuildContext context) async {
       builder: (dialog) => SimpleDialog(
         title: const Text('Home screen icon'),
         children: [
-          for (final (id, label, icon, color) in const [
-            ('classic', 'Classic', Icons.library_music, Color(0xff2e3a36)),
-            ('midnight', 'Midnight', Icons.music_note, Color(0xff253653)),
-            ('paper', 'Paper', Icons.description, Color(0xff593b35)),
+          for (final (id, label, asset) in const [
+            ('classic', 'Classic', 'assets/brand/app-icon-classic.png'),
+            ('midnight', 'Midnight', 'assets/brand/app-icon-midnight.png'),
+            ('paper', 'Paper', 'assets/brand/app-icon-paper.png'),
           ])
             SimpleDialogOption(
               onPressed: () => Navigator.pop(dialog, id),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    backgroundColor: color,
-                    foregroundColor: Colors.white,
-                    child: Icon(icon),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      asset,
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(child: Text(label)),
