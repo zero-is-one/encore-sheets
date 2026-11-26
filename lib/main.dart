@@ -59,6 +59,7 @@ import 'practice_goals.dart';
 import 'face_page_turn.dart';
 import 'measure_clipboard.dart';
 import 'quick_reader_tools.dart';
+import 'settings_profiles.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -93,6 +94,7 @@ enum _ReaderDisplay {
   restrictions,
   support,
   language,
+  profiles,
   metronome,
   tuner,
   piano,
@@ -2065,6 +2067,50 @@ class _ReaderState extends State<Reader> {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save the language setting.')),
+        );
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _showSettingsProfiles() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final data = await _library.storage.readPreferences();
+      if (!mounted) return;
+      final profile = await showDialog<SettingsProfile>(
+        context: context,
+        builder: (_) => SettingsProfilesDialog(
+          saved: readSettingsProfiles(data['settingsProfiles']),
+          current: (reader: _preferences, drawing: _drawing),
+          save: (profiles) => _library.updatePreferences({
+            'settingsProfiles': writeSettingsProfiles(profiles),
+          }),
+        ),
+      );
+      if (!mounted || profile == null) return;
+      await _library.updatePreferences({
+        ...profile.reader.toJson(),
+        'drawingSettings': profile.drawing.toJson(),
+      });
+      if (!mounted) return;
+      setState(() {
+        _preferences = profile.reader;
+        _drawing = profile.drawing;
+        _halfPreview = false;
+      });
+      _metronome?.soft = profile.reader.softMetronome;
+      _keepScreenAwake(_performance || _preferences.keepAwake);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fit();
+      });
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not use these settings profiles.'),
+          ),
         );
     } finally {
       _finishPicking();
@@ -4552,6 +4598,8 @@ class _ReaderState extends State<Reader> {
                         _showSupport();
                       case _ReaderDisplay.language:
                         _chooseLanguage();
+                      case _ReaderDisplay.profiles:
+                        _showSettingsProfiles();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4743,6 +4791,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.language,
                       child: Text('App language'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.profiles,
+                      child: Text('Settings profiles'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
