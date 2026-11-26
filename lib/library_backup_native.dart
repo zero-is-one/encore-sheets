@@ -16,6 +16,159 @@ Map<String, dynamic> _catalog(
   if (preferences != null) 'preferences': preferences,
 };
 
+Map<String, dynamic> _decodeCatalog(String contents) {
+  try {
+    final catalog = jsonDecode(contents) as Map<String, dynamic>;
+    final scores = (catalog['scores'] as List)
+        .map((row) => ScoreEntry.fromJson(row as Map<String, dynamic>))
+        .toList();
+    final setlists = (catalog['setlists'] as List)
+        .map((row) => Setlist.fromJson(row as Map<String, dynamic>))
+        .toList();
+    final safeId = RegExp(r'^[a-zA-Z0-9-]{1,80}$');
+    if (scores.any((score) => !safeId.hasMatch(score.id) || score.page < 1) ||
+        scores.map((score) => score.id).toSet().length != scores.length ||
+        setlists.map((list) => list.id).toSet().length != setlists.length ||
+        catalog['preferences'] != null &&
+            catalog['preferences'] is! Map<String, dynamic>) {
+      throw const FormatException('Invalid library catalog');
+    }
+    return catalog;
+  } on TypeError {
+    throw const FormatException('Invalid library catalog');
+  }
+}
+
+String _catalogDigest(String contents) =>
+    sha256.convert(utf8.encode(contents)).toString();
+
+String _snapshotContents(String catalog) => jsonEncode({
+  'version': 1,
+  'catalog': catalog,
+  'sha256': _catalogDigest(catalog),
+});
+
+String? _verifiedSnapshot(File file) {
+  if (!file.existsSync()) return null;
+  try {
+    final envelope = jsonDecode(file.readAsStringSync());
+    if (envelope
+        case {
+          'version': 1,
+          'catalog': final String data,
+          'sha256': final String digest,
+        }
+        when _catalogDigest(data) == digest) {
+      _decodeCatalog(data);
+      return data;
+    }
+  } on FormatException {
+    // The other generation may still be intact.
+  } on FileSystemException {
+    // A missing or unreadable snapshot cannot be used.
+  }
+  return null;
+}
+
+void _atomicCatalogWrite(File file, String contents) {
+  final staging = file.parent.createTempSync('.catalog-');
+  try {
+    File('${staging.path}/data')
+      ..writeAsStringSync(contents, flush: true)
+      ..renameSync(file.path);
+  } finally {
+    try {
+      staging.deleteSync(recursive: true);
+    } on FileSystemException {
+      // A completed rename remains committed.
+    }
+  }
+}
+
+void _commitCatalog(String root, Map<String, dynamic> catalog) {
+  final data = jsonEncode(catalog);
+  final latest = File('$root/catalog-recovery.json');
+  final prior = File('$root/catalog-recovery-previous.json');
+  _atomicCatalogWrite(File('$root/catalog.json'), data);
+  try {
+    if (_verifiedSnapshot(latest) != null) {
+      _atomicCatalogWrite(prior, latest.readAsStringSync());
+    }
+    _atomicCatalogWrite(latest, _snapshotContents(data));
+  } on FileSystemException {
+    // The live catalog is already committed. Keep the last verified snapshot.
+  }
+}
+
+void _seedSnapshot(String root) {
+  final live = File('$root/catalog.json');
+  final snapshot = File('$root/catalog-recovery.json');
+  if (!live.existsSync() || snapshot.existsSync()) return;
+  try {
+    final data = live.readAsStringSync();
+    _decodeCatalog(data);
+    _atomicCatalogWrite(snapshot, _snapshotContents(data));
+  } on FormatException {
+    // Never create a recovery snapshot from a corrupt catalog.
+  } on FileSystemException {
+    // The app can still open the live catalog.
+  }
+}
+
+Map<String, dynamic>? _recoverCatalog(String root) {
+  final live = File('$root/catalog.json');
+  // A write may have repaired the live file since the caller checked it.
+  if (live.existsSync()) {
+    try {
+      return _decodeCatalog(live.readAsStringSync());
+    } on FormatException {
+      // Check the recovery copies below.
+    } on FileSystemException {
+      // Check the recovery copies if the live file cannot be read.
+    }
+  }
+  for (final name in [
+    'catalog-recovery.json',
+    'catalog-recovery-previous.json',
+  ]) {
+    final contents = _verifiedSnapshot(File('$root/$name'));
+    if (contents == null) continue;
+    final catalog = _decodeCatalog(contents);
+    final scores = (catalog['scores'] as List).map(
+      (row) => ScoreEntry.fromJson(row as Map<String, dynamic>),
+    );
+    if (scores.any(
+      (score) => !File('$root/${score.storedPdfId}.pdf').existsSync(),
+    )) {
+      continue;
+    }
+    _atomicCatalogWrite(live, contents);
+    return catalog;
+  }
+  if (live.existsSync() ||
+      File('$root/catalog-recovery.json').existsSync() ||
+      File('$root/catalog-recovery-previous.json').existsSync()) {
+    throw const LibraryCatalogRecoveryRequired();
+  }
+  return null;
+}
+
+const _deviceOnlyPreferences = {
+  'readerRestrictions',
+  'assistantConnection',
+  'librarySyncState',
+  'localScoreAudio',
+  'practiceRecordings',
+  'audioPageCues',
+};
+
+Map<String, dynamic> _portablePreferences(Map<String, dynamic> source) => {
+  for (final row in source.entries)
+    if (!_deviceOnlyPreferences.contains(row.key) &&
+        !row.key.startsWith('sharedLibrarySync-'))
+      row.key: row.value,
+};
+
 void _exportBackup(
   String root,
   String path,
@@ -33,16 +186,9 @@ void _exportBackup(
         jsonEncode({
           'format': _archiveFormat(kind),
           'version': 1,
+          if (preferences != null) 'preferencesVersion': 1,
           if (!includeScores) 'referencesOnly': true,
-          ..._catalog(
-            scores,
-            setlists,
-            preferences: preferences == null
-                ? null
-                : (Map.of(preferences)
-                    ..remove('readerRestrictions')
-                    ..remove('assistantConnection')),
-          ),
+          ..._catalog(scores, setlists, preferences: preferences),
         }),
       ),
     );
@@ -68,11 +214,24 @@ void _exportBackup(
   List<Setlist> existingSetlists, {
   LibraryArchive kind = LibraryArchive.library,
   required Map<String, dynamic> existingPreferences,
+  required bool restoreSettings,
+  required bool recoveryRequired,
 }) {
   final input = InputFileStream(path);
   final written = <File>[];
   try {
-    final archive = ZipDecoder().decodeStream(input, verify: true);
+    final names = <String>{};
+    var duplicate = false;
+    final archive = ZipDecoder().decodeStream(
+      input,
+      verify: true,
+      callback: (entry) {
+        if (!names.add(entry.name)) duplicate = true;
+      },
+    );
+    if (duplicate) {
+      throw const FormatException('Duplicate backup entries');
+    }
     final manifest = _jsonEntry(archive.find('manifest.json'));
     if (manifest['format'] != _archiveFormat(kind) ||
         manifest['version'] != 1) {
@@ -90,6 +249,9 @@ void _exportBackup(
     if (savedPreferences != null && savedPreferences is! Map<String, dynamic>) {
       throw const FormatException('Invalid backup preferences');
     }
+    if (manifest['preferencesVersion'] case final version? when version != 1) {
+      throw const FormatException('Unsupported backup preferences version');
+    }
     if (kind == LibraryArchive.score &&
         (sourceScores.length != 1 ||
             sourceSetlists.isNotEmpty ||
@@ -105,6 +267,11 @@ void _exportBackup(
     final referencesOnly =
         kind != LibraryArchive.score && manifest['referencesOnly'] == true;
     final metadataOnly = kind == LibraryArchive.library && referencesOnly;
+    if (recoveryRequired && metadataOnly) {
+      throw const FormatException(
+        'A full library backup is required for recovery',
+      );
+    }
     final sourceIds = sourceScores.map((score) => score.id).toSet();
     final validSelections = {
       ...sourceIds,
@@ -253,11 +420,13 @@ void _exportBackup(
     }
     final listIds = existingSetlists.map((setlist) => setlist.id).toSet();
     final setlists = <Setlist>[];
+    final mappedLists = <String, String>{};
     for (final old in sourceSetlists) {
       String id;
       do {
         id = '${sequence++}';
       } while (!listIds.add(id));
+      mappedLists[old.id] = id;
       final unresolved = <String, String>{};
       final names = <String, String>{};
       final selections = <String>[];
@@ -281,63 +450,73 @@ void _exportBackup(
       );
     }
 
-    final staged = File('$root/catalog.json.tmp');
-    final preferences = {
-      if (kind == LibraryArchive.library &&
-          existingScores.isEmpty &&
-          savedPreferences is Map)
-        ...(Map<String, dynamic>.from(savedPreferences)
-          ..remove('readerRestrictions')
-          ..remove('assistantConnection')),
-      ...existingPreferences,
-      if (metadataOnly && savedPreferences is Map)
-        for (final key in savedPreferences.keys.whereType<String>())
-          if (!const {
-            'scoreTabs',
-            'scoreCollections',
-            'personalStamps',
-            'librarySyncState',
-            'localScoreAudio',
-            'practiceRecordings',
-            'readerRestrictions',
-            'assistantConnection',
-          }.contains(key))
-            key: savedPreferences[key],
-    };
-    if (kind == LibraryArchive.library && savedPreferences is Map) {
+    final preferences = {...existingPreferences};
+    if (kind == LibraryArchive.library &&
+        restoreSettings &&
+        savedPreferences is Map<String, dynamic>) {
+      final portable = _portablePreferences(savedPreferences);
       Iterable<String> values(Object? value) =>
           value is List ? value.whereType<String>() : const [];
+      preferences.addAll(portable);
       for (final key in ['scoreCollections', 'personalStamps']) {
         preferences[key] = {
           ...values(existingPreferences[key]),
-          ...values(savedPreferences[key]),
+          ...values(portable[key]),
         }.toList();
       }
       preferences['scoreTabs'] = {
         ...values(existingPreferences['scoreTabs']),
-        ...values(savedPreferences['scoreTabs'])
+        ...values(portable['scoreTabs'])
             .map((id) => mapped[id])
             .whereType<String>(),
       }.toList();
+      if (portable['setlistPlayHistory'] case final Map saved) {
+        final history = <String, dynamic>{
+          ...?existingPreferences['setlistPlayHistory']
+              as Map<String, dynamic>?,
+        };
+        for (final entry in saved.entries) {
+          if (entry.key is! String || entry.value is! int) continue;
+          final parts = (entry.key as String).split('/');
+          final list = mappedLists[parts.first];
+          if (list == null) continue;
+          if (parts.length == 1) history[list] = entry.value;
+          if (mapped[parts.last] case final selection? when parts.length == 2) {
+            history['$list/$selection'] = entry.value;
+          }
+        }
+        preferences['setlistPlayHistory'] = history;
+      }
+      if (portable['practiceActivity'] case final List saved) {
+        final existing = existingPreferences['practiceActivity'];
+        preferences['practiceActivity'] = [
+          if (existing is List) ...existing,
+          for (final row in saved)
+            if (row case {'id': final String id, 'kind': final String kind})
+              if ((kind == 'setlist' ? mappedLists[id] : mapped[id])
+                  case final target?)
+                {...row as Map<String, dynamic>, 'id': target},
+        ];
+      }
     }
     final replacing = metadataOnly
         ? scores.map((score) => score.id).toSet()
         : const <String>{};
-    written.add(staged);
-    staged.writeAsStringSync(
-      jsonEncode(
-        _catalog(
-          [
-            ...existingScores.where((score) => !replacing.contains(score.id)),
-            ...scores,
-          ],
-          [...existingSetlists, ...setlists],
-          preferences: preferences,
-        ),
+    final live = File('$root/catalog.json');
+    if (recoveryRequired && live.existsSync()) {
+      live.copySync('$root/catalog-damaged-${ScoreLibrary.newRecordId()}.json');
+    }
+    _commitCatalog(
+      root,
+      _catalog(
+        [
+          ...existingScores.where((score) => !replacing.contains(score.id)),
+          ...scores,
+        ],
+        [...existingSetlists, ...setlists],
+        preferences: preferences,
       ),
-      flush: true,
     );
-    staged.renameSync('$root/catalog.json');
     return (scores: scores, setlists: setlists);
   } catch (_) {
     for (final file in written.reversed) {

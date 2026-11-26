@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -8,6 +9,126 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('automatically recovers the latest verified catalog or its prior generation', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'encore_catalog_recovery',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    ScoreLibrary open() => ScoreLibrary(NativeLibraryStorage(directory: root));
+    final original = open();
+    final (score, _) = await original.import(XFile('assets/first_light.pdf'));
+    await original.saveSetlist(Setlist('program', 'Program', [score.id]));
+    await original.updatePreferences({'landscapeWidth': true});
+
+    final catalog = File('${root.path}/scores/catalog.json');
+    final latest = File('${root.path}/scores/catalog-recovery.json');
+    await catalog.writeAsString('{"scores":[],"setlists":"damaged"}');
+    final recovered = open();
+    await recovered.load();
+    expect(recovered.lookup(score.id)?.title, score.title);
+    expect(recovered.setlists.single.scores, [score.id]);
+    expect(
+      (await recovered.storage.readPreferences())['landscapeWidth'],
+      isTrue,
+    );
+    expect(jsonDecode(await catalog.readAsString())['scores'], hasLength(1));
+
+    final tampered =
+        jsonDecode(await latest.readAsString()) as Map<String, dynamic>;
+    tampered['catalog'] = '{"scores":[],"setlists":[]}';
+    await latest.writeAsString(jsonEncode(tampered));
+    await catalog.delete();
+    final fallback = open();
+    await fallback.load();
+    expect(fallback.setlists.single.scores, [score.id]);
+    expect(fallback.lookup(score.id), isNotNull);
+    expect(
+      (await fallback.storage.readPreferences())['landscapeWidth'],
+      isNull,
+    );
+    final fullBackup = await fallback.createBackup();
+    final metadataBackup = await fallback.createBackup(includeScores: false);
+    await catalog.writeAsString('broken catalog');
+    final prior = File('${root.path}/scores/catalog-recovery-previous.json');
+    await prior.writeAsString('bad checksum envelope');
+    final manual = open();
+    await expectLater(
+      manual.load(),
+      throwsA(isA<LibraryCatalogRecoveryRequired>()),
+    );
+    await expectLater(
+      manual.restoreBackup(metadataBackup),
+      throwsFormatException,
+    );
+    expect(await catalog.readAsString(), 'broken catalog');
+    expect(await manual.restoreBackup(fullBackup), (scores: 1, setlists: 1));
+    await manual.load();
+    expect(manual.setlists.single.scores, [manual.recent.single.id]);
+    expect(
+      await Directory('${root.path}/scores')
+          .list()
+          .any((entry) => entry.path.contains('catalog-damaged-')),
+      isTrue,
+    );
+  });
+
+  test(
+    'backup settings restore is optional and device-only settings stay local',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'encore_backup_settings',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final source = ScoreLibrary(NativeLibraryStorage(directory: root));
+      await source.updatePreferences({
+        'landscapeWidth': true,
+        'readerLanguage': 'fr',
+        'assistantConnection': {'token': 'secret'},
+        'sharedLibrarySync-folder': {'device': 'source-device'},
+      });
+      final backup = await source.createBackup();
+      final archive = ZipDecoder().decodeBytes(await backup.readAsBytes());
+      final manifest = jsonDecode(
+        utf8.decode(archive.find('manifest.json')!.content),
+      ) as Map<String, dynamic>;
+      expect(manifest['preferencesVersion'], 1);
+      expect(manifest['preferences'], {
+        'landscapeWidth': true,
+        'readerLanguage': 'fr',
+      });
+
+      final target = ScoreLibrary(
+        NativeLibraryStorage(directory: Directory('${root.path}/target')),
+      );
+      await target.updatePreferences({
+        'readerLanguage': 'en',
+        'assistantConnection': {'token': 'local-token'},
+      });
+      await target.restoreBackup(backup, restoreSettings: false);
+      expect((await target.storage.readPreferences())['readerLanguage'], 'en');
+      await target.restoreBackup(backup);
+      final preferences = await target.storage.readPreferences();
+      expect(preferences['readerLanguage'], 'fr');
+      expect(preferences['landscapeWidth'], isTrue);
+      expect(preferences['assistantConnection'], {'token': 'local-token'});
+      expect(preferences['sharedLibrarySync-folder'], isNull);
+
+      final legacy = Archive()
+        ..add(
+          ArchiveFile.string(
+            'manifest.json',
+            jsonEncode(manifest..remove('preferencesVersion')),
+          ),
+        );
+      final legacyFile = await File('${root.path}/legacy.zip')
+          .writeAsBytes(ZipEncoder().encode(legacy));
+      expect(await target.restoreBackup(XFile(legacyFile.path)), (
+        scores: 0,
+        setlists: 0,
+      ));
+    },
+  );
+
   test(
     'editable score packages retain and enforce their access deadline',
     () async {

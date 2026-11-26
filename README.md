@@ -85,6 +85,18 @@ flutter test
 The library also imports scanned pages and creates PDFs from templates or
 from TXT, RTF, DOC, and DOCX documents.
 
+## Backup and recovery
+
+Use **Score library → Tools → Backup & restore** to export a full library ZIP
+with PDFs, annotations, setlists, and portable app settings. During restore,
+choose whether to apply the saved settings. Device connections and linked audio
+files stay on the original device.
+
+EncoreSheets keeps two verified local catalog snapshots and uses the newest
+usable one if the live catalog is missing or unreadable. These snapshots cover
+catalog data and settings. Keep an exported full ZIP to recover missing score
+files or move to another device.
+
 ## Desktop backup utility
 
 Use [the backup utility](tools/library_backups.py) with Python 3 on Windows,

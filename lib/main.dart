@@ -212,7 +212,7 @@ class _ReaderState extends State<Reader> {
   final _ink = <int, PageInk>{};
   final _focus = FocusNode(debugLabel: 'Score reader');
   late final _library = ScoreLibrary(LibraryStorage.create());
-  late final _libraryReady = _library.load();
+  late Future<void> _libraryReady = _library.load();
   ScoreEntry? _entry;
   ScoreBookmark? _itemBookmark;
   XFile? _file;
@@ -1520,6 +1520,15 @@ class _ReaderState extends State<Reader> {
         );
       } else {
         await _openLibraryScore(_library.lookup(result)!, queue: selectedQueue);
+      }
+    } on LibraryCatalogRecoveryRequired {
+      if (!mounted || _restricted(RestrictedTool.transfers)) return;
+      final restored = await _openReaderPanel<bool>(
+        (_) => LibraryBackupScreen(library: _library, recoveryRequired: true),
+      );
+      if (restored == true && mounted) {
+        _libraryReady = _library.load();
+        await _restorePreferences();
       }
     } catch (_) {
       if (mounted) {

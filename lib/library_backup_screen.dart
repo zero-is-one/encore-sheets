@@ -7,9 +7,14 @@ import 'package:share_plus/share_plus.dart';
 import 'score_library.dart';
 
 class LibraryBackupScreen extends StatefulWidget {
-  const LibraryBackupScreen({super.key, required this.library});
+  const LibraryBackupScreen({
+    super.key,
+    required this.library,
+    this.recoveryRequired = false,
+  });
 
   final ScoreLibrary library;
+  final bool recoveryRequired;
 
   @override
   State<LibraryBackupScreen> createState() => _LibraryBackupScreenState();
@@ -73,9 +78,8 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
 
   Future<String?> _restore() async {
     final source = await openFile(acceptedTypeGroups: const [_zip]);
-    if (source == null) return null;
-    final result = await widget.library.restoreBackup(source);
-    return 'Restored data for ${result.scores} scores and ${result.setlists} setlists.';
+    if (source == null || !mounted) return null;
+    return _restoreFrom(source, 'Restore backup?');
   }
 
   Future<String?> _recoverSnapshot() async {
@@ -83,27 +87,53 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
     if (!mounted) return null;
     if (snapshot == null)
       return 'Create a backup to save a local recovery snapshot.';
-    final confirmed = await showDialog<bool>(
+    return _restoreFrom(snapshot, 'Restore latest local backup?');
+  }
+
+  Future<String?> _restoreFrom(XFile source, String title) async {
+    var restoreSettings = true;
+    final restore = await showDialog<bool>(
       context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Restore latest local backup?'),
-        content: const Text(
-          'The saved scores and setlists will be added as copies.',
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Full backups add copies. Metadata-only backups update matching scores.',
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Restore app settings'),
+                value: restoreSettings,
+                onChanged: (value) =>
+                    setDialogState(() => restoreSettings = value ?? false),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Restore'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialog),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Restore copies'),
-          ),
-        ],
       ),
     );
-    if (confirmed != true || !mounted) return null;
-    final restored = await widget.library.restoreBackup(snapshot);
+    if (restore != true || !mounted) return null;
+    final restored = await widget.library.restoreBackup(
+      source,
+      restoreSettings: restoreSettings,
+    );
+    if (widget.recoveryRequired && mounted) {
+      Navigator.pop(context, true);
+      return null;
+    }
     return 'Restored ${restored.scores} scores and ${restored.setlists} setlists.';
   }
 
@@ -116,12 +146,17 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'A backup includes your PDFs, annotations, setlists, libraries, and reader settings.',
+            Text(
+              widget.recoveryRequired
+                  ? 'The library catalog could not be recovered automatically. Restore a full library backup to open the library again.'
+                  : 'A backup includes your PDFs, annotations, setlists, libraries, and reader settings. EncoreSheets keeps two local catalog snapshots for automatic recovery.',
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: _operation == null && widget.library.storage.persistent
+              onPressed:
+                  !widget.recoveryRequired &&
+                      _operation == null &&
+                      widget.library.storage.persistent
                   ? () => _run('Create backup', _export)
                   : null,
               icon: const Icon(Icons.save_alt),
@@ -137,7 +172,10 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _operation == null && widget.library.storage.persistent
+              onPressed:
+                  !widget.recoveryRequired &&
+                      _operation == null &&
+                      widget.library.storage.persistent
                   ? () => _run(
                       'Create metadata backup',
                       () => _export(includeScores: false),

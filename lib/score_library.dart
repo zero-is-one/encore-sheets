@@ -312,6 +312,11 @@ class Setlist {
 
 enum LibraryArchive { library, score, setlist }
 
+class LibraryCatalogRecoveryRequired extends FormatException {
+  const LibraryCatalogRecoveryRequired()
+    : super('No valid library catalog recovery snapshot');
+}
+
 abstract class LibraryStorage {
   static LibraryStorage create() => platform.createStorage();
 
@@ -350,6 +355,7 @@ abstract class LibraryStorage {
     List<ScoreEntry> scores,
     List<Setlist> setlists, {
     LibraryArchive kind = LibraryArchive.library,
+    bool restoreSettings = true,
   });
 }
 
@@ -1036,28 +1042,29 @@ class ScoreLibrary {
     return setlist;
   });
 
-  Future<({int scores, int setlists})> restoreBackup(XFile source) =>
-      _serialize(() async {
-        final restored = await storage.restoreBackup(
-          source,
-          _scores.values.toList(),
-          setlists,
-        );
-        for (final score in restored.scores) {
-          _scores[score.id] = score;
-        }
-        for (final setlist in restored.setlists) {
-          _setlists[setlist.id] = setlist;
-        }
-        final preferences = await storage.readPreferences();
-        if (preferences['scoreCollections'] case final List names) {
-          _collections.addAll(names.whereType<String>());
-        }
-        return (
-          scores: restored.scores.length,
-          setlists: restored.setlists.length,
-        );
-      });
+  Future<({int scores, int setlists})> restoreBackup(
+    XFile source, {
+    bool restoreSettings = true,
+  }) => _serialize(() async {
+    final restored = await storage.restoreBackup(
+      source,
+      _scores.values.toList(),
+      setlists,
+      restoreSettings: restoreSettings,
+    );
+    for (final score in restored.scores) {
+      _scores[score.id] = score;
+    }
+    for (final setlist in restored.setlists) {
+      _setlists[setlist.id] = setlist;
+    }
+    final preferences = await storage.readPreferences();
+    _readSetlistPlayHistory(preferences);
+    if (preferences['scoreCollections'] case final List names) {
+      _collections.addAll(names.whereType<String>());
+    }
+    return (scores: restored.scores.length, setlists: restored.setlists.length);
+  });
 
   Future<Map<String, dynamic>> readInk(String id) =>
       _serialize(() => storage.readInk(id));
@@ -1067,13 +1074,7 @@ class ScoreLibrary {
 
   Future<void> load() async {
     final preferences = await storage.readPreferences();
-    final history = preferences['setlistPlayHistory'];
-    if (history is Map) {
-      for (final row in history.entries) {
-        if (row.key is String && row.value is int)
-          _setlistPlayed[row.key] = row.value;
-      }
-    }
+    _readSetlistPlayHistory(preferences);
     _collections.addAll(
       (preferences['scoreCollections'] as List?)?.whereType<String>() ?? [],
     );
@@ -1082,6 +1083,16 @@ class ScoreLibrary {
     }
     for (final setlist in await storage.readSetlists()) {
       _setlists[setlist.id] = setlist;
+    }
+  }
+
+  void _readSetlistPlayHistory(Map<String, dynamic> preferences) {
+    final history = preferences['setlistPlayHistory'];
+    if (history is Map) {
+      for (final row in history.entries) {
+        if (row.key is String && row.value is int)
+          _setlistPlayed[row.key] = row.value;
+      }
     }
   }
 

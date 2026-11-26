@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:archive/archive_io.dart';
+import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 
@@ -36,8 +37,7 @@ class NativeLibraryStorage implements LibraryStorage {
 
   @override
   Future<void> writePreferences(Map<String, dynamic> preferences) async =>
-      _writeJson(
-        'catalog.json',
+      _saveCatalog(
         _catalog(
           await readIndex(),
           await readSetlists(),
@@ -47,7 +47,11 @@ class NativeLibraryStorage implements LibraryStorage {
 
   Future<Directory> _prepare() async {
     final documents = _override ?? await managedDocuments();
-    return Directory('${documents.path}/scores').create(recursive: true);
+    final root = await Directory('${documents.path}/scores')
+        .create(recursive: true);
+    final path = root.path;
+    await Isolate.run(() => _seedSnapshot(path));
+    return root;
   }
 
   Future<File> _file(String name) async => File('${(await _root).path}/$name');
@@ -72,19 +76,31 @@ class NativeLibraryStorage implements LibraryStorage {
 
   Future<Map<String, dynamic>?> _readCatalog() async {
     final file = await _file('catalog.json');
-    return await file.exists()
-        ? jsonDecode(await file.readAsString()) as Map<String, dynamic>
-        : null;
+    if (await file.exists()) {
+      try {
+        return _decodeCatalog(await file.readAsString());
+      } on FormatException {
+        // Try verified recovery copies before exposing a damaged catalog.
+      } on FileSystemException {
+        // An unreadable catalog may still have a usable recovery copy.
+      }
+    }
+    final root = file.parent.path;
+    return Isolate.run(() => _recoverCatalog(root));
   }
 
   @override
   Future<void> writeCatalog(
     List<ScoreEntry> scores,
     List<Setlist> setlists,
-  ) async => _writeJson(
-    'catalog.json',
+  ) async => _saveCatalog(
     _catalog(scores, setlists, preferences: await readPreferences()),
   );
+
+  Future<void> _saveCatalog(Map<String, dynamic> catalog) async {
+    final root = (await _root).path;
+    await Isolate.run(() => _commitCatalog(root, catalog));
+  }
 
   Future<void> _writeJson(String name, Object value) async {
     final file = await _file(name);
@@ -135,10 +151,7 @@ class NativeLibraryStorage implements LibraryStorage {
     final path =
         '${folder.path}/EncoreSheets-${includeScores ? 'library' : 'metadata'}-${DateTime.now().millisecondsSinceEpoch}.zip';
     final root = (await _root).path;
-    final preferences = (await readPreferences())
-      ..remove('librarySyncState')
-      ..remove('localScoreAudio')
-      ..remove('practiceRecordings');
+    final preferences = _portablePreferences(await readPreferences());
     await Isolate.run(
       () => _exportBackup(
         root,
@@ -241,10 +254,22 @@ class NativeLibraryStorage implements LibraryStorage {
     List<ScoreEntry> scores,
     List<Setlist> setlists, {
     LibraryArchive kind = LibraryArchive.library,
+    bool restoreSettings = true,
   }) async {
     final root = (await _root).path;
     final path = source.path;
-    final existingPreferences = await readPreferences();
+    var recoveryRequired = false;
+    Map<String, dynamic> existingPreferences;
+    try {
+      existingPreferences = await readPreferences();
+    } on LibraryCatalogRecoveryRequired {
+      if (kind != LibraryArchive.library ||
+          scores.isNotEmpty ||
+          setlists.isNotEmpty)
+        rethrow;
+      existingPreferences = {};
+      recoveryRequired = true;
+    }
     return Isolate.run(
       () => _restoreBackup(
         root,
@@ -253,6 +278,8 @@ class NativeLibraryStorage implements LibraryStorage {
         setlists,
         kind: kind,
         existingPreferences: existingPreferences,
+        restoreSettings: restoreSettings,
+        recoveryRequired: recoveryRequired,
       ),
     );
   }

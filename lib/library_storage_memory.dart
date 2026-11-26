@@ -51,6 +51,7 @@ class _MemoryLibraryStorage implements LibraryStorage {
     List<ScoreEntry> scores,
     List<Setlist> setlists, {
     LibraryArchive kind = LibraryArchive.library,
+    bool restoreSettings = true,
   }) => Future.error(
     UnsupportedError('Library restore requires the installed app'),
   );
