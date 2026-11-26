@@ -75,17 +75,7 @@ class NativeLibraryStorage implements LibraryStorage {
       writeCatalog(entries, await readSetlists());
 
   Future<Map<String, dynamic>?> _readCatalog() async {
-    final file = await _file('catalog.json');
-    if (await file.exists()) {
-      try {
-        return _decodeCatalog(await file.readAsString());
-      } on FormatException {
-        // Try verified recovery copies before exposing a damaged catalog.
-      } on FileSystemException {
-        // An unreadable catalog may still have a usable recovery copy.
-      }
-    }
-    final root = file.parent.path;
+    final root = (await _root).path;
     return Isolate.run(() => _recoverCatalog(root));
   }
 

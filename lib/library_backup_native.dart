@@ -73,9 +73,18 @@ String? _verifiedSnapshot(File file) {
 void _atomicCatalogWrite(File file, String contents) {
   final staging = file.parent.createTempSync('.catalog-');
   try {
-    File('${staging.path}/data')
-      ..writeAsStringSync(contents, flush: true)
-      ..renameSync(file.path);
+    final staged = File('${staging.path}/data');
+    staged.writeAsStringSync(contents, flush: true);
+    for (var attempt = 0; ; attempt++) {
+      try {
+        staged.renameSync(file.path);
+        break;
+      } on PathAccessException {
+        if (!Platform.isWindows || attempt >= 4) rethrow;
+        // Windows can deny replacement while a reader has the file open.
+        sleep(const Duration(milliseconds: 20));
+      }
+    }
   } finally {
     try {
       staging.deleteSync(recursive: true);
