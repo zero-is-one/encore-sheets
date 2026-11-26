@@ -62,6 +62,7 @@ import 'quick_reader_tools.dart';
 import 'settings_profiles.dart';
 import 'metadata_symbols.dart';
 import 'share_reader_link.dart';
+import 'reader_appearance_options.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -80,11 +81,6 @@ import 'score_text_search.dart';
 import 'setlists_screen.dart';
 import 'text_annotation_dialog.dart';
 
-const _stand = Color(0xff202a28);
-const _rail = Color(0xff2e3a36);
-const _paper = Color(0xfff0eddf);
-const _brass = Color(0xffe9bd75);
-
 enum _ReaderDisplay {
   nowPlaying,
   findInScore,
@@ -98,6 +94,7 @@ enum _ReaderDisplay {
   language,
   profiles,
   metadataSymbols,
+  themeOptions,
   metronome,
   tuner,
   piano,
@@ -152,6 +149,7 @@ class EncoreSheets extends StatefulWidget {
 
 class _EncoreSheetsState extends State<EncoreSheets> {
   Locale? _locale;
+  ReaderAppearanceOptions _appearance = const ReaderAppearanceOptions();
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -161,16 +159,26 @@ class _EncoreSheetsState extends State<EncoreSheets> {
     supportedLocales: readerLocales,
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: ThemeData(
-      brightness: Brightness.dark,
-      colorScheme: const ColorScheme.dark(
-        primary: _brass,
-        onPrimary: _stand,
-        surface: _rail,
-        onSurface: _paper,
-      ),
-      scaffoldBackgroundColor: _stand,
+      brightness: _appearance.palette.light
+          ? Brightness.light
+          : Brightness.dark,
+      colorScheme:
+          (_appearance.palette.light
+                  ? const ColorScheme.light()
+                  : const ColorScheme.dark())
+              .copyWith(
+                primary: _appearance.palette.accent,
+                onPrimary: _appearance.palette.light
+                    ? Colors.white
+                    : _appearance.backdrop,
+                surface: _appearance.palette.bar,
+                onSurface: _appearance.palette.text,
+              ),
+      iconTheme: IconThemeData(weight: _appearance.boldIcons ? 700 : 400),
+      scaffoldBackgroundColor: _appearance.backdrop,
     ),
     home: Reader(
+      onAppearance: (appearance) => setState(() => _appearance = appearance),
       onLanguage: (language) {
         final resolved = language == null ? null : Locale(language);
         if (_locale != resolved) setState(() => _locale = resolved);
@@ -180,8 +188,9 @@ class _EncoreSheetsState extends State<EncoreSheets> {
 }
 
 class Reader extends StatefulWidget {
-  const Reader({super.key, this.onLanguage});
+  const Reader({super.key, this.onLanguage, this.onAppearance});
   final ValueChanged<String?>? onLanguage;
+  final ValueChanged<ReaderAppearanceOptions>? onAppearance;
 
   @override
   State<Reader> createState() => _ReaderState();
@@ -238,6 +247,12 @@ class _ReaderState extends State<Reader> {
   MeasureClip? _measureClipboard;
   Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
   Map<String, String> _metadataSymbols = {};
+  ReaderAppearanceOptions _appearance = const ReaderAppearanceOptions();
+
+  Color get _stand => _appearance.backdrop;
+  Color get _rail => _appearance.palette.bar;
+  Color get _paper => _appearance.palette.text;
+  Color get _brass => _appearance.palette.accent;
   bool _faceReverse = false;
   double _faceSensitivity = 23;
   ReaderRestrictions? _restrictions;
@@ -422,6 +437,9 @@ class _ReaderState extends State<Reader> {
           _practice.enabled = data['practiceTracking'] == true;
           _quickTools = readQuickReaderTools(data['quickReaderTools']);
           _metadataSymbols = readMetadataSymbols(data['metadataSymbols']);
+          _appearance = ReaderAppearanceOptions.fromJson(
+            data['appearanceOptions'],
+          );
           final language = data['readerLanguage'];
           _language =
               language is String && readerLanguageNames.containsKey(language)
@@ -455,6 +473,8 @@ class _ReaderState extends State<Reader> {
         });
         _listenToMidi();
         widget.onLanguage?.call(_language);
+        widget.onAppearance?.call(_appearance);
+        _applyStatusBar();
         _focusPractice();
         _requestWidgetRefresh();
         if (_preferences.keepAwake) _keepScreenAwake(true);
@@ -1195,7 +1215,8 @@ class _ReaderState extends State<Reader> {
                   ..._scoreTabIds.where((value) => value != id),
                   id,
                 ]),
-                compact: _preferences.compactLibrary,
+                compact:
+                    _preferences.compactLibrary || !_appearance.showMetadata,
                 metadataIconKeys: _metadataSymbols,
               ),
             );
@@ -2142,6 +2163,36 @@ class _ReaderState extends State<Reader> {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save the metadata symbols.')),
+        );
+    }
+  }
+
+  void _applyStatusBar() {
+    if (!_supportsSharedImport) return;
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: [
+          if (_appearance.showStatusBar) SystemUiOverlay.top,
+          SystemUiOverlay.bottom,
+        ],
+      ).catchError((Object _) {}),
+    );
+  }
+
+  Future<void> _changeThemeOptions() async {
+    final result = await chooseReaderAppearance(context, _appearance);
+    if (!mounted || result == null) return;
+    try {
+      await _library.updatePreferences({'appearanceOptions': result.toJson()});
+      if (!mounted) return;
+      setState(() => _appearance = result);
+      widget.onAppearance?.call(result);
+      _applyStatusBar();
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save theme settings.')),
         );
     }
   }
@@ -4045,7 +4096,11 @@ class _ReaderState extends State<Reader> {
               fitMode: PdfFitMode.fit,
               margin: _preferences.pageFit == ReaderPageFit.bestFit ? 3 : 12,
             ),
-      paging: const PdfPaging(duration: Duration(milliseconds: 140)),
+      paging: PdfPaging(
+        duration: _appearance.animateTurns
+            ? const Duration(milliseconds: 140)
+            : Duration.zero,
+      ),
       calculateCurrentPageNumber: _spreadStep == 0
           ? null
           : (visible, pages, controller) {
@@ -4496,7 +4551,10 @@ class _ReaderState extends State<Reader> {
           child: Column(
             children: [
               if (_showControls && !_performance) _header(),
-              if (_showControls && !_performance && _scoreTabIds.isNotEmpty)
+              if (_showControls &&
+                  !_performance &&
+                  _appearance.showTabs &&
+                  _scoreTabIds.isNotEmpty)
                 _scoreTabs(),
               Expanded(
                 key: const ValueKey('score-viewport'),
@@ -4686,6 +4744,8 @@ class _ReaderState extends State<Reader> {
                         _showSettingsProfiles();
                       case _ReaderDisplay.metadataSymbols:
                         _editMetadataSymbols();
+                      case _ReaderDisplay.themeOptions:
+                        _changeThemeOptions();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4896,6 +4956,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.metadataSymbols,
                       child: Text('Metadata symbols'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.themeOptions,
+                      child: Text('Theme and menus'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
