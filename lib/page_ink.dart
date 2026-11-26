@@ -561,6 +561,7 @@ class InkSurface extends StatefulWidget {
     this.tilt = false,
     this.switchTools = true,
     this.autoStylus = false,
+    this.onEditStart,
     this.onStylusStart,
     this.onStylusEnd,
   });
@@ -578,6 +579,7 @@ class InkSurface extends StatefulWidget {
   final bool tilt;
   final bool switchTools;
   final bool autoStylus;
+  final VoidCallback? onEditStart;
   final VoidCallback? onStylusStart;
   final void Function(bool commit)? onStylusEnd;
 
@@ -693,10 +695,12 @@ class _InkSurfaceState extends State<InkSurface> {
                 ? widget.tool
                 : InkTool.pen;
             if (tool == InkTool.text) {
+              widget.onEditStart?.call();
               widget.onTextTap?.call(_point(event, size), size);
               return;
             }
             if (tool == InkTool.selection) {
+              widget.onEditStart?.call();
               _pointer = event.pointer;
               _activeTool = tool;
               widget.ink.beginSelection(
@@ -713,6 +717,7 @@ class _InkSurfaceState extends State<InkSurface> {
               _ => false,
             };
             if (!accepted) return;
+            widget.onEditStart?.call();
             _pointer = event.pointer;
             _activeTool = tool;
             _activeShape = widget.enabled && !erasing ? widget.shape : null;

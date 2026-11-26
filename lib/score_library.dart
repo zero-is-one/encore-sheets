@@ -7,6 +7,7 @@ import 'package:file_selector/file_selector.dart';
 import 'library_sync.dart';
 import 'page_crop.dart';
 import 'program_duration.dart';
+import 'reader_preferences.dart';
 import 'score_action.dart';
 import 'reflow_zones.dart';
 import 'library_storage_memory.dart'
@@ -87,6 +88,7 @@ class ScoreEntry {
     this.pdfSourceId,
     this.deletedAt,
     this.validUntil,
+    this.scrollMode,
   });
 
   factory ScoreEntry.fromJson(Map<String, dynamic> json) => ScoreEntry(
@@ -99,6 +101,7 @@ class ScoreEntry {
       _ => null,
     },
     deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
+    scrollMode: ReaderScrollMode.fromJson(json['scrollMode']),
     validUntil: switch (json['validUntil']) {
       null => null,
       final String value => DateTime.parse(value).toUtc(),
@@ -152,6 +155,7 @@ class ScoreEntry {
   final DateTime openedAt;
   final DateTime? deletedAt;
   final DateTime? validUntil;
+  final ReaderScrollMode? scrollMode;
   bool get expired => validUntil?.isAfter(DateTime.now()) == false;
   final Map<String, String> metadata;
   final List<String> collections;
@@ -186,6 +190,8 @@ class ScoreEntry {
     DateTime? deletedAt,
     bool recover = false,
     DateTime? validUntil,
+    ReaderScrollMode? scrollMode,
+    bool inheritScrollMode = false,
   }) => ScoreEntry(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -204,6 +210,7 @@ class ScoreEntry {
     pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
     validUntil: validUntil ?? this.validUntil,
+    scrollMode: inheritScrollMode ? null : scrollMode ?? this.scrollMode,
   );
 
   Map<String, dynamic> toJson() => {
@@ -214,6 +221,7 @@ class ScoreEntry {
     if (pdfSourceId != null) 'pdfSourceId': pdfSourceId,
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
     if (validUntil != null) 'validUntil': validUntil!.toUtc().toIso8601String(),
+    if (scrollMode != null) 'scrollMode': scrollMode!.name,
     if (metadata.isNotEmpty) 'metadata': metadata,
     if (collections.isNotEmpty) 'collections': collections,
     if (bookmarks.isNotEmpty)

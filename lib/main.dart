@@ -26,6 +26,7 @@ import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
 import 'reader_shortcuts_dialog.dart';
 import 'reader_preferences.dart';
+import 'vertical_score_layout.dart';
 import 'library_backup_screen.dart';
 import 'library_sync.dart';
 import 'assistant_connection.dart';
@@ -122,6 +123,7 @@ enum _ReaderDisplay {
   embeddedPdf,
   fit,
   fittingMode,
+  scrollMode,
   zoomIn,
   zoomOut,
   previousPage,
@@ -223,6 +225,7 @@ class _ReaderState extends State<Reader> {
   double? _seek;
   bool _showControls = true;
   bool _inking = false;
+  int? _annotationPage;
   bool _allowFinger = false;
   bool _picking = false;
   bool _sidebarOpen = false;
@@ -609,9 +612,11 @@ class _ReaderState extends State<Reader> {
         final enabledHalfTurns =
             configured.halfPageTurns && !_preferences.halfPageTurns;
         final fittingChanged = configured.pageFit != _preferences.pageFit;
+        final previousMode = _scrollMode;
         setState(() {
           if (!configured.halfPageTurns) _halfPreview = false;
           _preferences = configured;
+          if (previousMode != _scrollMode) _resetScoreLayout();
         });
         if (enabledHalfTurns) _fit();
         if (fittingChanged) {
@@ -2183,10 +2188,12 @@ class _ReaderState extends State<Reader> {
         'drawingSettings': profile.drawing.toJson(),
       });
       if (!mounted) return;
+      final previousMode = _scrollMode;
       setState(() {
         _preferences = profile.reader;
         _drawing = profile.drawing;
         _halfPreview = false;
+        if (previousMode != _scrollMode) _resetScoreLayout();
       });
       _metronome?.soft = profile.reader.softMetronome;
       _keepScreenAwake(_performance || _preferences.keepAwake);
@@ -2748,10 +2755,11 @@ class _ReaderState extends State<Reader> {
   }
 
   void _togglePerformance() {
-    _ink[_page]?.finish(commit: false);
+    _ink[_annotationPage ?? _page]?.finish(commit: false);
     setState(() {
       _performance = !_performance;
       _inking = false;
+      _annotationPage = null;
       _showControls = true;
     });
     _keepScreenAwake(_performance || _preferences.keepAwake);
@@ -3002,6 +3010,7 @@ class _ReaderState extends State<Reader> {
       _pages = 0;
       _seek = null;
       _inking = false;
+      _annotationPage = null;
       _showControls = !_followingSpread;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3069,12 +3078,16 @@ class _ReaderState extends State<Reader> {
       _go(_page - (_page - _firstPage) % 2 + step * 2);
       return;
     }
+    if (_verticalScrolling && !_inking) {
+      _turnVertical(step);
+      return;
+    }
     if (_spreadStep > 0) {
       _go(_page + step * _spreadStep);
       return;
     }
     if (_readingAtWidth && !_inking && _turnPageSection(step)) return;
-    if (!_preferences.halfPageTurns || _inking) {
+    if (!_halfPageTurns || _inking) {
       _go(_page + step);
       return;
     }
@@ -3091,19 +3104,45 @@ class _ReaderState extends State<Reader> {
   }
 
   int get _spreadStep =>
-      _inking ||
+      _verticalScrolling ||
+          _inking ||
           _itemBookmark != null ||
-          _preferences.halfPageTurns ||
+          _halfPageTurns ||
           _ensemble?.leading == true && _leadingSpread ||
           _followingSpread
       ? 0
       : _preferences.spreadStep;
 
+  ReaderScrollMode get _scrollMode =>
+      _entry?.scrollMode ?? _preferences.scrollMode;
+
+  bool get _verticalScrolling =>
+      _scrollMode != ReaderScrollMode.paged &&
+      !_followingSpread &&
+      !(_ensemble?.leading == true && _leadingSpread);
+
+  bool get _halfPageTurns => !_verticalScrolling && _preferences.halfPageTurns;
+
+  void _resetScoreLayout() {
+    _initialPage = _page;
+    _halfPreview = false;
+    _annotationPage = null;
+    _revision++;
+    _viewer = PdfViewerController();
+    _pages = 0;
+    _seek = null;
+  }
+
   PageCrop? _cropFor(int page) => _entry?.crops[page];
 
   bool _fitCrop(int page, PdfViewerController controller) {
     final crop = _cropFor(page);
-    if (crop == null || _spreadStep > 0 || !controller.isReady) return false;
+    if (crop == null ||
+        _verticalScrolling ||
+        _spreadStep > 0 ||
+        !controller.isReady) {
+      return false;
+    }
     final bounds = crop.pdfBounds(controller.document.pages[page - 1]);
     if (_readingAtWidth) {
       final visible = controller.calcRectForRectInsidePage(
@@ -3130,12 +3169,37 @@ class _ReaderState extends State<Reader> {
   }
 
   bool get _readingAtWidth =>
+      !_verticalScrolling &&
       _spreadStep == 0 &&
-      !_preferences.halfPageTurns &&
+      !_halfPageTurns &&
       (_preferences.pageFit == ReaderPageFit.zoomed ||
           _preferences.pageFit == ReaderPageFit.standard &&
               _preferences.landscapeWidth &&
               MediaQuery.orientationOf(context) == Orientation.landscape);
+
+  void _turnVertical(int step) {
+    final visible = _viewer.visibleRect;
+    final bottom = math.max(
+      0.0,
+      _viewer.layout.documentSize.height - visible.height,
+    );
+    if (step > 0 && visible.top >= bottom - 1 && _hasNextScore) {
+      _nextScore();
+      return;
+    }
+    final target = (visible.top + visible.height * .85 * step).clamp(
+      0.0,
+      bottom,
+    );
+    unawaited(
+      _viewer.goToPosition(
+        documentOffset: Offset(visible.left, target),
+        duration: _appearance.animateTurns
+            ? const Duration(milliseconds: 140)
+            : Duration.zero,
+      ),
+    );
+  }
 
   bool _turnPageSection(int step) {
     final visible = _viewer.visibleRect;
@@ -3161,16 +3225,20 @@ class _ReaderState extends State<Reader> {
     final target = page.clamp(_firstPage, _lastPage);
     if (target == _page) {
       if (_halfPreview) setState(() => _halfPreview = false);
+      if (_verticalScrolling) _positionVerticalPage(_viewer, target);
       return;
     }
-    _ink[_page]?.finish(commit: false);
+    _ink[_annotationPage ?? _page]?.finish(commit: false);
     final wasCropped = _cropFor(_page) != null;
     _previousPage = _page;
     setState(() {
       _page = target;
+      _annotationPage = null;
       _halfPreview = false;
     });
-    if (_spreadStep == 1) {
+    if (_verticalScrolling) {
+      _positionVerticalPage(_viewer, target);
+    } else if (_spreadStep == 1) {
       final viewer = _viewer;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _viewer == viewer && viewer.isReady && _page == target) {
@@ -3961,9 +4029,10 @@ class _ReaderState extends State<Reader> {
 
   void _toggleInk() {
     if (_pages == 0 || _restricted(RestrictedTool.markup)) return;
-    _ink[_page]?.finish(commit: false);
+    _ink[_annotationPage ?? _page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
+      if (!_inking) _annotationPage = null;
       _halfPreview = false;
       _showControls = true;
     });
@@ -4018,7 +4087,9 @@ class _ReaderState extends State<Reader> {
 
   void _fit() {
     if (!_viewer.isReady) return;
-    if (!_fitCrop(_page, _viewer)) {
+    if (_verticalScrolling) {
+      _positionVerticalPage(_viewer, _page, resetZoom: true);
+    } else if (!_fitCrop(_page, _viewer)) {
       if (_readingAtWidth) {
         _viewer.goToPage(
           pageNumber: _page,
@@ -4030,6 +4101,99 @@ class _ReaderState extends State<Reader> {
       }
     }
     _focus.requestFocus();
+  }
+
+  void _positionVerticalPage(
+    PdfViewerController controller,
+    int page, {
+    bool resetZoom = false,
+  }) {
+    final layout = controller.layout;
+    final zoom = resetZoom ? controller.coverScale : controller.currentZoom;
+    final center = resetZoom
+        ? layout.documentSize.width / 2 - controller.viewSize.width / (2 * zoom)
+        : controller.visibleRect.left;
+    unawaited(
+      controller.goToPosition(
+        documentOffset: Offset(
+          center,
+          layout.pageLayouts[page - 1].top - layout.margin,
+        ),
+        zoom: zoom,
+      ),
+    );
+  }
+
+  Future<void> _chooseScrollMode() async {
+    final scoreId = _entry?.id;
+    final selected = await showDialog<(bool, ReaderScrollMode?)>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Scrolling display'),
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+            child: Text('Default for scores'),
+          ),
+          for (final mode in ReaderScrollMode.values)
+            ListTile(
+              title: Text(mode.label),
+              selected: _preferences.scrollMode == mode,
+              onTap: () => Navigator.pop(dialog, (false, mode)),
+            ),
+          if (scoreId != null) ...[
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+              child: Text('Override for this score'),
+            ),
+            ListTile(
+              title: const Text('Use default'),
+              selected: _entry?.scrollMode == null,
+              onTap: () => Navigator.pop(dialog, (true, null)),
+            ),
+            for (final mode in ReaderScrollMode.values)
+              ListTile(
+                title: Text(mode.label),
+                selected: _entry?.scrollMode == mode,
+                onTap: () => Navigator.pop(dialog, (true, mode)),
+              ),
+          ],
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final (override, mode) = selected;
+    if (!override) {
+      if (mode != _preferences.scrollMode) {
+        await _savePreferences(_preferences.copyWith(scrollMode: mode));
+      }
+      return;
+    }
+    if (scoreId == null ||
+        _entry?.id != scoreId ||
+        _entry?.scrollMode == mode) {
+      return;
+    }
+    try {
+      await _library.updateScore(
+        scoreId,
+        (score) =>
+            score.copyWith(scrollMode: mode, inheritScrollMode: mode == null),
+      );
+      if (!mounted || _entry?.id != scoreId) return;
+      final previousMode = _scrollMode;
+      setState(() {
+        _entry = _library.lookup(scoreId);
+        if (previousMode != _scrollMode) _resetScoreLayout();
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the score display.')),
+        );
+      }
+    }
   }
 
   Future<void> _choosePageFit() async {
@@ -4175,7 +4339,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Widget? _previewBand() {
-    if (!_preferences.halfPageTurns ||
+    if (!_halfPageTurns ||
         _inking ||
         !_viewer.isReady ||
         _pages == 0 ||
@@ -4220,9 +4384,21 @@ class _ReaderState extends State<Reader> {
   Widget _score() {
     final revision = _revision;
     final pageBeforeResize = _page;
+    final vertical = _verticalScrolling;
+    final scrollLayout = SequentialPagesLayout(
+      fitMode: _scrollMode == ReaderScrollMode.fitWidth
+          ? PdfFitMode.fill
+          : PdfFitMode.fit,
+      margin: 12,
+    );
+    final item = _itemBookmark;
     final params = PdfViewerParams(
       backgroundColor: _stand,
-      layoutStrategy: _spreadStep > 0
+      layoutStrategy: vertical
+          ? item != null && item.endPage != null
+                ? VerticalExcerptLayout(scrollLayout, item.page, item.endPage!)
+                : scrollLayout
+          : _spreadStep > 0
           ? FacingPagesLayout(
               coverPage: _spreadStep == 1 && _page.isEven,
               fitMode: PdfFitMode.fit,
@@ -4235,12 +4411,28 @@ class _ReaderState extends State<Reader> {
               fitMode: PdfFitMode.fit,
               margin: _preferences.pageFit == ReaderPageFit.bestFit ? 3 : 12,
             ),
-      paging: PdfPaging(
-        duration: _appearance.animateTurns
-            ? const Duration(milliseconds: 140)
-            : Duration.zero,
-      ),
-      calculateCurrentPageNumber: _spreadStep == 0
+      paging: vertical
+          ? null
+          : PdfPaging(
+              duration: _appearance.animateTurns
+                  ? const Duration(milliseconds: 140)
+                  : Duration.zero,
+            ),
+      calculateCurrentPageNumber: vertical
+          ? (visible, pages, _) {
+              if (pages.isEmpty) return null;
+              final first = (item?.page ?? 1).clamp(1, pages.length);
+              return verticalPageAt(
+                visible,
+                pages,
+                first: first,
+                last: (item?.endPage ?? pages.length).clamp(
+                  first,
+                  pages.length,
+                ),
+              );
+            }
+          : _spreadStep == 0
           ? null
           : (visible, pages, controller) {
               for (final spread in controller.layout.spreads) {
@@ -4254,21 +4446,19 @@ class _ReaderState extends State<Reader> {
               }
               return _page;
             },
-      pageAnchor: _readingAtWidth
+      pageAnchor: vertical || _readingAtWidth
           ? PdfPageAnchor.topCenter
           : PdfPageAnchor.center,
+      pageAnchorEnd: vertical ? PdfPageAnchor.topCenter : PdfPageAnchor.bottom,
       pageDropShadow: const BoxShadow(
         color: Colors.black54,
         blurRadius: 14,
         offset: Offset(0, 6),
       ),
-      panEnabled: !_inking && !_stylusDrawing && !_preferences.halfPageTurns,
+      panEnabled: !_inking && !_stylusDrawing && !_halfPageTurns,
       scaleEnabled:
-          !_inking &&
-          !_stylusDrawing &&
-          !_performance &&
-          !_preferences.halfPageTurns,
-      scrollByMouseWheel: _preferences.halfPageTurns ? null : .2,
+          !_inking && !_stylusDrawing && !_performance && !_halfPageTurns,
+      scrollByMouseWheel: _halfPageTurns || (vertical && _inking) ? null : .2,
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
       maxImageBytesCachedOnMemory: 72 * 1024 * 1024,
@@ -4343,22 +4533,21 @@ class _ReaderState extends State<Reader> {
                 event,
                 size.width,
                 canAdvance:
+                    !vertical &&
                     !_inking &&
-                    (_preferences.halfPageTurns ||
+                    (_halfPageTurns ||
                         (_hasNextScore &&
                             _pages > 0 &&
                             _page == _lastPage &&
                             _viewer.isReady &&
                             _viewer.currentZoom <= _viewer.coverScale * 1.02)),
-                allowBackward: _preferences.halfPageTurns && !_inking,
+                allowBackward: _halfPageTurns && !_inking,
               );
             },
             onPointerMove: _edgeTaps.move,
             onPointerCancel: _edgeTaps.cancel,
             onPointerSignal: (event) {
-              if (!_preferences.halfPageTurns ||
-                  _inking ||
-                  event is! PointerScrollEvent)
+              if (!_halfPageTurns || _inking || event is! PointerScrollEvent)
                 return;
               final delta = event.scrollDelta.dy == 0
                   ? event.scrollDelta.dx
@@ -4375,7 +4564,7 @@ class _ReaderState extends State<Reader> {
             onPointerUp: (event) {
               final (step, swipe) = _edgeTaps.up(event);
               if (swipe != 0) {
-                if (_preferences.halfPageTurns) {
+                if (_halfPageTurns) {
                   _turn(swipe);
                 } else {
                   _nextScore();
@@ -4403,22 +4592,30 @@ class _ReaderState extends State<Reader> {
         if (!mounted || revision != _revision) return;
         final count = document.pages.length;
         if (count == 0) return;
-        final restored = _page.clamp(1, count);
+        final first = (item?.page ?? 1).clamp(1, count);
+        final last = (item?.endPage ?? count).clamp(first, count);
+        final restored = _page.clamp(first, last);
         setState(() {
           _pages = count;
           _page = restored;
         });
         _remember(_entry?.id, restored);
-        if (_cropFor(restored) != null) {
+        if (vertical || _cropFor(restored) != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && revision == _revision && _page == restored) {
-              _fitCrop(restored, controller);
+              if (vertical) {
+                _positionVerticalPage(controller, restored, resetZoom: true);
+              } else {
+                _fitCrop(restored, controller);
+              }
             }
           });
         }
       },
       onViewSizeChanged: (size, previous, controller) {
-        if (!mounted || previous == null || revision != _revision) return;
+        if (vertical || !mounted || previous == null || revision != _revision) {
+          return;
+        }
         // Keep the score on the same page when the controls resize the viewport.
         if (!_fitCrop(pageBeforeResize, controller)) {
           controller.goToPage(
@@ -4445,11 +4642,12 @@ class _ReaderState extends State<Reader> {
         _previousPage = _page;
         setState(() {
           _page = page;
+          _annotationPage = null;
           _halfPreview = false;
         });
         _remember(_entry?.id, page);
         _recordAudioCue(page);
-        if (_pdfLinkNavigations == 0 && _cropFor(page) != null) {
+        if (!vertical && _pdfLinkNavigations == 0 && _cropFor(page) != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && revision == _revision && _page == page) {
               _fitCrop(page, _viewer);
@@ -4472,8 +4670,7 @@ class _ReaderState extends State<Reader> {
         );
         if (step != 0) return true;
         if (details.type == PdfViewerGeneralTapType.doubleTap) {
-          if (_preferences.halfPageTurns || !_preferences.complexGestures)
-            return true;
+          if (_halfPageTurns || !_preferences.complexGestures) return true;
           if (controller.currentZoom > controller.coverScale * 1.02) {
             _fit();
           } else {
@@ -4548,6 +4745,13 @@ class _ReaderState extends State<Reader> {
               tilt: _drawing.tilt,
               switchTools: _drawing.switchTools,
               autoStylus: _autoStylus,
+              onEditStart: vertical
+                  ? () {
+                      if (_annotationPage != page.pageNumber) {
+                        setState(() => _annotationPage = page.pageNumber);
+                      }
+                    }
+                  : null,
               onStylusStart: _stylusStarted,
               onStylusEnd: _stylusFinished,
             ),
@@ -4732,7 +4936,9 @@ class _ReaderState extends State<Reader> {
   );
 
   Widget _deskewedScore() {
-    final angle = _spreadStep == 0 ? _cropFor(_page)?.angle ?? 0 : 0;
+    final angle = !_verticalScrolling && _spreadStep == 0
+        ? _cropFor(_page)?.angle ?? 0
+        : 0.0;
     return ClipRect(
       child: Transform.rotate(angle: angle * math.pi / 180, child: _score()),
     );
@@ -5040,6 +5246,8 @@ class _ReaderState extends State<Reader> {
           _fit();
         case _ReaderDisplay.fittingMode:
           _choosePageFit();
+        case _ReaderDisplay.scrollMode:
+          await _chooseScrollMode();
         case _ReaderDisplay.zoomIn:
           if (_viewer.isReady) _viewer.zoomUp();
         case _ReaderDisplay.zoomOut:
@@ -5317,16 +5525,21 @@ class _ReaderState extends State<Reader> {
       const PopupMenuItem(value: _ReaderDisplay.fit, child: Text('Fit page')),
       PopupMenuItem(
         value: _ReaderDisplay.fittingMode,
+        enabled: !_verticalScrolling,
         child: Text('Page fitting · ${_preferences.pageFit.label}'),
       ),
       PopupMenuItem(
+        value: _ReaderDisplay.scrollMode,
+        child: Text('Scrolling display · ${_scrollMode.label}'),
+      ),
+      PopupMenuItem(
         value: _ReaderDisplay.zoomIn,
-        enabled: !_preferences.halfPageTurns,
+        enabled: !_halfPageTurns,
         child: const Text('Zoom in'),
       ),
       PopupMenuItem(
         value: _ReaderDisplay.zoomOut,
-        enabled: !_preferences.halfPageTurns,
+        enabled: !_halfPageTurns,
         child: const Text('Zoom out'),
       ),
       PopupMenuItem(
@@ -5351,27 +5564,31 @@ class _ReaderState extends State<Reader> {
       ),
       CheckedPopupMenuItem(
         value: _ReaderDisplay.halfTurns,
+        enabled: !_verticalScrolling,
         checked: _preferences.halfPageTurns,
         child: const Text('Half-page turns'),
       ),
       PopupMenuItem(
         value: _ReaderDisplay.halfSplit,
-        enabled: _preferences.halfPageTurns && _page < _lastPage,
+        enabled: _halfPageTurns && _page < _lastPage,
         child: const Text('Adjust current page split'),
       ),
       CheckedPopupMenuItem(
         value: _ReaderDisplay.halfIndicator,
+        enabled: !_verticalScrolling,
         checked: _preferences.halfPageIndicator,
         child: const Text('Show half-page indicator'),
       ),
       if (_preferences.pageFit == ReaderPageFit.standard)
         CheckedPopupMenuItem(
           value: _ReaderDisplay.landscapeWidth,
+          enabled: !_verticalScrolling,
           checked: _preferences.landscapeWidth,
           child: const Text('Fit width in landscape'),
         ),
       CheckedPopupMenuItem(
         value: _ReaderDisplay.spreads,
+        enabled: !_verticalScrolling,
         checked: _preferences.spreadStep > 0,
         child: const Text('Two-page layout'),
       ),
@@ -5662,8 +5879,9 @@ class _ReaderState extends State<Reader> {
                     ),
                   ],
                 ),
-                if (_tool == InkTool.selection && _ink[_page] != null)
-                  _selectionActions(_ink[_page]!),
+                if (_ink[_annotationPage ?? _page] case final ink?
+                    when _tool == InkTool.selection)
+                  _selectionActions(ink),
                 IconButton(
                   tooltip: 'Annotation layers',
                   onPressed: _showInkLayers,
@@ -5680,12 +5898,12 @@ class _ReaderState extends State<Reader> {
                 ),
                 IconButton(
                   tooltip: 'Undo stroke',
-                  onPressed: () => _ink[_page]?.undo(),
+                  onPressed: () => _ink[_annotationPage ?? _page]?.undo(),
                   icon: const Icon(Icons.undo),
                 ),
                 IconButton(
                   tooltip: 'Redo stroke',
-                  onPressed: () => _ink[_page]?.redo(),
+                  onPressed: () => _ink[_annotationPage ?? _page]?.redo(),
                   icon: const Icon(Icons.redo),
                 ),
               ],
@@ -5693,8 +5911,14 @@ class _ReaderState extends State<Reader> {
           Row(
             children: [
               IconButton(
-                tooltip: ReaderText.previous.of(context),
-                onPressed: _page <= _firstPage && !_halfPreview
+                tooltip: _verticalScrolling && !_inking
+                    ? 'Scroll up'
+                    : ReaderText.previous.of(context),
+                onPressed:
+                    _pages == 0 ||
+                        ((!_verticalScrolling || _inking) &&
+                            _page <= _firstPage &&
+                            !_halfPreview)
                     ? null
                     : () => _turn(-1),
                 icon: const Icon(Icons.chevron_left),
@@ -5733,10 +5957,16 @@ class _ReaderState extends State<Reader> {
                 ),
               ),
               IconButton(
-                tooltip: _page == _lastPage && _hasNextScore
+                tooltip: _verticalScrolling && !_inking
+                    ? 'Scroll down'
+                    : _page == _lastPage && _hasNextScore
                     ? 'Next score'
                     : ReaderText.next.of(context),
-                onPressed: _pages == 0 || (_page >= _lastPage && !_hasNextScore)
+                onPressed:
+                    _pages == 0 ||
+                        ((!_verticalScrolling || _inking) &&
+                            _page >= _lastPage &&
+                            !_hasNextScore)
                     ? null
                     : () => _turn(1),
                 icon: const Icon(Icons.chevron_right),

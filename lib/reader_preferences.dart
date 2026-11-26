@@ -28,6 +28,18 @@ enum ReaderPageFit {
   final String explanation;
 }
 
+enum ReaderScrollMode {
+  paged('Paged'),
+  fitPage('Vertical scrolling · Fit page'),
+  fitWidth('Vertical scrolling · Fit width');
+
+  const ReaderScrollMode(this.label);
+  final String label;
+
+  static ReaderScrollMode? fromJson(Object? value) =>
+      values.where((mode) => mode.name == value).firstOrNull;
+}
+
 class ReaderPreferences {
   const ReaderPreferences({
     this.left = ReaderTapAction.previous,
@@ -50,6 +62,7 @@ class ReaderPreferences {
     this.embeddedPdfContent = EmbeddedPdfContent.all,
     this.embeddedPdfLinks = true,
     this.pageFit = ReaderPageFit.standard,
+    this.scrollMode = ReaderScrollMode.paged,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -85,6 +98,9 @@ class ReaderPreferences {
               .firstOrNull ??
           EmbeddedPdfContent.all,
       embeddedPdfLinks: json['embeddedPdfLinks'] != false,
+      scrollMode:
+          ReaderScrollMode.fromJson(json['scrollMode']) ??
+          ReaderScrollMode.paged,
       pageFit:
           ReaderPageFit.values
               .where((mode) => mode.name == json['pageFit'])
@@ -113,6 +129,7 @@ class ReaderPreferences {
   final EmbeddedPdfContent embeddedPdfContent;
   final bool embeddedPdfLinks;
   final ReaderPageFit pageFit;
+  final ReaderScrollMode scrollMode;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -135,6 +152,7 @@ class ReaderPreferences {
     EmbeddedPdfContent? embeddedPdfContent,
     bool? embeddedPdfLinks,
     ReaderPageFit? pageFit,
+    ReaderScrollMode? scrollMode,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -156,6 +174,7 @@ class ReaderPreferences {
     embeddedPdfContent: embeddedPdfContent ?? this.embeddedPdfContent,
     embeddedPdfLinks: embeddedPdfLinks ?? this.embeddedPdfLinks,
     pageFit: pageFit ?? this.pageFit,
+    scrollMode: scrollMode ?? this.scrollMode,
   );
 
   Map<String, dynamic> toJson() => {
@@ -179,5 +198,6 @@ class ReaderPreferences {
     'embeddedPdfContent': embeddedPdfContent.name,
     'embeddedPdfLinks': embeddedPdfLinks,
     'pageFit': pageFit.name,
+    'scrollMode': scrollMode.name,
   };
 }

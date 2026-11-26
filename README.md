@@ -11,7 +11,9 @@ performance.
 - **Read and perform.** Open a score at its last page, jump with the page slider,
   or turn pages by tapping, swiping, or using a keyboard or compatible pedal.
   Use facing pages, half-page turns, or performance mode when you need a
-  different view of the music.
+  different view of the music. Open **Reader tools → Scrolling display** for
+  continuous vertical scrolling with fit-page and fit-width scaling. Choose a
+  library default or override it for the current score.
 - **Mark up a score.** Draw, highlight, add text or notation stamps, and organize
   annotations into layers. Copy a passage from the PDF and place it on the same
   page or another page. The app saves markup separately from the source PDF.
