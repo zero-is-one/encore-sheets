@@ -111,7 +111,46 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
     final stem = score.title
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_')
         .trim();
-    final name = '${stem.isEmpty ? 'Score' : stem}.pdf';
+    var name = '${stem.isEmpty ? 'Score' : stem}.pdf';
+    if (!widget.provider.supportsClipboard) {
+      var filename = name;
+      final chosen = await showDialog<String>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Upload PDF'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                initialValue: name,
+                decoration: const InputDecoration(labelText: 'Filename'),
+                onChanged: (value) => filename = value.trim(),
+              ),
+              Text(
+                widget.provider == DirectCloudProvider.googleDrive
+                    ? 'Google Drive keeps files with the same name as separate copies.'
+                    : 'If this name is taken, choose a different filename.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, filename),
+              child: const Text('Upload'),
+            ),
+          ],
+        ),
+      );
+      if (chosen == null || !mounted) return;
+      if (chosen.isEmpty || chosen.contains(RegExp(r'[<>:"/\\|?*\x00-\x1f]'))) {
+        throw const CloudTransferError('Choose a valid PDF filename.');
+      }
+      name = chosen.toLowerCase().endsWith('.pdf') ? chosen : '$chosen.pdf';
+    }
     await _session!.upload(
       _path.last.id,
       name,
@@ -168,9 +207,12 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
             if (_busy) const LinearProgressIndicator(),
             if (_status case final status?) Text(status),
             if (_session == null) ...[
-              const Text(
-                'Use a provider access token with file access. The token is cleared when you close this screen.',
-              ),
+              Text(switch (widget.provider) {
+                DirectCloudProvider.googleDrive => 'Use a Google Drive access token with the Drive read/write scope.',
+                DirectCloudProvider.oneDrive => 'Use a Microsoft Graph access token with delegated Files.ReadWrite permission.',
+                _ => 'Use a provider access token with file access.',
+              }),
+              const Text('The token is cleared when you close this screen.'),
               TextField(
                 controller: _token,
                 obscureText: true,
@@ -204,10 +246,11 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
                         : _upload,
                     child: const Text('Upload score'),
                   ),
-                  TextButton(
-                    onPressed: _busy ? null : _pasteFile,
-                    child: const Text('Paste PDF'),
-                  ),
+                  if (widget.provider.supportsClipboard)
+                    TextButton(
+                      onPressed: _busy ? null : _pasteFile,
+                      child: const Text('Paste PDF'),
+                    ),
                   if (_latest case final score?)
                     TextButton(
                       onPressed: _busy
@@ -227,6 +270,8 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
                   title: Text(item.name),
                   trailing: item.folder
                       ? const Icon(Icons.chevron_right)
+                      : !widget.provider.supportsClipboard
+                      ? const Icon(Icons.download_outlined)
                       : PopupMenuButton<bool>(
                           enabled: !_busy,
                           tooltip: 'PDF clipboard actions',

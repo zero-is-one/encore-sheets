@@ -26,7 +26,10 @@ performance.
   a second device to show the facing page.
 - **Move and back up your library.** Share editable scores and setlists, export
   PDFs with flattened markup, or save a library backup. Import and export files
-  through the system picker or browse Dropbox and Box with a session access token.
+  through the system picker, or browse and transfer PDFs directly with Dropbox,
+  Box, Google Drive, and OneDrive using a session access token. Google Drive
+  uses the `https://www.googleapis.com/auth/drive` scope and OneDrive uses
+  delegated Microsoft Graph `Files.ReadWrite`.
 
 ## Build from source
 
