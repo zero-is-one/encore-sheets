@@ -58,6 +58,7 @@ import 'practice_dashboard.dart';
 import 'practice_goals.dart';
 import 'face_page_turn.dart';
 import 'measure_clipboard.dart';
+import 'quick_reader_tools.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -228,6 +229,7 @@ class _ReaderState extends State<Reader> {
   static const _faceChannel = MethodChannel('encoresheets/face');
   FacePageTurn? _faceTurns;
   MeasureClip? _measureClipboard;
+  Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
   bool _faceReverse = false;
   double _faceSensitivity = 23;
   ReaderRestrictions? _restrictions;
@@ -405,6 +407,7 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
           _practice.enabled = data['practiceTracking'] == true;
+          _quickTools = readQuickReaderTools(data['quickReaderTools']);
           final language = data['readerLanguage'];
           _language =
               language is String && readerLanguageNames.containsKey(language)
@@ -667,6 +670,48 @@ class _ReaderState extends State<Reader> {
       _finishPicking();
     }
   }
+
+  Future<void> _runQuickTool(QuickReaderTool tool) async {
+    switch (tool) {
+      case QuickReaderTool.library:
+        await _showLibrary();
+      case QuickReaderTool.bookmarks:
+        await _showBookmarks();
+      case QuickReaderTool.layers:
+        await _showInkLayers();
+      case QuickReaderTool.presets:
+        await _configureDrawing();
+      case QuickReaderTool.metronome:
+        await _showMetronome();
+      case QuickReaderTool.fit:
+        _fit();
+    }
+  }
+
+  Future<void> _pinQuickTools() async {
+    final result = await chooseQuickReaderTools(context, _quickTools);
+    if (!mounted || result == null) return;
+    try {
+      await _library.updatePreferences({
+        'quickReaderTools': result.map((tool) => tool.name).toList(),
+      });
+      if (mounted) setState(() => _quickTools = result);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save quick-access tools.')),
+        );
+    }
+  }
+
+  bool _quickToolEnabled(QuickReaderTool tool) => switch (tool) {
+    QuickReaderTool.layers ||
+    QuickReaderTool.presets => !_restricted(RestrictedTool.markup),
+    QuickReaderTool.bookmarks => _entry != null && _pages > 0,
+    QuickReaderTool.fit => _pages > 0,
+    QuickReaderTool.metronome => ScoreAudioSession.supported,
+    QuickReaderTool.library => true,
+  };
 
   Future<void> _configureFaceTurns() async {
     if (_faceTurns != null) {
@@ -4445,10 +4490,32 @@ class _ReaderState extends State<Reader> {
             ),
           ),
           SizedBox(
-            width: 96,
+            width: 144,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                PopupMenuButton<QuickReaderTool>(
+                  tooltip: 'Quick access',
+                  enabled: !_picking,
+                  icon: const Icon(Icons.bolt_outlined),
+                  onSelected: _runQuickTool,
+                  itemBuilder: (_) => [
+                    for (final tool in _quickTools)
+                      PopupMenuItem(
+                        value: tool,
+                        enabled: _quickToolEnabled(tool),
+                        child: ListTile(
+                          leading: Icon(tool.icon),
+                          title: Text(tool.label),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    PopupMenuItem(
+                      onTap: _pinQuickTools,
+                      child: const Text('Pin tools…'),
+                    ),
+                  ],
+                ),
                 if (!_restricted(RestrictedTool.markup))
                   IconButton(
                     tooltip: _inking
