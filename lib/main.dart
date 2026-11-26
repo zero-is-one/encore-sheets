@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
 import 'package:flutter_midi_command/flutter_midi_command.dart';
 import 'package:flutter_midi_command_ble/flutter_midi_command_ble.dart';
@@ -125,6 +126,7 @@ enum _ReaderDisplay {
   fit,
   fittingMode,
   scrollMode,
+  autoScroll,
   zoomIn,
   zoomOut,
   previousPage,
@@ -209,6 +211,10 @@ class Reader extends StatefulWidget {
 
 class _ReaderState extends State<Reader> {
   PdfViewerController _viewer = PdfViewerController();
+  late final _autoScrollTicker = Ticker(_tickAutoScroll);
+  bool _autoScrollAdvancing = false;
+  Duration _autoScrollLast = Duration.zero;
+  Duration _autoScrollAtEnd = Duration.zero;
   final _ink = <int, PageInk>{};
   final _focus = FocusNode(debugLabel: 'Score reader');
   late final _library = ScoreLibrary(LibraryStorage.create());
@@ -419,6 +425,7 @@ class _ReaderState extends State<Reader> {
         if (_isAppleMobile || _webDavSync != null) _syncIfReady();
       },
       onHide: () {
+        _stopAutoScroll();
         unawaited(_practice.suspend().catchError((Object _) {}));
         _stopFaceTurns();
       },
@@ -639,6 +646,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    _autoScrollTicker.dispose();
     _scoreExpiry?.cancel();
     if (_supportsSharedImport) {
       _stopFaceTurns(rebuild: false);
@@ -2969,6 +2977,7 @@ class _ReaderState extends State<Reader> {
     int? startPage,
     ScoreBookmark? item,
   }) {
+    if (!_autoScrollAdvancing) _stopAutoScroll(rebuild: false);
     _scoreExpiry?.cancel();
     final scoreChanged = _entry?.id != entry?.id;
     final audio = _scoreAudio;
@@ -3104,6 +3113,7 @@ class _ReaderState extends State<Reader> {
 
   void _turn(int step) {
     if (_picking || !_viewer.isReady || _pages == 0) return;
+    _stopAutoScroll();
     if (_ensemble?.leading == true && _leadingSpread) {
       _go(_page - (_page - _firstPage) % 2 + step * 2);
       return;
@@ -3153,7 +3163,139 @@ class _ReaderState extends State<Reader> {
 
   bool get _halfPageTurns => !_verticalScrolling && _preferences.halfPageTurns;
 
+  bool get _canAutoScroll =>
+      _verticalScrolling &&
+      !_inking &&
+      !_stylusDrawing &&
+      _pages > 0 &&
+      _viewer.isReady;
+
+  void _stopAutoScroll({bool rebuild = true}) {
+    if (!_autoScrollTicker.isActive) return;
+    _autoScrollTicker.stop();
+    if (mounted && rebuild) setState(() {});
+  }
+
+  void _toggleAutoScroll() {
+    if (_autoScrollTicker.isActive) {
+      _stopAutoScroll();
+    } else if (_canAutoScroll && !_picking) {
+      _autoScrollLast = _autoScrollAtEnd = Duration.zero;
+      setState(() {
+        _autoScrollTicker.start();
+      });
+    }
+    _focus.requestFocus();
+  }
+
+  void _tickAutoScroll(Duration elapsed) {
+    final delta = elapsed - _autoScrollLast;
+    _autoScrollLast = elapsed;
+    if (delta <= Duration.zero || _picking || _autoScrollAdvancing) return;
+    if (!_verticalScrolling || _inking || _stylusDrawing) {
+      _stopAutoScroll();
+      return;
+    }
+    if (!_canAutoScroll) return;
+    final frame = delta > const Duration(milliseconds: 50)
+        ? const Duration(milliseconds: 50)
+        : delta;
+    final pixels =
+        _viewer.viewSize.height *
+        frame.inMicroseconds /
+        (_preferences.autoScrollSeconds * Duration.microsecondsPerSecond);
+    final current = _viewer.value;
+    final offset = current.storage[13];
+    final target = current.clone()..setEntry(1, 3, offset - pixels);
+    final clamped = _viewer.makeMatrixInSafeRange(target, forceClamp: true);
+    if ((clamped.storage[13] - offset).abs() > .001) {
+      _autoScrollAtEnd = Duration.zero;
+      _viewer.value = clamped;
+      return;
+    }
+    if (!_preferences.autoScrollSetlist || !_hasNextScore) {
+      _stopAutoScroll();
+      return;
+    }
+    _autoScrollAtEnd += frame;
+    if (_autoScrollAtEnd < const Duration(seconds: 4)) return;
+    _autoScrollAtEnd = Duration.zero;
+    _autoScrollAdvancing = true;
+    final revision = _revision;
+    unawaited(
+      _nextScore().whenComplete(() {
+        _autoScrollAdvancing = false;
+        if (mounted && (revision == _revision || !_verticalScrolling)) {
+          _stopAutoScroll();
+        }
+      }),
+    );
+  }
+
+  Future<void> _showAutoScroll() async {
+    if (!_canAutoScroll || _picking) return;
+    var seconds = _preferences.autoScrollSeconds;
+    var advance = _preferences.autoScrollSetlist;
+    final running = _autoScrollTicker.isActive;
+    setState(() => _picking = true);
+    var start = false;
+    try {
+      final save = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('Automatic scrolling'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('$seconds seconds per screen'),
+                Slider(
+                  min: 5,
+                  max: 60,
+                  divisions: 55,
+                  value: seconds.toDouble(),
+                  onChanged: (value) => update(() => seconds = value.round()),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Continue to the next setlist score'),
+                  subtitle: const Text(
+                    'Wait 4 seconds at the end of each score.',
+                  ),
+                  value: advance,
+                  onChanged: (value) => update(() => advance = value),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: Text(running ? 'Save' : 'Start scrolling'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (save != true || !mounted) return;
+      await _savePreferences(
+        _preferences.copyWith(
+          autoScrollSeconds: seconds,
+          autoScrollSetlist: advance,
+        ),
+      );
+      start = !running;
+    } finally {
+      _finishPicking();
+    }
+    if (mounted && start) _toggleAutoScroll();
+  }
+
   void _resetScoreLayout() {
+    _stopAutoScroll(rebuild: false);
     _initialPage = _page;
     _halfPreview = false;
     _annotationPage = null;
@@ -3658,6 +3800,8 @@ class _ReaderState extends State<Reader> {
                 .catchError((Object _) {}),
           );
         }
+      case ReaderShortcut.autoScroll:
+        _toggleAutoScroll();
     }
   }
 
@@ -4059,6 +4203,7 @@ class _ReaderState extends State<Reader> {
 
   void _toggleInk() {
     if (_pages == 0 || _restricted(RestrictedTool.markup)) return;
+    _stopAutoScroll(rebuild: false);
     _ink[_annotationPage ?? _page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
@@ -4557,6 +4702,7 @@ class _ReaderState extends State<Reader> {
           child: Listener(
             behavior: HitTestBehavior.translucent,
             onPointerDown: (event) {
+              _stopAutoScroll();
               _lastReaderPointerStylus = isPenPointer(event);
               if (_autoStylus && _lastReaderPointerStylus) return;
               _edgeTaps.down(
@@ -4935,6 +5081,16 @@ class _ReaderState extends State<Reader> {
                   fit: StackFit.expand,
                   children: [
                     _deskewedScore(),
+                    if (_autoScrollTicker.isActive && !_performance)
+                      PositionedDirectional(
+                        end: 8,
+                        bottom: 8,
+                        child: IconButton.filledTonal(
+                          tooltip: 'Stop automatic scrolling',
+                          onPressed: _stopAutoScroll,
+                          icon: const Icon(Icons.pause),
+                        ),
+                      ),
                     if (_missingFacingPage)
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
@@ -5278,6 +5434,8 @@ class _ReaderState extends State<Reader> {
           _choosePageFit();
         case _ReaderDisplay.scrollMode:
           await _chooseScrollMode();
+        case _ReaderDisplay.autoScroll:
+          await _showAutoScroll();
         case _ReaderDisplay.zoomIn:
           if (_viewer.isReady) _viewer.zoomUp();
         case _ReaderDisplay.zoomOut:
@@ -5563,6 +5721,11 @@ class _ReaderState extends State<Reader> {
         child: Text('Scrolling display · ${_scrollMode.label}'),
       ),
       PopupMenuItem(
+        value: _ReaderDisplay.autoScroll,
+        enabled: _canAutoScroll,
+        child: const Text('Automatic scrolling'),
+      ),
+      PopupMenuItem(
         value: _ReaderDisplay.zoomIn,
         enabled: !_halfPageTurns,
         child: const Text('Zoom in'),
@@ -5704,6 +5867,16 @@ class _ReaderState extends State<Reader> {
           ),
         ),
         Text(_pages == 0 ? '–' : '$_page / $_pages'),
+        if (_canAutoScroll)
+          IconButton(
+            tooltip: _autoScrollTicker.isActive
+                ? 'Stop automatic scrolling'
+                : 'Start automatic scrolling',
+            onPressed: _picking ? null : _toggleAutoScroll,
+            icon: Icon(
+              _autoScrollTicker.isActive ? Icons.pause : Icons.play_arrow,
+            ),
+          ),
         if (_entry != null)
           IconButton(
             tooltip: 'Now playing',

@@ -1,17 +1,21 @@
 import 'dart:io';
 
 import 'package:encoresheets/main.dart';
+import 'package:encoresheets/library_storage_native.dart';
+import 'package:encoresheets/reader_input.dart';
 import 'package:encoresheets/reader_preferences.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/vertical_score_layout.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show SizedBox;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('reader can switch to continuous vertical scrolling', (
+  testWidgets('reader auto-scrolls, pauses, and advances through a setlist', (
     tester,
   ) async {
     final root = (await tester.runAsync(
@@ -27,13 +31,35 @@ void main() {
         paths,
         null,
       );
-      await root.delete(recursive: true);
+      if (await root.exists()) await root.delete(recursive: true);
     });
     tester.view.physicalSize = const Size(1000, 650);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    await tester.runAsync(() async {
+      final library = ScoreLibrary(NativeLibraryStorage(directory: root));
+      final first = await File('assets/first_light.pdf')
+          .copy('${root.path}/Transition first.pdf');
+      final second = await first.copy('${root.path}/Transition second.pdf');
+      final (a, _) = await library.import(XFile(first.path));
+      final (b, _) = await library.import(XFile(second.path));
+      for (final score in [a, b]) {
+        await library.updateScore(
+          score.id,
+          (entry) => entry.copyWith(scrollMode: ReaderScrollMode.fitWidth),
+        );
+      }
+      await library.saveSetlist(
+        Setlist('auto-scroll', 'Scrolling rehearsal', [a.id, b.id]),
+      );
+      await library.updatePreferences({
+        'readerShortcuts': {
+          shortcutKey(LogicalKeyboardKey.keyS): ReaderShortcut.autoScroll.name,
+        },
+      });
+    });
     await tester.runAsync(pdfrxFlutterInitialize);
     await tester.pumpWidget(const EncoreSheets());
     PdfViewer viewer() => tester.widget<PdfViewer>(find.byType(PdfViewer));
@@ -71,6 +97,28 @@ void main() {
       controller.layout.pageLayouts[1].top,
       greaterThan(controller.layout.pageLayouts.first.bottom),
     );
+    await tester.tap(find.byTooltip('Reader tools'));
+    await tester.pumpAndSettle();
+    final automatic = find.text('Automatic scrolling');
+    await tester.ensureVisible(automatic);
+    await tester.tap(automatic);
+    await tester.pumpAndSettle();
+    expect(find.text('20 seconds per screen'), findsOneWidget);
+    await tester.tap(find.text('Start scrolling'));
+    final stop = find.byTooltip('Stop automatic scrolling');
+    await waitUntil(() => stop.evaluate().isNotEmpty);
+    final start = controller.visibleRect.top;
+    for (var frame = 0; frame < 20; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(controller.visibleRect.top, greaterThan(start));
+    await tester.tap(stop);
+    await tester.pump();
+    final paused = controller.visibleRect.top;
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(stop, findsNothing);
+    expect(controller.visibleRect.top, closeTo(paused, .01));
+
     final swipe = await tester.startGesture(
       tester.getCenter(find.byType(PdfViewer)),
     );
@@ -101,13 +149,74 @@ void main() {
           viewer().controller!.isReady &&
           find.text('2 / 3').evaluate().isNotEmpty,
     );
+    await tester.tap(find.byTooltip('Setlists'));
+    await waitUntil(
+      () => find.text('Scrolling rehearsal').evaluate().isNotEmpty,
+    );
+    await tester.tap(find.text('Scrolling rehearsal'));
+    await waitUntil(
+      () =>
+          viewer().params.paging == null &&
+          viewer().controller!.isReady &&
+          find.text('Transition first').evaluate().isNotEmpty,
+    );
+    final firstScore = viewer().controller!;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await waitUntil(() => stop.evaluate().isNotEmpty);
+    await firstScore.goToPosition(
+      documentOffset: Offset(
+        firstScore.visibleRect.left,
+        firstScore.layout.documentSize.height,
+      ),
+    );
+    for (var frame = 0; frame < 85; frame++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await waitUntil(
+      () =>
+          viewer().controller != firstScore &&
+          viewer().controller!.isReady &&
+          find.text('Transition second').evaluate().isNotEmpty,
+    );
+    expect(stop, findsOneWidget);
+    final lastScore = viewer().controller!;
+    await lastScore.goToPosition(
+      documentOffset: Offset(
+        lastScore.visibleRect.left,
+        lastScore.layout.documentSize.height,
+      ),
+    );
+    await waitUntil(() => stop.evaluate().isEmpty);
     expect(tester.takeException(), isNull);
-  });
+    await tester.pumpWidget(const SizedBox.shrink());
+    for (var attempt = 0; attempt < 20; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      final deleted = await tester.runAsync(() async {
+        try {
+          if (await root.exists()) await root.delete(recursive: true);
+          return true;
+        } on FileSystemException catch (error) {
+          if (!Platform.isWindows ||
+              !const {5, 32, 145}.contains(error.osError?.errorCode)) {
+            rethrow;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          return false;
+        }
+      });
+      if (deleted == true) break;
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   test('scroll settings round-trip and older scores inherit the default', () {
     final global = const ReaderPreferences().copyWith(
       scrollMode: ReaderScrollMode.fitWidth,
+      autoScrollSeconds: 35,
+      autoScrollSetlist: false,
     );
+    final preferences = ReaderPreferences.fromJson(global.toJson());
+    expect(preferences.autoScrollSeconds, 35);
+    expect(preferences.autoScrollSetlist, isFalse);
     expect(
       ReaderPreferences.fromJson(global.toJson()).scrollMode,
       ReaderScrollMode.fitWidth,

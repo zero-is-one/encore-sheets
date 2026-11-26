@@ -5,7 +5,8 @@ enum ReaderShortcut {
   previous('Previous page'),
   controls('Toggle controls'),
   markup('Toggle markup'),
-  audio('Play or pause audio');
+  audio('Play or pause audio'),
+  autoScroll('Start or stop automatic scrolling');
 
   const ReaderShortcut(this.label);
   final String label;

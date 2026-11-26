@@ -14,6 +14,9 @@ performance.
   different view of the music. Open **Reader tools → Scrolling display** for
   continuous vertical scrolling with fit-page and fit-width scaling. Choose a
   library default or override it for the current score.
+  In a vertical display, open **Reader tools → Automatic scrolling** to set
+  the speed and optionally continue to the next setlist score. Use **Input
+  shortcuts** to assign a keyboard key or pedal to start and stop scrolling.
 - **Mark up a score.** Draw, highlight, add text or notation stamps, and organize
   annotations into layers. Copy a passage from the PDF and place it on the same
   page or another page. The app saves markup separately from the source PDF.

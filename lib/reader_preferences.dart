@@ -63,6 +63,8 @@ class ReaderPreferences {
     this.embeddedPdfLinks = true,
     this.pageFit = ReaderPageFit.standard,
     this.scrollMode = ReaderScrollMode.paged,
+    this.autoScrollSeconds = 20,
+    this.autoScrollSetlist = true,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -101,6 +103,11 @@ class ReaderPreferences {
       scrollMode:
           ReaderScrollMode.fromJson(json['scrollMode']) ??
           ReaderScrollMode.paged,
+      autoScrollSeconds: switch (json['autoScrollSeconds']) {
+        final int seconds => seconds.clamp(5, 60),
+        _ => 20,
+      },
+      autoScrollSetlist: json['autoScrollSetlist'] != false,
       pageFit:
           ReaderPageFit.values
               .where((mode) => mode.name == json['pageFit'])
@@ -130,6 +137,8 @@ class ReaderPreferences {
   final bool embeddedPdfLinks;
   final ReaderPageFit pageFit;
   final ReaderScrollMode scrollMode;
+  final int autoScrollSeconds;
+  final bool autoScrollSetlist;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -153,6 +162,8 @@ class ReaderPreferences {
     bool? embeddedPdfLinks,
     ReaderPageFit? pageFit,
     ReaderScrollMode? scrollMode,
+    int? autoScrollSeconds,
+    bool? autoScrollSetlist,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -175,6 +186,8 @@ class ReaderPreferences {
     embeddedPdfLinks: embeddedPdfLinks ?? this.embeddedPdfLinks,
     pageFit: pageFit ?? this.pageFit,
     scrollMode: scrollMode ?? this.scrollMode,
+    autoScrollSeconds: autoScrollSeconds ?? this.autoScrollSeconds,
+    autoScrollSetlist: autoScrollSetlist ?? this.autoScrollSetlist,
   );
 
   Map<String, dynamic> toJson() => {
@@ -199,5 +212,7 @@ class ReaderPreferences {
     'embeddedPdfLinks': embeddedPdfLinks,
     'pageFit': pageFit.name,
     'scrollMode': scrollMode.name,
+    'autoScrollSeconds': autoScrollSeconds,
+    'autoScrollSetlist': autoScrollSetlist,
   };
 }
