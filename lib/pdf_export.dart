@@ -71,6 +71,7 @@ Future<Uint8List> exportScorePdf({
 }
 
 Future<Uint8List> _renderAnnotatedPage(PdfPage page, PageInk ink) async {
+  await ink.prepareImages();
   final scale = math.min(2.5, 3200 / math.max(page.width, page.height));
   final width = math.max(1, (page.width * scale).round());
   final height = math.max(1, (page.height * scale).round());

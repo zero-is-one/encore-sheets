@@ -57,6 +57,7 @@ import 'practice_activity.dart';
 import 'practice_dashboard.dart';
 import 'practice_goals.dart';
 import 'face_page_turn.dart';
+import 'measure_clipboard.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -96,6 +97,8 @@ enum _ReaderDisplay {
   piano,
   inputShortcuts,
   faceTurns,
+  copyMeasure,
+  pasteMeasure,
   midiDevices,
   midiAutomation,
   ensemble,
@@ -224,6 +227,7 @@ class _ReaderState extends State<Reader> {
   );
   static const _faceChannel = MethodChannel('encoresheets/face');
   FacePageTurn? _faceTurns;
+  MeasureClip? _measureClipboard;
   bool _faceReverse = false;
   double _faceSensitivity = 23;
   ReaderRestrictions? _restrictions;
@@ -319,6 +323,8 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.jumpLinks ||
     _ReaderDisplay.crop ||
     _ReaderDisplay.drawingSettings ||
+    _ReaderDisplay.copyMeasure ||
+    _ReaderDisplay.pasteMeasure ||
     _ReaderDisplay.halfSplit => !_restricted(RestrictedTool.markup),
     _ReaderDisplay.exportPdf ||
     _ReaderDisplay.shareScorePackage ||
@@ -613,6 +619,53 @@ class _ReaderState extends State<Reader> {
     unawaited(
       _faceChannel.invokeMethod<void>('stop').catchError((Object _) {}),
     );
+  }
+
+  Future<void> _measureRegion({required bool paste}) async {
+    if (_picking ||
+        !_viewer.isReady ||
+        _pages == 0 ||
+        _restricted(RestrictedTool.markup))
+      return;
+    final clip = _measureClipboard;
+    if (paste && (clip == null || _activeInkLayer == null)) return;
+    final number = _page;
+    final page = _viewer.document.pages[number - 1];
+    final revision = _revision;
+    setState(() => _picking = true);
+    try {
+      final area = await showDialog<Rect>(
+        context: context,
+        builder: (_) =>
+            MeasureRegionDialog(page: page, clip: paste ? clip : null),
+      );
+      if (!mounted || area == null || revision != _revision) return;
+      if (paste) {
+        final ink = _ink.putIfAbsent(number, _newPageInk);
+        ink.pasteRaster(clip!.png, area);
+        if (!_inking) _toggleInk();
+      } else {
+        final copied = await copyMeasure(page, area);
+        if (!mounted) return;
+        setState(() => _measureClipboard = copied);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Measure copied. Use Paste measure on the destination page.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not copy or place this measure.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
+    }
   }
 
   Future<void> _configureFaceTurns() async {
@@ -4442,6 +4495,10 @@ class _ReaderState extends State<Reader> {
                         _showInputShortcuts();
                       case _ReaderDisplay.faceTurns:
                         _configureFaceTurns();
+                      case _ReaderDisplay.copyMeasure:
+                        _measureRegion(paste: false);
+                      case _ReaderDisplay.pasteMeasure:
+                        _measureRegion(paste: true);
                       case _ReaderDisplay.midiDevices:
                         _showMidiDevices();
                       case _ReaderDisplay.midiAutomation:
@@ -4648,6 +4705,16 @@ class _ReaderState extends State<Reader> {
                               : 'Stop head gesture page turns',
                         ),
                       ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.copyMeasure,
+                      child: Text('Copy measure from PDF'),
+                    ),
+                    PopupMenuItem(
+                      value: _ReaderDisplay.pasteMeasure,
+                      enabled:
+                          _measureClipboard != null && _activeInkLayer != null,
+                      child: const Text('Paste measure'),
+                    ),
                     if (_supportsSharedImport)
                       const PopupMenuItem(
                         value: _ReaderDisplay.midiDevices,

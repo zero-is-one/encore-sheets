@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show PointerDeviceKind;
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart'
     show kPrimaryButton, kPrimaryStylusButton, kSecondaryStylusButton;
@@ -28,6 +32,7 @@ class _Stroke {
     this.text,
     this.layer = 'base',
     this.sampleWidths,
+    this.raster,
   });
 
   factory _Stroke.fromJson(Map<String, dynamic> data) => _Stroke(
@@ -43,6 +48,7 @@ class _Stroke {
     sampleWidths: (data['sampleWidths'] as List?)
         ?.map((value) => (value as num).toDouble())
         .toList(),
+    raster: data['raster'] as String?,
   );
 
   final InkTool tool;
@@ -52,6 +58,7 @@ class _Stroke {
   final String? text;
   final String layer;
   final List<double>? sampleWidths;
+  final String? raster;
 
   _Stroke shifted(Offset delta, {String? intoLayer}) => _Stroke(
     tool,
@@ -61,6 +68,7 @@ class _Stroke {
     text: text,
     layer: intoLayer ?? layer,
     sampleWidths: sampleWidths,
+    raster: raster,
   );
 
   Map<String, dynamic> toJson() => {
@@ -70,6 +78,7 @@ class _Stroke {
     if (text != null) 'text': text,
     if (layer != 'base') 'layer': layer,
     if (sampleWidths != null) 'sampleWidths': sampleWidths,
+    if (raster != null) 'raster': raster,
     'points': [
       for (final point in points) [point.dx, point.dy],
     ],
@@ -88,7 +97,9 @@ class PageInk extends ChangeNotifier {
        _strokes = [
          for (final stroke in saved)
            _Stroke.fromJson(stroke as Map<String, dynamic>),
-       ];
+       ] {
+    unawaited(prepareImages());
+  }
 
   final VoidCallback? onChanged;
   List<_Stroke> _strokes;
@@ -102,6 +113,66 @@ class PageInk extends ChangeNotifier {
   bool _moving = false;
   String? _activeLayer;
   List<String> _visibleLayers;
+  final _images = <String, ui.Image>{};
+  final _loadingImages = <String, Future<void>>{};
+  bool _disposed = false;
+
+  Future<void> prepareImages() async {
+    await Future.wait([
+      for (final image
+          in _strokes.map((stroke) => stroke.raster).nonNulls.toSet())
+        if (!_images.containsKey(image))
+          _loadingImages.putIfAbsent(image, () => _decodeImage(image)),
+    ]);
+  }
+
+  Future<void> _decodeImage(String data) async {
+    try {
+      if (data.length > 4 * 1024 * 1024) return;
+      final codec = await ui.instantiateImageCodec(base64Decode(data));
+      try {
+        final frame = await codec.getNextFrame();
+        if (_disposed) {
+          frame.image.dispose();
+        } else {
+          _images[data] = frame.image;
+          notifyListeners();
+        }
+      } finally {
+        codec.dispose();
+      }
+    } catch (_) {
+      // A damaged raster annotation should not prevent reading the page.
+    }
+  }
+
+  void pasteRaster(Uint8List png, Rect placement) {
+    final layer = _activeLayer;
+    if (layer == null || png.isEmpty) return;
+    _replaceStrokes(
+      [
+        ..._strokes,
+        _Stroke(
+          InkTool.pen,
+          [placement.topLeft, placement.bottomRight],
+          layer: layer,
+          raster: base64Encode(png),
+        ),
+      ],
+      selection: {_strokes.length},
+    );
+    unawaited(prepareImages());
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    for (final image in _images.values) {
+      image.dispose();
+    }
+    _images.clear();
+    super.dispose();
+  }
 
   void configureLayers({
     required String? active,
@@ -168,6 +239,7 @@ class PageInk extends ChangeNotifier {
       ],
       selection: {for (var i = start; i < start + strokes.length; i++) i},
     );
+    unawaited(prepareImages());
   }
 
   Rect get _selectionBounds =>
@@ -725,6 +797,26 @@ class _InkPainter extends CustomPainter {
     Offset position(Offset point) =>
         Offset(point.dx * size.width, point.dy * size.height);
     for (final mark in strokes) {
+      if (mark.raster case final data?) {
+        final image = ink._images[data];
+        if (image != null && mark.points.length == 2) {
+          canvas.drawImageRect(
+            image,
+            Rect.fromLTWH(
+              0,
+              0,
+              image.width.toDouble(),
+              image.height.toDouble(),
+            ),
+            Rect.fromPoints(
+              position(mark.points.first),
+              position(mark.points.last),
+            ),
+            Paint()..filterQuality = FilterQuality.medium,
+          );
+        }
+        continue;
+      }
       if (mark.text case final text?) {
         final painter = _layoutText(
           text,
