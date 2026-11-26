@@ -50,6 +50,16 @@ choose a location in the system file picker, such as Downloads. Restore adds
 copies alongside existing scores and setlists. On a fresh install, restore the
 ZIP, turn on airplane mode, and reopen a setlist to check the scores and ink.
 
+On Windows, macOS, or Linux, use Python 3 to inspect or verify a backup ZIP.
+The copy command checks the copied archive and preserves any existing file
+with the same name.
+
+```sh
+python tools/library_backups.py inspect "EncoreSheets backup.zip"
+python tools/library_backups.py verify "EncoreSheets backup.zip"
+python tools/library_backups.py copy "EncoreSheets backup.zip" "Backups"
+```
+
 On both tablets, try a large scanned PDF in airplane mode, repeat page turns
 with a pedal, and draw while resting your palm on the screen. Verify that ink
 stays aligned after zooming and rotating, and check pedal input again after
