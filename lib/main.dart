@@ -64,6 +64,7 @@ import 'metadata_symbols.dart';
 import 'share_reader_link.dart';
 import 'reader_appearance_options.dart';
 import 'library_search_options.dart';
+import 'local_maintenance.dart';
 import 'reader_restrictions.dart';
 import 'support_screen.dart';
 import 'app_localization.dart';
@@ -96,6 +97,7 @@ enum _ReaderDisplay {
   profiles,
   metadataSymbols,
   themeOptions,
+  maintenance,
   metronome,
   tuner,
   piano,
@@ -2195,6 +2197,93 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save theme settings.')),
         );
+    }
+  }
+
+  Future<void> _showMaintenance() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final command = await showDialog<int>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('Maintenance'),
+          children: [
+            for (final (id, label) in [
+              (1, 'Reset reader display and menus'),
+              if (!_restricted(RestrictedTool.markup))
+                (2, 'Reset drawing settings and personal stamps'),
+              if (!kIsWeb) (3, 'Remove old temporary files'),
+            ])
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, id),
+                child: Text(label),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || command == null) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Apply maintenance change?'),
+          content: Text(switch (command) {
+            1 => 'Restore the default reader display, theme, quick-access tools, and library sorting.',
+            2 => 'Restore default drawing tools and remove personal stamps.',
+            _ => 'Remove app working copies last modified more than seven days ago.',
+          }),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+      var message = 'Defaults restored.';
+      if (command == 3) {
+        final count = await cleanOldWorkingFiles();
+        message = 'Removed $count old working copies.';
+      } else {
+        await _library.updatePreferences(
+          command == 1
+              ? {
+                  ...const ReaderPreferences().toJson(),
+                  'appearanceOptions': null,
+                  'quickReaderTools': null,
+                  'metadataSymbols': null,
+                  'searchOptions': null,
+                }
+              : {
+                  'drawingSettings': const DrawingSettings().toJson(),
+                  'personalStamps': <String>[],
+                },
+        );
+        if (!mounted) return;
+        await _restorePreferences();
+        if (mounted)
+          setState(() {
+            _stamp = null;
+            _halfPreview = false;
+          });
+      }
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not apply this maintenance change.'),
+          ),
+        );
+    } finally {
+      _finishPicking();
     }
   }
 
@@ -4747,6 +4836,8 @@ class _ReaderState extends State<Reader> {
                         _editMetadataSymbols();
                       case _ReaderDisplay.themeOptions:
                         _changeThemeOptions();
+                      case _ReaderDisplay.maintenance:
+                        _showMaintenance();
                       case _ReaderDisplay.metronome:
                         _showMetronome();
                       case _ReaderDisplay.tuner:
@@ -4961,6 +5052,10 @@ class _ReaderState extends State<Reader> {
                     const PopupMenuItem(
                       value: _ReaderDisplay.themeOptions,
                       child: Text('Theme and menus'),
+                    ),
+                    const PopupMenuItem(
+                      value: _ReaderDisplay.maintenance,
+                      child: Text('Maintenance and reset'),
                     ),
                     if (ScoreAudioSession.supported)
                       const PopupMenuItem(
