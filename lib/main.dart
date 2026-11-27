@@ -1818,6 +1818,50 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  Future<void> _openNewScoreTab() async {
+    if (_picking || _savingTabs) return;
+    setState(() => _picking = true);
+    try {
+      await _libraryReady;
+      if (!mounted) return;
+      final scores = [
+        ..._library.recent,
+      ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      final id = await showDialog<String>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('Open in new tab'),
+          children: [
+            if (scores.isEmpty)
+              const SimpleDialogOption(
+                child: Text('Import a PDF from the score library first.'),
+              ),
+            for (final score in scores)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, score.id),
+                child: Text(score.title),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || id == null) return;
+      final score = _library.lookup(id);
+      if (score == null) return;
+      if (!_scoreTabIds.contains(id)) {
+        await _updateScoreTabs([..._scoreTabIds, id]);
+      }
+      if (mounted && _scoreTabIds.contains(id)) await _openLibraryScore(score);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this score.')),
+        );
+      }
+    } finally {
+      _finishPicking();
+    }
+  }
+
   Future<void> _showBookmarks() async {
     final entry = _entry;
     if (entry == null || _picking || _pages == 0) return;
@@ -5396,7 +5440,7 @@ class _ReaderState extends State<Reader> {
                     if (_showControls &&
                         !_performance &&
                         _appearance.showTabs &&
-                        _scoreTabIds.isNotEmpty)
+                        (_scoreTabIds.isNotEmpty || _library.recent.isNotEmpty))
                       _scoreTabs(),
                     Expanded(
                       key: const ValueKey('score-viewport'),
@@ -5487,9 +5531,16 @@ class _ReaderState extends State<Reader> {
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         scrollDirection: Axis.horizontal,
-        itemCount: _scoreTabIds.length,
+        itemCount: _scoreTabIds.length + 1,
         separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
+          if (index == _scoreTabIds.length) {
+            return TextButton.icon(
+              onPressed: _picking || _savingTabs ? null : _openNewScoreTab,
+              icon: const Icon(Icons.add),
+              label: const Text('Open in new tab'),
+            );
+          }
           final id = _scoreTabIds[index];
           final title = _library.lookup(id)?.title ?? 'Saved score';
           return InputChip(
