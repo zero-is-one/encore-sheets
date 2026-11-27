@@ -5590,9 +5590,18 @@ class _ReaderState extends State<Reader> {
             children: [
               ...navigation,
               const SizedBox(width: 12),
-              _displayButton(),
-              Expanded(child: title),
-              _readerToolsMenu(group: _ReaderMenu.score),
+              Expanded(
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _displayButton(),
+                      Flexible(child: title),
+                      _readerToolsMenu(group: _ReaderMenu.score),
+                    ],
+                  ),
+                ),
+              ),
               ...editing,
               const SizedBox(width: 12),
               ...utilities,

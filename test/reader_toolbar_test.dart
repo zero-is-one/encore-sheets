@@ -43,6 +43,11 @@ void main() {
           expect(find.byTooltip(label), findsOneWidget);
           expect(find.text(label), findsNothing);
         }
+        final display = tester.getRect(find.byTooltip('Display'));
+        final title = tester.getRect(find.text('First Light'));
+        final scoreActions = tester.getRect(find.byTooltip('Score actions'));
+        expect(title.left, closeTo(display.right, 1));
+        expect(title.right, closeTo(scoreActions.left, 1));
       }
       expect(tester.takeException(), isNull);
     }
