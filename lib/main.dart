@@ -5590,9 +5590,9 @@ class _ReaderState extends State<Reader> {
             children: [
               ...navigation,
               const SizedBox(width: 12),
-              _displayButton(labelled: true),
+              _displayButton(),
               Expanded(child: title),
-              _readerToolsMenu(group: _ReaderMenu.score, labelled: true),
+              _readerToolsMenu(group: _ReaderMenu.score),
               ...editing,
               const SizedBox(width: 12),
               ...utilities,
@@ -5950,23 +5950,11 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Widget _displayButton({bool labelled = false}) {
-    if (labelled) {
-      return Tooltip(
-        message: 'Display',
-        child: TextButton.icon(
-          onPressed: _pages > 0 && !_picking ? _showDisplayPanel : null,
-          icon: const Icon(Icons.view_quilt_outlined, size: 18),
-          label: const Text('Display'),
-        ),
-      );
-    }
-    return IconButton(
-      tooltip: 'Display',
-      onPressed: _pages > 0 && !_picking ? _showDisplayPanel : null,
-      icon: const Icon(Icons.view_quilt_outlined),
-    );
-  }
+  Widget _displayButton() => IconButton(
+    tooltip: 'Display',
+    onPressed: _pages > 0 && !_picking ? _showDisplayPanel : null,
+    icon: const Icon(Icons.view_quilt_outlined),
+  );
 
   Future<void> _showDisplayPanel() async {
     final action = await showDialog<_ReaderDisplay>(

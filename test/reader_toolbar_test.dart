@@ -20,8 +20,8 @@ void main() {
       'Reader tools',
     ];
 
-    for (final width in [1024.0, 320.0]) {
-      tester.view.physicalSize = Size(width, 768);
+    for (final size in [const Size(834, 1194), const Size(320, 768)]) {
+      tester.view.physicalSize = size;
       await tester.pumpWidget(const EncoreSheets());
       await tester.pump();
 
@@ -33,11 +33,16 @@ void main() {
         orderedEquals(positions.map((point) => point.dx).toList()..sort()),
       );
       expect(positions.map((point) => point.dy).toSet(), hasLength(1));
-      if (width < 720) {
+      if (size.width < 720) {
         expect(
           tester.getCenter(find.text('First Light')).dy,
           lessThan(positions.first.dy),
         );
+      } else {
+        for (final label in ['Display', 'Score actions']) {
+          expect(find.byTooltip(label), findsOneWidget);
+          expect(find.text(label), findsNothing);
+        }
       }
       expect(tester.takeException(), isNull);
     }
