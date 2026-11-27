@@ -118,7 +118,9 @@ class _ReflowScreenState extends State<ReflowScreen>
     if (!_scroll.hasClients || _scroll.position.maxScrollExtent <= 0) return;
     if (_scroll.offset >= _scroll.position.maxScrollExtent) _scroll.jumpTo(0);
     _previousTick = Duration.zero;
-    setState(() => _playback.start());
+    setState(() {
+      _playback.start();
+    });
   }
 
   void _jump(int index, {bool animate = true}) {

@@ -5,15 +5,54 @@ import 'package:encoresheets/pdf_assembly.dart';
 import 'package:encoresheets/page_crop.dart';
 import 'package:encoresheets/pdf_export.dart';
 import 'package:encoresheets/pdf_rearrange.dart';
+import 'package:encoresheets/reflow_screen.dart';
 import 'package:encoresheets/score_library.dart';
 import 'package:encoresheets/score_text_search.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart' show ListView, MaterialApp;
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   Pdfrx.cacheDirectoryPath = Directory.systemTemp.path;
+
+  testWidgets('reflow advances hands-free and pauses in place', (tester) async {
+    final document = (await tester.runAsync(
+      () => openRearrangeDocument(XFile('assets/first_light.pdf')),
+    ))!;
+    addTearDown(document.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReflowScreen(
+          document: document,
+          first: 1,
+          last: 3,
+          initialPage: 1,
+          saved: [
+            for (var page = 1; page <= 3; page++)
+              (page: page, top: .2, bottom: .3),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Continuous scroll'));
+    await tester.pump();
+    final scroll = tester.widget<ListView>(find.byType(ListView)).controller!;
+    expect(scroll.offset, 0);
+    await tester.tap(find.text('Play'));
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(scroll.offset, greaterThan(0));
+    await tester.tap(find.text('Pause'));
+    await tester.pump();
+    final paused = scroll.offset;
+    await tester.pump(const Duration(seconds: 1));
+    expect(scroll.offset, paused);
+    await tester.pumpWidget(const MaterialApp());
+  });
 
   test(
     'imports bookmark tables with quoted fields, ranges, and matched pages',
