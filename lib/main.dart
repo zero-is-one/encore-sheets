@@ -6098,7 +6098,14 @@ class _ReaderState extends State<Reader> {
             contentPadding: EdgeInsets.zero,
           ),
         ),
-      PopupMenuItem(onTap: _pinQuickTools, child: const Text('Pin tools…')),
+      PopupMenuItem(
+        onTap: _pinQuickTools,
+        child: const ListTile(
+          leading: Icon(Icons.push_pin_outlined),
+          title: Text('Pin tools…'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
     ],
   );
 
