@@ -110,6 +110,7 @@ void main() {
     expect(next.dx, greaterThan(pageCount.dx));
     expect(next.dx - previous.dx, lessThan(160));
     final scoreBounds = tester.getRect(find.byType(PdfViewer));
+    expect(find.byTooltip('Open in new tab'), findsNothing);
     final visiblePage = viewer().controller!.visibleRect;
     await tester.tap(find.byIcon(Icons.draw_outlined));
     await tester.pumpAndSettle();

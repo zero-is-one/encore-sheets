@@ -52,6 +52,7 @@ class ReaderAppearanceOptions {
     this.palette = ReaderPalette.classic,
     this.boldIcons = false,
     this.showTabs = true,
+    this.alwaysShowTabs = false,
     this.showStatusBar = true,
     this.showMetadata = true,
     this.animateTurns = true,
@@ -68,6 +69,7 @@ class ReaderAppearanceOptions {
           ReaderPalette.classic,
       boldIcons: json['boldIcons'] == true,
       showTabs: json['showTabs'] != false,
+      alwaysShowTabs: json['alwaysShowTabs'] == true,
       showStatusBar: json['showStatusBar'] != false,
       showMetadata: json['showMetadata'] != false,
       animateTurns: json['animateTurns'] != false,
@@ -78,6 +80,7 @@ class ReaderAppearanceOptions {
   final ReaderPalette palette;
   final bool boldIcons,
       showTabs,
+      alwaysShowTabs,
       showStatusBar,
       showMetadata,
       animateTurns,
@@ -90,6 +93,7 @@ class ReaderAppearanceOptions {
     'palette': palette.name,
     'boldIcons': boldIcons,
     'showTabs': showTabs,
+    'alwaysShowTabs': alwaysShowTabs,
     'showStatusBar': showStatusBar,
     'showMetadata': showMetadata,
     'animateTurns': animateTurns,
@@ -131,6 +135,7 @@ Future<ReaderAppearanceOptions?> chooseReaderAppearance(
               for (final option in const {
                 'boldIcons': 'Bold toolbar icons',
                 'showTabs': 'Show the score tab bar',
+                'alwaysShowTabs': 'Show the tab bar before opening a tab',
                 'showStatusBar': 'Show the system status bar',
                 'showMetadata': 'Show details in library rows',
                 'animateTurns': 'Animate page turns',
@@ -139,8 +144,11 @@ Future<ReaderAppearanceOptions?> chooseReaderAppearance(
                 SwitchListTile(
                   title: Text(option.value),
                   value: draft[option.key] == true,
-                  onChanged: (value) =>
-                      refresh(() => draft[option.key] = value),
+                  onChanged:
+                      option.key == 'alwaysShowTabs' &&
+                          draft['showTabs'] != true
+                      ? null
+                      : (value) => refresh(() => draft[option.key] = value),
                 ),
             ],
           ),

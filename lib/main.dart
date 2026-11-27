@@ -1437,6 +1437,7 @@ class _ReaderState extends State<Reader> {
                 transferRestricted: _restricted(RestrictedTool.transfers),
                 connectionsRestricted: _restricted(RestrictedTool.connections),
                 onScoreQueue: (ids) => selectedQueue = ids,
+                canOpenTabs: _appearance.showTabs,
                 onPinScore: (id) => _updateScoreTabs([
                   ..._scoreTabIds.where((value) => value != id),
                   id,
@@ -1710,7 +1711,16 @@ class _ReaderState extends State<Reader> {
         }
         return;
       }
-      if (result.startsWith('bookmark:')) {
+      if (result.startsWith('tab:')) {
+        final score = _library.lookup(result.substring(4));
+        if (score == null) return;
+        if (!_scoreTabIds.contains(score.id)) {
+          await _updateScoreTabs([..._scoreTabIds, score.id]);
+        }
+        if (mounted && _scoreTabIds.contains(score.id)) {
+          await _openLibraryScore(score);
+        }
+      } else if (result.startsWith('bookmark:')) {
         final parts = result.split(':');
         final entry = _library.lookup(parts[1])!;
         final bookmark = entry.bookmarks.firstWhere(
@@ -5766,7 +5776,7 @@ class _ReaderState extends State<Reader> {
                     if (_showControls &&
                         !_performance &&
                         _appearance.showTabs &&
-                        (_scoreTabIds.isNotEmpty || _library.recent.isNotEmpty))
+                        (_scoreTabIds.isNotEmpty || _appearance.alwaysShowTabs))
                       _scoreTabs(),
                     Expanded(
                       key: const ValueKey('score-viewport'),
@@ -5861,10 +5871,10 @@ class _ReaderState extends State<Reader> {
         separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           if (index == _scoreTabIds.length) {
-            return TextButton.icon(
+            return IconButton(
+              tooltip: 'Open in new tab',
               onPressed: _picking || _savingTabs ? null : _openNewScoreTab,
               icon: const Icon(Icons.add),
-              label: const Text('Open in new tab'),
             );
           }
           final id = _scoreTabIds[index];
@@ -5917,10 +5927,7 @@ class _ReaderState extends State<Reader> {
             icon: const Icon(Icons.search),
           ),
         ];
-        final utilities = [
-          _audioToolsMenu(),
-          _readerToolsMenu(),
-        ];
+        final utilities = [_audioToolsMenu(), _readerToolsMenu()];
         final title = _readerTitle();
         final display = _displayButton();
         final scoreActions = _readerToolsMenu(group: _ReaderMenu.score);
@@ -6297,11 +6304,10 @@ class _ReaderState extends State<Reader> {
           );
         }
       case _ReaderDisplay.scoreTabs:
-        if (_entry case final score?) {
-          _updateScoreTabs([
-            ..._scoreTabIds.where((id) => id != score.id),
-            if (!_scoreTabIds.contains(score.id)) score.id,
-          ]);
+        if (_entry case final score? when !_scoreTabIds.contains(score.id)) {
+          await _updateScoreTabs([..._scoreTabIds, score.id]);
+        } else {
+          await _openNewScoreTab();
         }
       case _ReaderDisplay.hideControls:
         setState(() => _showControls = false);
@@ -6713,11 +6719,13 @@ class _ReaderState extends State<Reader> {
                   value: _ReaderDisplay.performance,
                   child: Text('Performance mode'),
                 ),
-                CheckedPopupMenuItem(
+                PopupMenuItem(
                   value: _ReaderDisplay.scoreTabs,
-                  enabled: _entry != null && !_savingTabs,
-                  checked: _scoreTabIds.contains(_entry?.id),
-                  child: const Text('Keep score in tabs'),
+                  enabled:
+                      _appearance.showTabs &&
+                      !_savingTabs &&
+                      (_entry != null || _library.recent.isNotEmpty),
+                  child: const Text('Open in new tab'),
                 ),
                 PopupMenuItem(
                   value: _ReaderDisplay.exportPdf,
@@ -7512,6 +7520,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.connectionsRestricted,
     required this.onScoreQueue,
     required this.onPinScore,
+    required this.canOpenTabs,
     required this.compact,
     required this.metadataIconKeys,
     required this.focusSearch,
@@ -7530,6 +7539,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool connectionsRestricted;
   final ValueChanged<List<String>> onScoreQueue;
   final Future<void> Function(String) onPinScore;
+  final bool canOpenTabs;
   final bool compact;
   final Map<String, String> metadataIconKeys;
   final bool focusSearch;
@@ -8058,7 +8068,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         title: _draggingScore
             ? Row(
                 children: [
-                  _scoreDrop('Pin tab', Icons.tab, widget.onPinScore),
+                  if (widget.canOpenTabs)
+                    _scoreDrop('Pin tab', Icons.tab, widget.onPinScore),
                   if (widget.setlists.isNotEmpty)
                     _scoreDrop('Setlist', Icons.queue_music, _dropIntoSetlist),
                 ],
@@ -8443,6 +8454,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                         _assignCollections(score);
                                       } else if (action == 'ranges') {
                                         _openBookmarkRange(score);
+                                      } else if (action == 'tab') {
+                                        Navigator.pop(
+                                          context,
+                                          'tab:${score.id}',
+                                        );
                                       } else if (action == 'copy') {
                                         _copyLibraryScore(score);
                                       } else if (action == 'trash') {
@@ -8470,6 +8486,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                       }
                                     },
                                     itemBuilder: (_) => [
+                                      if (widget.canOpenTabs)
+                                        const PopupMenuItem(
+                                          value: 'tab',
+                                          child: Text('Open in new tab'),
+                                        ),
                                       if (score.bookmarks.any(
                                         (bookmark) => bookmark.isItem,
                                       ))
