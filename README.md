@@ -191,8 +191,11 @@ warranty, liability, responsible use, and precautions for test builds.
 
 ## License
 
-**MIT OR Apache-2.0**, at your option. See [LICENSE-MIT](LICENSE-MIT) and
+The software is **MIT OR Apache-2.0**, at your option. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE) for the full terms.
+
+The EncoreSheets name, logos, and app icons are covered by the
+[EncoreSheets Brand License](LICENSE-BRAND).
 
 EncoreSheets is an independent project. Third-party components and assets
 retain their own licenses and attribution. See [NOTICE](NOTICE) for details.
