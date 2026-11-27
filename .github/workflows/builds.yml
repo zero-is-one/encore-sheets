@@ -59,7 +59,8 @@ jobs:
         if: matrix.target == 'macos'
         run: |
           if [ ! -d macos ]; then
-            flutter create --no-pub --platforms=macos --org app.encoresheets .
+            flutter create --no-pub --platforms=macos --org app.encoresheets "$RUNNER_TEMP/encoresheets"
+            mv "$RUNNER_TEMP/encoresheets/macos" macos
           fi
           flutter pub get --enforce-lockfile
           flutter build macos --release --no-pub
@@ -69,8 +70,10 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path windows)) {
-            flutter create --no-pub --platforms=windows --org app.encoresheets .
+            $templateProject = Join-Path $env:RUNNER_TEMP encoresheets
+            flutter create --no-pub --platforms=windows --org app.encoresheets $templateProject
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Move-Item (Join-Path $templateProject windows) windows
           }
           flutter pub get --enforce-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
