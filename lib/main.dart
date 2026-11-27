@@ -7450,6 +7450,31 @@ class _LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<_LibraryScreen> {
+  Future<void> _openBookmarkRange(ScoreEntry score) async {
+    final ranges = score.bookmarks.where((bookmark) => bookmark.isItem).toList()
+      ..sort((a, b) => a.page.compareTo(b.page));
+    final selected = await showDialog<ScoreBookmark>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: Text(score.title),
+        children: [
+          for (final range in ranges)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, range),
+              child: Text(
+                '${range.title} · Pages ${range.page}–${range.endPage}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    widget.onScoreQueue([
+      for (final range in ranges) range.selectionId(score.id),
+    ]);
+    Navigator.pop(context, 'bookmark:${score.id}:${selected.id}');
+  }
+
   LibrarySearchOptions _searchOptions = const LibrarySearchOptions();
   late final ScrollController _libraryScroll;
 
@@ -8324,6 +8349,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                         _dropIntoSetlist(score.id);
                                       } else if (action == 'libraries') {
                                         _assignCollections(score);
+                                      } else if (action == 'ranges') {
+                                        _openBookmarkRange(score);
                                       } else if (action == 'copy') {
                                         _copyLibraryScore(score);
                                       } else if (action == 'trash') {
@@ -8351,6 +8378,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                       }
                                     },
                                     itemBuilder: (_) => [
+                                      if (score.bookmarks.any(
+                                        (bookmark) => bookmark.isItem,
+                                      ))
+                                        const PopupMenuItem(
+                                          value: 'ranges',
+                                          child: Text('Open bookmarked range'),
+                                        ),
                                       const PopupMenuItem(
                                         value: 'setlist',
                                         child: Text('Add to setlist'),
