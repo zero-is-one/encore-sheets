@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'ensemble_session.dart';
@@ -85,6 +86,27 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
                 if (session.leading)
                   SelectableText('Group code ${session.code}'),
                 if (session.leading)
+                  TextButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            await Clipboard.setData(
+                              ClipboardData(
+                                text: '${session.address}\n${session.code}',
+                              ),
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Connection details copied.'),
+                                ),
+                              );
+                            }
+                          },
+                    icon: const Icon(Icons.copy),
+                    label: const Text('Copy connection details'),
+                  ),
+                if (session.leading)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Show left pages of a two-device spread'),
@@ -117,6 +139,33 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
                   enabled: !_busy,
                   autocorrect: false,
                   decoration: const InputDecoration(labelText: 'Group code'),
+                ),
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          final clipboard = await Clipboard.getData(
+                            Clipboard.kTextPlain,
+                          );
+                          if (!mounted) return;
+                          final lines = clipboard?.text?.trim().split(
+                            RegExp(r'\r?\n'),
+                          );
+                          if (lines == null ||
+                              lines.length != 2 ||
+                              lines.any((line) => line.trim().isEmpty)) {
+                            setState(
+                              () => _error = 'Copy the address and code from the leader first.',
+                            );
+                            return;
+                          }
+                          setState(() {
+                            _error = null;
+                            _address.text = lines.first.trim();
+                            _code.text = lines.last.trim();
+                          });
+                        },
+                  child: const Text('Paste connection details'),
                 ),
                 DropdownButton<EnsembleFollowMode>(
                   value: _mode,
