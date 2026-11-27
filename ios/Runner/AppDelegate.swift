@@ -198,7 +198,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
         result(FlutterMethodNotImplemented)
         return
       }
-      if let defaults = UserDefaults(suiteName: "group.app.encoresheets.encoresheets") {
+      if let defaults = UserDefaults(suiteName: "group.com.encoresheets.app") {
         let total = max(0, values["total"] ?? 0)
         let reached = min(total, max(0, values["reached"] ?? 0))
         if defaults.integer(forKey: "widgetTotal") != total ||

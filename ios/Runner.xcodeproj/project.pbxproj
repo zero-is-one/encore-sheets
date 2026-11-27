@@ -400,7 +400,7 @@
 					"@executable_path/Frameworks",
 				);
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -416,7 +416,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -433,7 +433,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -448,7 +448,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -582,7 +582,7 @@
 					"@executable_path/Frameworks",
 				);
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -605,7 +605,7 @@
 					"@executable_path/Frameworks",
 				);
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets;
+				PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -613,9 +613,9 @@
 			};
 			name = Release;
 		};
-		7EF09300000000000000000d = {isa = XCBuildConfiguration; baseConfigurationReference = 9740EEB21CF90195004384FC; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		7EF09300000000000000000e = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		7EF09300000000000000000f = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = app.encoresheets.encoresheets.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Profile; };
+		7EF09300000000000000000d = {isa = XCBuildConfiguration; baseConfigurationReference = 9740EEB21CF90195004384FC; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		7EF09300000000000000000e = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		7EF09300000000000000000f = {isa = XCBuildConfiguration; baseConfigurationReference = 7AFA3C8E1D35360C0083082E; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements; CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = RehearsalWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.encoresheets.app.PracticeWidget; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Profile; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

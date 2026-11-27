@@ -1,4 +1,4 @@
-package app.encoresheets.encoresheets
+package com.encoresheets.app
 
 import android.app.Activity
 import android.graphics.Bitmap

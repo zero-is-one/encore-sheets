@@ -21,7 +21,7 @@ private struct PracticeProvider: TimelineProvider {
     }
 
     private func current() -> PracticeEntry {
-        let defaults = UserDefaults(suiteName: "group.app.encoresheets.encoresheets")
+        let defaults = UserDefaults(suiteName: "group.com.encoresheets.app")
         return PracticeEntry(date: Date(), reached: defaults?.integer(forKey: "widgetReached") ?? 0,
                              total: defaults?.integer(forKey: "widgetTotal") ?? 0)
     }

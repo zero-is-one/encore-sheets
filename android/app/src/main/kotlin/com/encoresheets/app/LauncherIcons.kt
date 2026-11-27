@@ -1,4 +1,4 @@
-package app.encoresheets.encoresheets
+package com.encoresheets.app
 
 import android.content.ComponentName
 import android.content.Context
