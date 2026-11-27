@@ -184,13 +184,15 @@ assistants and physical tablets need a reachable HTTPS origin. Restrict
 enrollment to the operator and configure reverse-proxy rate limits for public
 OAuth endpoints before exposing a deployment.
 
-## License
-
-EncoreSheets is available under the [MIT License](LICENSE-MIT) or the
-[Apache License 2.0](LICENSE-APACHE), at your option. Third-party components
-and assets retain their own licenses and attribution.
-
 ## Disclaimer
 
-GitHub Actions artifacts are test builds. See the [disclaimer](DISCLAIMER.md)
-for warranty terms and guidance on using test builds and sharing scores.
+EncoreSheets is provided as is. The [disclaimer](DISCLAIMER.md) covers
+warranty, liability, responsible use, and precautions for test builds.
+
+## License
+
+**MIT OR Apache-2.0**, at your option. See [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE) for the full terms.
+
+EncoreSheets is an independent project. Third-party components and assets
+retain their own licenses and attribution. See [NOTICE](NOTICE) for details.

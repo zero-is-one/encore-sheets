@@ -1,0 +1,16 @@
+EncoreSheets
+Copyright (c) 2026 EncoreSheets contributors.
+
+SPDX-License-Identifier: MIT OR Apache-2.0
+You may choose the MIT License (LICENSE-MIT) or the Apache License,
+Version 2.0 (LICENSE-APACHE).
+
+Third-party material
+Flutter and Dart dependencies are listed in pubspec.yaml and pubspec.lock.
+Third-party components retain their own licenses and attribution.
+The bundled Noto Sans font is distributed under the SIL Open Font License
+1.1. The license and attribution are in assets/NotoSans-OFL.txt.
+
+Project identity
+EncoreSheets is an independent project. References to third-party platforms,
+services, and file formats describe supported uses and integrations.
