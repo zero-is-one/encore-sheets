@@ -228,6 +228,7 @@ void main() {
     await tester.tap(find.text('Play'));
     await waitUntil(
       () =>
+          find.byType(PdfViewer).evaluate().length == 1 &&
           viewer().params.paging == null &&
           viewer().controller!.isReady &&
           find.text('Transition first').evaluate().isNotEmpty,

@@ -456,8 +456,12 @@ class _SetlistEditorState extends State<_SetlistEditor> {
         move: move,
       ));
       if (!mounted) return;
-      if (move)
-        setState(() => _scores.removeWhere((item) => item.key == row.key));
+      if (move) {
+        setState(() {
+          if (_replacement == row.key) _replacement = null;
+          _scores.removeWhere((item) => item.key == row.key);
+        });
+      }
       _clipboardStatus(move ? 'Score cut from this draft.' : 'Score copied.');
     } catch (_) {
       _clipboardStatus('Could not copy this selection.');
