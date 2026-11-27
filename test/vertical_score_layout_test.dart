@@ -128,7 +128,7 @@ void main() {
     );
     await tester.tap(find.text('Page 1'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Reader tools'));
+    await tester.tap(find.byTooltip('Display'));
     await tester.pumpAndSettle();
     final option = find.text('Scrolling display · Paged');
     await tester.ensureVisible(option);
@@ -156,7 +156,7 @@ void main() {
       controller.layout.pageLayouts[1].top,
       greaterThan(controller.layout.pageLayouts.first.bottom),
     );
-    await tester.tap(find.byTooltip('Reader tools'));
+    await tester.tap(find.byTooltip('Display'));
     await tester.pumpAndSettle();
     final automatic = find.text('Automatic scrolling');
     await tester.ensureVisible(automatic);
@@ -196,7 +196,7 @@ void main() {
       documentOffset: Offset(0, controller.layout.pageLayouts[1].top),
     );
     await waitUntil(() => find.text('2 / 3').evaluate().isNotEmpty);
-    await tester.tap(find.byTooltip('Reader tools'));
+    await tester.tap(find.byTooltip('Display'));
     await tester.pumpAndSettle();
     final scrolling = find.text(
       'Scrolling display · Vertical scrolling · Fit width',

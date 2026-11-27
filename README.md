@@ -11,10 +11,10 @@ performance.
 - **Read and perform.** Open a score at its last page, jump with the page slider,
   or turn pages by tapping, swiping, or using a keyboard or compatible pedal.
   Use facing pages, half-page turns, or performance mode when you need a
-  different view of the music. Open **Reader tools → Scrolling display** for
+  different view of the music. Open **Display → Scrolling display** for
   continuous vertical scrolling with fit-page and fit-width scaling. Choose a
   library default or override it for the current score.
-  In a vertical display, open **Reader tools → Automatic scrolling** to set
+  In a vertical display, open **Display → Automatic scrolling** to set
   the speed and optionally continue to the next setlist score. Use **Input
   shortcuts** to assign a keyboard key or pedal to start and stop scrolling.
 - **Mark up a score.** Draw, highlight, add text or notation stamps, and organize
@@ -24,7 +24,7 @@ performance.
   bookmarks, and arrange setlists in performance order. Add bookmarks, page
   flags, and repeat or coda links to navigate within a score.
   Add on-page buttons for websites, supported app links, or local files through
-  **Reader tools → On-page actions**. On Android and iPad, file buttons open the
+  **Score actions → On-page actions**. On Android and iPad, file buttons open the
   selected attachment with a compatible app. Attachments stay on the device
   where they were added.
 - **Rehearse.** Attach a local audio track, record takes, or use the metronome,
