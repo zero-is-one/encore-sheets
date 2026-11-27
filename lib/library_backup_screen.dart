@@ -149,7 +149,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
             Text(
               widget.recoveryRequired
                   ? 'The library catalog could not be recovered automatically. Restore a full library backup to open the library again.'
-                  : 'A backup includes your PDFs, annotations, setlists, libraries, and reader settings. EncoreSheets keeps two local catalog snapshots for automatic recovery.',
+                  : 'A backup includes your PDFs, annotations, setlists, libraries, and reader settings. Keep separate copies of linked audio and practice recordings. EncoreSheets keeps two local catalog snapshots for automatic recovery.',
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
