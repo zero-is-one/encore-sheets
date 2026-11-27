@@ -4,6 +4,8 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val releaseKeystore = providers.environmentVariable("ENCORESHEETS_RELEASE_KEYSTORE")
+
 android {
     namespace = "com.encoresheets.app"
     compileSdk = flutter.compileSdkVersion
@@ -27,9 +29,11 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        if (releaseKeystore.isPresent) {
+            ndk.abiFilters.add("arm64-v8a")
+        }
     }
 
-    val releaseKeystore = providers.environmentVariable("ENCORESHEETS_RELEASE_KEYSTORE")
     if (releaseKeystore.isPresent) {
         signingConfigs.create("distribution") {
             storeFile = file(releaseKeystore.get())
