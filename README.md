@@ -14,6 +14,7 @@
   <a href="#what-works">Features</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="#file-formats">File formats</a> ·
+  <a href="#license">License</a> ·
   <a href="https://github.com/zero-is-one/encoresheets/issues">Report an issue</a>
 </p>
 
@@ -181,3 +182,14 @@ The service defaults to `http://127.0.0.1:8787` for local testing. Remote
 assistants and physical tablets need a reachable HTTPS origin. Restrict
 enrollment to the operator and configure reverse-proxy rate limits for public
 OAuth endpoints before exposing a deployment.
+
+## License
+
+EncoreSheets does not currently have a project-wide software license. Bundled
+third-party components and assets are subject to their own terms.
+
+## Disclaimer
+
+EncoreSheets is in development. GitHub Actions artifacts are test builds.
+Keep copies of your original scores and export a library backup before relying
+on a test build for rehearsal or performance.
