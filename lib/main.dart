@@ -258,6 +258,7 @@ class _ReaderState extends State<Reader> {
   bool _editingText = false;
   InkTool _tool = InkTool.pen;
   InkShape? _shape;
+  InkShape? _favoriteShape;
   bool _showRuler = false;
   InkRulerGuide _ruler = (
     start: const Offset(.15, .45),
@@ -492,6 +493,9 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
           _markupPaletteAtTop = data['markupPaletteAtTop'] == true;
+          _favoriteShape = InkShape.values
+              .where((shape) => shape.name == data['favoriteInkShape'])
+              .firstOrNull;
           _libraryBrowseState =
               (data['libraryBrowseState'] is Map<String, dynamic>)
               ? data['libraryBrowseState'] as Map<String, dynamic>
@@ -6856,19 +6860,13 @@ class _ReaderState extends State<Reader> {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
             _stamp ??
-                switch (_shape) {
-                  InkShape.line => 'Line',
-                  InkShape.rectangle => 'Rectangle',
-                  InkShape.oval => 'Oval',
-                  InkShape.arrow => 'Arrow',
-                  InkShape.ruler => 'Ruler',
-                  null => switch (_tool) {
-                    InkTool.pen => 'Pen',
-                    InkTool.highlighter => 'Highlighter',
-                    InkTool.eraser => 'Eraser',
-                    InkTool.text => 'Text',
-                    InkTool.selection => 'Selection',
-                  },
+                _shape?.label ??
+                switch (_tool) {
+                  InkTool.pen => 'Pen',
+                  InkTool.highlighter => 'Highlighter',
+                  InkTool.eraser => 'Eraser',
+                  InkTool.text => 'Text',
+                  InkTool.selection => 'Selection',
                 },
             style: TextStyle(color: _brass, fontWeight: FontWeight.w600),
           ),
@@ -6979,26 +6977,37 @@ class _ReaderState extends State<Reader> {
               ),
           ],
         ),
+        if (_favoriteShape case final favorite?)
+          TextButton.icon(
+            onPressed: () => _selectMarkupShape(favorite),
+            icon: const Icon(Icons.star_outline),
+            label: Text(favorite.label),
+          ),
         PopupMenuButton<InkShape>(
           tooltip: 'Draw shape',
           icon: Icon(
             Icons.interests_outlined,
             color: _shape == null ? null : _brass,
           ),
-          onSelected: (shape) => setState(() {
-            _shape = shape;
-            _stamp = null;
-            _tool = InkTool.pen;
-          }),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: InkShape.line, child: Text('Line')),
-            PopupMenuItem(value: InkShape.rectangle, child: Text('Rectangle')),
-            PopupMenuItem(value: InkShape.oval, child: Text('Oval')),
-            PopupMenuItem(value: InkShape.arrow, child: Text('Arrow')),
-            PopupMenuItem(
-              value: InkShape.ruler,
-              child: Text('Ruler · 15° steps'),
-            ),
+          onSelected: _selectMarkupShape,
+          itemBuilder: (_) => [
+            for (final shape in InkShape.values)
+              PopupMenuItem(
+                value: shape,
+                child: Text(
+                  shape == InkShape.ruler ? 'Ruler · 15° steps' : shape.label,
+                ),
+              ),
+            if (_shape case final shape? when shape != _favoriteShape)
+              PopupMenuItem(
+                onTap: () => _setFavoriteShape(shape),
+                child: Text('Favorite ${shape.label}'),
+              ),
+            if (_favoriteShape != null)
+              PopupMenuItem(
+                onTap: () => _setFavoriteShape(null),
+                child: const Text('Remove favorite'),
+              ),
           ],
         ),
         PopupMenuButton<bool>(
@@ -7053,6 +7062,25 @@ class _ReaderState extends State<Reader> {
       ],
     ),
   );
+
+  void _selectMarkupShape(InkShape shape) => setState(() {
+    _shape = shape;
+    _stamp = null;
+    _tool = InkTool.pen;
+  });
+
+  Future<void> _setFavoriteShape(InkShape? shape) async {
+    try {
+      await _library.updatePreferences({'favoriteInkShape': shape?.name});
+      if (mounted) setState(() => _favoriteShape = shape);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the favorite shape.')),
+        );
+      }
+    }
+  }
 
   Widget _markupOverlay() => LayoutBuilder(
     builder: (context, space) {

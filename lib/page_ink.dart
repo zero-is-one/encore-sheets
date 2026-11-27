@@ -11,7 +11,16 @@ import 'package:flutter/widgets.dart';
 
 enum InkTool { pen, highlighter, eraser, text, selection }
 
-enum InkShape { line, rectangle, oval, arrow, ruler }
+enum InkShape {
+  line('Line'),
+  rectangle('Rectangle'),
+  oval('Oval'),
+  arrow('Arrow'),
+  ruler('Ruler');
+
+  const InkShape(this.label);
+  final String label;
+}
 
 typedef PageText = ({String value, Offset position, double size});
 typedef InkLayer = ({String id, String name, bool visible});
