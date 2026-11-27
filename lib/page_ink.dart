@@ -16,6 +16,7 @@ enum InkShape { line, rectangle, oval, arrow, ruler }
 typedef PageText = ({String value, Offset position, double size});
 typedef InkLayer = ({String id, String name, bool visible});
 typedef InkLayerChange = ({String target, String? source});
+typedef InkRulerGuide = ({Offset start, Offset end});
 
 const defaultInkLayer = (id: 'base', name: 'Annotations', visible: true);
 
@@ -556,6 +557,7 @@ class InkSurface extends StatefulWidget {
     this.color,
     this.onTextTap,
     this.shape,
+    this.ruler,
     this.freeformSelection = false,
     this.pressure = false,
     this.tilt = false,
@@ -574,6 +576,7 @@ class InkSurface extends StatefulWidget {
   final int? color;
   final void Function(Offset point, Size pageSize)? onTextTap;
   final InkShape? shape;
+  final InkRulerGuide? ruler;
   final bool freeformSelection;
   final bool pressure;
   final bool tilt;
@@ -592,11 +595,17 @@ class _InkSurfaceState extends State<InkSurface> {
   InkTool? _activeTool;
   InkShape? _activeShape;
   bool _stylus = false;
+  InkRulerGuide? _strokeGuide;
 
-  Offset _point(PointerEvent event, Size size) => Offset(
-    (event.localPosition.dx / size.width).clamp(0.0, 1.0),
-    (event.localPosition.dy / size.height).clamp(0.0, 1.0),
-  );
+  Offset _point(PointerEvent event, Size size) {
+    final position = _strokeGuide == null
+        ? event.localPosition
+        : rulerProjection(_strokeGuide!, event.localPosition, size);
+    return Offset(
+      (position.dx / size.width).clamp(0.0, 1.0),
+      (position.dy / size.height).clamp(0.0, 1.0),
+    );
+  }
 
   void _end(bool commit) {
     _pointer = null;
@@ -609,6 +618,7 @@ class _InkSurfaceState extends State<InkSurface> {
     _stylus = false;
     _activeTool = null;
     _activeShape = null;
+    _strokeGuide = null;
   }
 
   double? _widthFor(PointerEvent event) {
@@ -643,6 +653,7 @@ class _InkSurfaceState extends State<InkSurface> {
       final stylus = _stylus;
       _activeTool = null;
       _activeShape = null;
+      _strokeGuide = null;
       _stylus = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (tool == InkTool.selection) {
@@ -722,6 +733,18 @@ class _InkSurfaceState extends State<InkSurface> {
             _activeTool = tool;
             _activeShape = widget.enabled && !erasing ? widget.shape : null;
             _stylus = stylus;
+            if (widget.ruler case final ruler?
+                when _activeShape == null &&
+                    (tool == InkTool.pen || tool == InkTool.highlighter)) {
+              final projected = rulerProjection(
+                ruler,
+                event.localPosition,
+                size,
+              );
+              if ((projected - event.localPosition).distance <= 18) {
+                _strokeGuide = ruler;
+              }
+            }
             widget.ink.begin(
               _point(event, size),
               tool: tool,
@@ -761,6 +784,136 @@ class _InkSurfaceState extends State<InkSurface> {
       },
     );
   }
+}
+
+Offset rulerProjection(InkRulerGuide ruler, Offset point, Size size) {
+  final start = Offset(
+    ruler.start.dx * size.width,
+    ruler.start.dy * size.height,
+  );
+  final end = Offset(ruler.end.dx * size.width, ruler.end.dy * size.height);
+  final edge = end - start;
+  if (edge.distanceSquared == 0) return start;
+  final relative = point - start;
+  final fraction =
+      (relative.dx * edge.dx + relative.dy * edge.dy) / edge.distanceSquared;
+  return start + edge * fraction.clamp(0.0, 1.0);
+}
+
+class InkRulerOverlay extends StatelessWidget {
+  const InkRulerOverlay({
+    super.key,
+    required this.guide,
+    required this.color,
+    required this.onChanged,
+  });
+
+  final InkRulerGuide guide;
+  final Color color;
+  final ValueChanged<InkRulerGuide> onChanged;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, bounds) {
+      final size = bounds.biggest;
+      Offset pixels(Offset position) =>
+          Offset(position.dx * size.width, position.dy * size.height);
+      Offset normalized(Offset delta) =>
+          Offset(delta.dx / size.width, delta.dy / size.height);
+      Offset clamp(Offset point) =>
+          Offset(point.dx.clamp(.04, .96), point.dy.clamp(.04, .96));
+
+      Widget handle(Offset point, String label, ValueChanged<Offset> move) {
+        final position = pixels(point);
+        return Positioned(
+          left: position.dx - 18,
+          top: position.dy - 18,
+          width: 36,
+          height: 36,
+          child: Semantics(
+            label: label,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanUpdate: (event) => move(normalized(event.delta)),
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const SizedBox.square(dimension: 12),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      final start = guide.start;
+      final end = guide.end;
+      void moveEnds(Offset delta) {
+        final shift = Offset(
+          delta.dx.clamp(
+            .04 - math.min(start.dx, end.dx),
+            .96 - math.max(start.dx, end.dx),
+          ),
+          delta.dy.clamp(
+            .04 - math.min(start.dy, end.dy),
+            .96 - math.max(start.dy, end.dy),
+          ),
+        );
+        onChanged((start: start + shift, end: end + shift));
+      }
+
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          IgnorePointer(
+            child: CustomPaint(
+              painter: _RulerLine(pixels(start), pixels(end), color),
+            ),
+          ),
+          handle(start, 'Adjust ruler start', (delta) {
+            final point = clamp(start + delta);
+            if ((point - end).distance >= .12) {
+              onChanged((start: point, end: end));
+            }
+          }),
+          handle(end, 'Adjust ruler end', (delta) {
+            final point = clamp(end + delta);
+            if ((point - start).distance >= .12) {
+              onChanged((start: start, end: point));
+            }
+          }),
+          handle((start + end) / 2, 'Move ruler', moveEnds),
+        ],
+      );
+    },
+  );
+}
+
+class _RulerLine extends CustomPainter {
+  const _RulerLine(this.start, this.end, this.color);
+
+  final Offset start, end;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+      start,
+      end,
+      Paint()
+        ..color = color.withValues(alpha: .75)
+        ..strokeWidth = 2,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_RulerLine oldDelegate) =>
+      start != oldDelegate.start ||
+      end != oldDelegate.end ||
+      color != oldDelegate.color;
 }
 
 TextPainter _layoutText(

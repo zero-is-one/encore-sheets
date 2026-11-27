@@ -258,6 +258,11 @@ class _ReaderState extends State<Reader> {
   bool _editingText = false;
   InkTool _tool = InkTool.pen;
   InkShape? _shape;
+  bool _showRuler = false;
+  InkRulerGuide _ruler = (
+    start: const Offset(.15, .45),
+    end: const Offset(.85, .45),
+  );
   bool _freeformSelection = false;
   List<Map<String, dynamic>> _inkClipboard = [];
   List<InkLayer> _inkLayers = [defaultInkLayer];
@@ -5515,6 +5520,12 @@ class _ReaderState extends State<Reader> {
               onTextTap: (point, size) =>
                   _editText(page.pageNumber, point, size),
               shape: _shape,
+              ruler:
+                  _inking &&
+                      _showRuler &&
+                      page.pageNumber == (_annotationPage ?? _page)
+                  ? _ruler
+                  : null,
               freeformSelection: _freeformSelection,
               pressure: _drawing.pressure,
               tilt: _drawing.tilt,
@@ -5532,6 +5543,19 @@ class _ReaderState extends State<Reader> {
             ),
           ),
         ),
+        if (_inking &&
+            _showRuler &&
+            page.pageNumber == (_annotationPage ?? _page))
+          Positioned.fill(
+            child: ClipRect(
+              clipper: _PageCropClipper(_cropFor(page.pageNumber)),
+              child: InkRulerOverlay(
+                guide: _ruler,
+                color: const Color(0xff1683cd),
+                onChanged: (guide) => setState(() => _ruler = guide),
+              ),
+            ),
+          ),
         if (!_inking &&
             !_performance &&
             _entry?.pageNotes.containsKey(page.pageNumber) == true)
@@ -6993,6 +7017,12 @@ class _ReaderState extends State<Reader> {
             PopupMenuItem(value: false, child: Text('Rectangle selection')),
             PopupMenuItem(value: true, child: Text('Freeform selection')),
           ],
+        ),
+        IconButton(
+          tooltip: _showRuler ? 'Hide ruler guide' : 'Show ruler guide',
+          isSelected: _showRuler,
+          icon: const Icon(Icons.straighten),
+          onPressed: () => setState(() => _showRuler = !_showRuler),
         ),
         if (_ink[_annotationPage ?? _page] case final ink?
             when _tool == InkTool.selection)
