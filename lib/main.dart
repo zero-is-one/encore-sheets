@@ -6820,9 +6820,23 @@ class _ReaderState extends State<Reader> {
               : () => _turn(-1),
           icon: const Icon(Icons.chevron_left),
         ),
-        Text(
-          _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
-          style: TextStyle(color: _brass, fontWeight: FontWeight.w600),
+        Tooltip(
+          message: 'Page thumbnails',
+          child: TextButton.icon(
+            onPressed: _pages == 0 ? null : _showThumbnails,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            icon: const Icon(Icons.grid_view_outlined),
+            label: Text(
+              _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
         ),
         IconButton(
           tooltip: _verticalScrolling && !_inking
@@ -6844,11 +6858,6 @@ class _ReaderState extends State<Reader> {
     final tools = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          tooltip: 'Page thumbnails',
-          onPressed: _pages == 0 ? null : _showThumbnails,
-          icon: const Icon(Icons.grid_view_outlined),
-        ),
         PopupMenuButton<bool>(
           tooltip: 'Fit mode: ${fitWidth ? 'Fit width' : 'Fit page'}',
           enabled:

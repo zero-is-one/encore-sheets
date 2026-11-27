@@ -119,7 +119,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
 
-    await tester.tap(find.byTooltip('Page thumbnails'));
+    expect(find.byTooltip('Page thumbnails'), findsOneWidget);
+    await tester.tap(find.text('1 / 3'));
     await tester.pumpAndSettle();
     final thumbnails = tester.widget<GridView>(find.byType(GridView));
     expect(
