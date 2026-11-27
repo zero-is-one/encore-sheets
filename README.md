@@ -17,16 +17,16 @@
   <a href="#file-formats">File formats</a> ·
   <a href="#license">License</a> ·
   <a href="DISCLAIMER.md">Disclaimer</a> ·
-  <a href="https://github.com/zero-is-one/encoresheets/issues">Report an issue</a>
+  <a href="https://github.com/zero-is-one/encore-sheets/issues">Report an issue</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/zero-is-one/encoresheets/actions/workflows/checks.yml?query=branch%3Amain"><img src="https://github.com/zero-is-one/encoresheets/actions/workflows/checks.yml/badge.svg?branch=main" alt="Flutter checks" /></a>
+  <a href="https://github.com/zero-is-one/encore-sheets/actions/workflows/checks.yml?query=branch%3Amain"><img src="https://github.com/zero-is-one/encore-sheets/actions/workflows/checks.yml/badge.svg?branch=main" alt="Flutter checks" /></a>
 </p>
 
 ## Test builds
 
-Open a successful [Build test packages](https://github.com/zero-is-one/encoresheets/actions/workflows/builds.yml)
+Open a successful [Build test packages](https://github.com/zero-is-one/encore-sheets/actions/workflows/builds.yml)
 run and look under **Artifacts**. Sign in to GitHub to download a package while
 its artifact is available.
 
@@ -87,8 +87,8 @@ Requires Flutter 3.50 or later. Android development requires the Android SDK.
 To run on an iPad or iPad simulator, use macOS with Xcode.
 
 ```sh
-git clone https://github.com/zero-is-one/encoresheets.git
-cd encoresheets
+git clone https://github.com/zero-is-one/encore-sheets.git
+cd encore-sheets
 flutter pub get
 flutter devices
 flutter run -d <device-id>

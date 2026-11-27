@@ -19,7 +19,7 @@ class SupportScreen extends StatefulWidget {
 class _SupportScreenState extends State<SupportScreen> {
   static final _issues = Uri.https(
     'github.com',
-    '/zero-is-one/encoresheets/issues',
+    '/zero-is-one/encore-sheets/issues',
   );
   late final _version = _readVersion();
 
