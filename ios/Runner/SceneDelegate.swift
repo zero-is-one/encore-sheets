@@ -94,7 +94,10 @@ final class ScoreWindowSceneDelegate: UIResponder, UIWindowSceneDelegate {
   static let activityType = "app.encoresheets.score-window"
   var window: UIWindow?
   private weak var pdfView: PDFView?
+  private weak var reader: UIViewController?
   private var activity: NSUserActivity?
+  private var scoreURL: URL?
+  private var positions: [URL: Int] = [:]
 
   func scene(
     _ scene: UIScene,
@@ -105,39 +108,166 @@ final class ScoreWindowSceneDelegate: UIResponder, UIWindowSceneDelegate {
     let controller = UIViewController()
     let view = PDFView()
     controller.view = view
+    reader = controller
     view.autoScales = true
     view.displayMode = .singlePageContinuous
     let activity = options.userActivities.first { $0.activityType == Self.activityType }
       ?? session.stateRestorationActivity
     self.activity = activity
     self.pdfView = view
-    if let data = activity?.userInfo,
-       let path = data["path"] as? String,
-       let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-       URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(support.path + "/LibraryData/"),
-       let document = PDFDocument(url: URL(fileURLWithPath: path)) {
-      view.document = document
-      if let index = data["page"] as? Int, let page = document.page(at: max(0, index - 1)) {
-        view.go(to: page)
-      }
-      scene.title = data["title"] as? String
-    } else {
-      let label = UILabel()
-      label.text = "This score is unavailable."
-      label.textAlignment = .center
-      controller.view = label
-    }
+    controller.navigationItem.leftBarButtonItem = UIBarButtonItem(
+      title: "Scores", style: .plain, target: self, action: #selector(showScores)
+    )
+    controller.navigationItem.rightBarButtonItems = [
+      UIBarButtonItem(title: "Next", style: .plain, target: self, action: #selector(nextPage)),
+      UIBarButtonItem(title: "Previous", style: .plain, target: self, action: #selector(previousPage)),
+      UIBarButtonItem(title: "Fit", style: .plain, target: self, action: #selector(fitPage)),
+    ]
+    let navigation = UINavigationController(rootViewController: controller)
     let window = UIWindow(windowScene: scene)
-    window.rootViewController = controller
+    window.rootViewController = navigation
     window.makeKeyAndVisible()
     self.window = window
+    if let data = activity?.userInfo, let path = data["path"] as? String {
+      openScore(
+        at: URL(fileURLWithPath: path), title: data["title"] as? String ?? "Score",
+        page: data["page"] as? Int ?? 1
+      )
+    } else {
+      controller.title = "Choose a score"
+    }
+  }
+
+  private var scoresDirectory: URL? {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("LibraryData/scores", isDirectory: true)
+      .resolvingSymlinksInPath()
+  }
+
+  private func openScore(at url: URL, title: String, page: Int) {
+    let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+    guard let view = pdfView, let directory = scoresDirectory,
+          resolved.deletingLastPathComponent().path == directory.path,
+          resolved.pathExtension.lowercased() == "pdf",
+          let document = PDFDocument(url: resolved), document.pageCount > 0 else {
+      let alert = UIAlertController(title: "Score unavailable", message: nil, preferredStyle: .alert)
+      alert.addAction(UIAlertAction(title: "OK", style: .default))
+      reader?.present(alert, animated: true)
+      return
+    }
+    rememberPage()
+    scoreURL = resolved
+    view.document = document
+    view.autoScales = true
+    let target = min(document.pageCount, max(1, positions[resolved] ?? page))
+    if let pdfPage = document.page(at: target - 1) { view.go(to: pdfPage) }
+    reader?.title = title
+    window?.windowScene?.title = title
+    let restored = NSUserActivity(activityType: Self.activityType)
+    restored.userInfo = ["path": resolved.path, "title": title, "page": target]
+    activity = restored
+  }
+
+  private func rememberPage() {
+    if let url = scoreURL, let view = pdfView,
+       let current = view.currentPage, let document = view.document {
+      positions[url] = document.index(for: current) + 1
+    }
+  }
+
+  @objc private func previousPage() { pdfView?.goToPreviousPage(nil) }
+  @objc private func nextPage() { pdfView?.goToNextPage(nil) }
+  @objc private func fitPage() {
+    if let view = pdfView { view.scaleFactor = view.scaleFactorForSizeToFit }
+  }
+
+  @objc private func showScores() {
+    guard let directory = scoresDirectory else { return }
+    let catalog = (UIApplication.shared.delegate as? AppDelegate)?.scoreWindowCatalog ?? []
+    let rows: [ScoreWindowPicker.Row] = catalog.compactMap { row in
+      guard let id = row["file"] as? String,
+            id.range(of: "^[a-zA-Z0-9-]+$", options: .regularExpression) != nil,
+            let title = row["title"] as? String else { return nil }
+      return (directory.appendingPathComponent("\(id).pdf"), title, row["page"] as? Int ?? 1)
+    }
+    let picker = ScoreWindowPicker(rows: rows) { [weak self] row in
+      self?.openScore(at: row.url, title: row.title, page: row.page)
+    }
+    reader?.present(UINavigationController(rootViewController: picker), animated: true)
   }
 
   func stateRestorationActivity(for scene: UIScene) -> NSUserActivity? {
-    if let view = pdfView, let current = view.currentPage, let document = view.document {
-      activity?.addUserInfoEntries(from: ["page": document.index(for: current) + 1])
+    rememberPage()
+    if let url = scoreURL, let page = positions[url] {
+      activity?.addUserInfoEntries(from: ["page": page])
     }
     return activity
+  }
+}
+
+private final class ScoreWindowPicker: UITableViewController, UISearchResultsUpdating {
+  typealias Row = (url: URL, title: String, page: Int)
+  private let rows: [Row]
+  private var filtered: [Row]
+  private let select: (Row) -> Void
+
+  init(rows: [Row], select: @escaping (Row) -> Void) {
+    let sorted = rows.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    self.rows = sorted
+    self.filtered = sorted
+    self.select = select
+    super.init(style: .insetGrouped)
+  }
+
+  required init?(coder: NSCoder) { return nil }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    title = "Choose a score"
+    let search = UISearchController(searchResultsController: nil)
+    search.searchResultsUpdater = self
+    search.obscuresBackgroundDuringPresentation = false
+    search.searchBar.placeholder = "Search scores"
+    navigationItem.searchController = search
+    navigationItem.hidesSearchBarWhenScrolling = false
+    navigationItem.rightBarButtonItem = UIBarButtonItem(
+      barButtonSystemItem: .cancel, target: self, action: #selector(close)
+    )
+  }
+
+  @objc private func close() { dismiss(animated: true) }
+
+  func updateSearchResults(for searchController: UISearchController) {
+    let query = searchController.searchBar.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    filtered = query.isEmpty ? rows : rows.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    tableView.reloadData()
+  }
+
+  override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    if filtered.isEmpty {
+      let message = UILabel()
+      message.text = rows.isEmpty ? "No scores available in this window." : "No matching scores."
+      message.textAlignment = .center
+      message.textColor = .secondaryLabel
+      tableView.backgroundView = message
+    } else {
+      tableView.backgroundView = nil
+    }
+    return filtered.count
+  }
+
+  override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    let cell = tableView.dequeueReusableCell(withIdentifier: "score") ??
+      UITableViewCell(style: .default, reuseIdentifier: "score")
+    var content = cell.defaultContentConfiguration()
+    content.text = filtered[indexPath.row].title
+    cell.contentConfiguration = content
+    return cell
+  }
+
+  override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+    let row = filtered[indexPath.row]
+    dismiss(animated: true) { [select] in select(row) }
   }
 }
 

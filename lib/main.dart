@@ -4178,13 +4178,28 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _openScoreWindow() async {
     final file = _file;
-    if (file == null || !_supportsSharedImport) return;
+    if (file == null ||
+        !_supportsSharedImport ||
+        !_readerActionAllowed(_ReaderDisplay.scoreWindow))
+      return;
+    final revision = _revision;
     try {
+      await _library.flush();
+      if (!mounted || revision != _revision) return;
       await const MethodChannel('encoresheets/score-windows')
           .invokeMethod<void>('open', {
             'path': file.path,
             'title': _title,
             'page': _page,
+            'library': [
+              for (final score in _library.recent)
+                if (score.validUntil == null)
+                  {
+                    'file': score.storedPdfId,
+                    'title': score.title,
+                    'page': score.page,
+                  },
+            ],
           });
     } catch (_) {
       if (mounted)

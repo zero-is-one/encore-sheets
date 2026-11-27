@@ -128,6 +128,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
   private var musicPickerResult: FlutterResult?
   private var musicTrackID: MPMediaEntityPersistentID?
   var presentedScore: (path: String, page: Int)?
+  var scoreWindowCatalog: [[String: Any]] = []
   #if compiler(>=6.4)
   private var displayAccessoryRegistration: Any?
   #endif
@@ -279,7 +280,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
       name: "encoresheets/score-windows",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
-    windows.setMethodCallHandler { call, result in
+    windows.setMethodCallHandler { [weak self] call, result in
       guard call.method == "open",
         let data = call.arguments as? [String: Any],
         let path = data["path"] as? String,
@@ -294,6 +295,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
       }
       let activity = NSUserActivity(activityType: ScoreWindowSceneDelegate.activityType)
       activity.userInfo = ["path": path, "title": title, "page": page]
+      self?.scoreWindowCatalog = data["library"] as? [[String: Any]] ?? []
       UIApplication.shared.requestSceneSessionActivation(nil, userActivity: activity, options: nil) { error in
         NSLog("EncoreSheets could not open the score window: %@", error.localizedDescription)
       }
