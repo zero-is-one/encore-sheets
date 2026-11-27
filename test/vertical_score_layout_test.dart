@@ -216,6 +216,16 @@ void main() {
       () => find.text('Scrolling rehearsal').evaluate().isNotEmpty,
     );
     await tester.tap(find.text('Scrolling rehearsal'));
+    await tester.pumpAndSettle();
+    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('Transition first'), findsOneWidget);
+    expect(find.text('Transition second'), findsOneWidget);
+    await tester.tap(find.byTooltip('Edit setlist'));
+    await tester.pumpAndSettle();
+    expect(find.text('Search scores'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Play'));
     await waitUntil(
       () =>
           viewer().params.paging == null &&

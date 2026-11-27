@@ -179,6 +179,68 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     }
   }
 
+  Future<void> _inspect(Setlist list) async {
+    final play = await Navigator.of(context).push<Setlist>(
+      MaterialPageRoute(
+        builder: (context) => StatefulBuilder(
+          builder: (context, refresh) {
+            final current = widget.library.setlists.firstWhere(
+              (item) => item.id == list.id,
+            );
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(current.name),
+                actions: [
+                  IconButton(
+                    tooltip: 'Edit setlist',
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () async {
+                      await _edit(current);
+                      if (context.mounted) refresh(() {});
+                    },
+                  ),
+                  TextButton.icon(
+                    onPressed: current.scores.isEmpty
+                        ? null
+                        : () => Navigator.pop(context, current),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Play'),
+                  ),
+                ],
+              ),
+              body: ListView(
+                children: [
+                  if (current.notes.isNotEmpty)
+                    ListTile(subtitle: Text(current.notes)),
+                  if (current.scores.isEmpty)
+                    const ListTile(
+                      title: Text(
+                        'No scores yet. Choose Edit setlist to add one.',
+                      ),
+                    ),
+                  for (final (index, id) in current.scores.indexed)
+                    ListTile(
+                      leading: Text('${index + 1}'),
+                      title: Text(switch (widget.library.lookupSelection(id)) {
+                        (final score, final bookmark) =>
+                          bookmark?.title ?? score.title,
+                        null => current.placeholders[id] ?? 'Missing score',
+                      }),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (play != null)
+      Navigator.pop(context, play);
+    else
+      setState(() {});
+  }
+
   Widget _row(Setlist list, List<Setlist> group, int index) => ListTile(
     leading: const Icon(Icons.queue_music),
     title: Text(list.name),
@@ -192,9 +254,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
     ),
-    onTap: list.scores.isEmpty
-        ? () => _edit(list)
-        : () => Navigator.pop(context, list),
+    onTap: () => _inspect(list),
     trailing: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -363,6 +423,21 @@ class _SetlistEditorState extends State<_SetlistEditor> {
       (key: Object(), id: id),
   ];
   bool _saving = false;
+  String _libraryQuery = '';
+  Object? _replacement;
+
+  void _insertSelection(String id, {Object? replace}) {
+    if (_saving) return;
+    setState(() {
+      final index = _scores.indexWhere((row) => row.key == replace);
+      if (index == -1) {
+        if (replace == null) _scores.add((key: Object(), id: id));
+      } else {
+        _scores[index] = (key: _scores[index].key, id: id);
+      }
+      _replacement = null;
+    });
+  }
 
   void _clipboardStatus(String message) {
     if (mounted)
@@ -416,46 +491,54 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   }
 
   Future<void> _add([int? replaceAt]) async {
-    final scores = widget.library.recent;
+    final replacement = replaceAt == null ? null : _scores[replaceAt].key;
     final selection = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
-      builder: (context) => scores.isEmpty
+      builder: (context) => widget.library.recent.isEmpty
           ? const Center(
               child: Text('Import a PDF in the score library first.'),
             )
-          : ListView(
-              children: [
-                for (final score in scores) ...[
-                  ListTile(
-                    leading: const Icon(Icons.description_outlined),
-                    title: Text(score.title),
-                    onTap: () => Navigator.pop(context, score.id),
-                  ),
-                  for (final bookmark in score.bookmarks.where(
-                    (item) => item.isItem,
-                  ))
-                    ListTile(
-                      leading: const Icon(Icons.bookmark_outline),
-                      title: Text(bookmark.title),
-                      subtitle: Text(score.title),
-                      onTap: () => Navigator.pop(
-                        context,
-                        bookmark.selectionId(score.id),
-                      ),
-                    ),
-                ],
-              ],
-            ),
+          : _scorePicker('', (id) => Navigator.pop(context, id)),
     );
     if (!mounted || selection == null) return;
-    setState(() {
-      if (replaceAt == null) {
-        _scores.add((key: Object(), id: selection));
-      } else {
-        _scores[replaceAt] = (key: _scores[replaceAt].key, id: selection);
+    _insertSelection(selection, replace: replacement);
+  }
+
+  Widget _scorePicker(String query, ValueChanged<String> select) {
+    final matches = <({String id, String title, String? score})>[];
+    for (final score in widget.library.recent) {
+      final all = [score.title, ...score.metadata.values];
+      final match = all.any((value) => value.toLowerCase().contains(query));
+      if (match) matches.add((id: score.id, title: score.title, score: null));
+      for (final bookmark in score.bookmarks.where((item) => item.isItem)) {
+        if (match || bookmark.title.toLowerCase().contains(query)) {
+          matches.add((
+            id: bookmark.selectionId(score.id),
+            title: bookmark.title,
+            score: score.title,
+          ));
+        }
       }
-    });
+    }
+    if (matches.isEmpty)
+      return const Center(child: Text('No matching scores.'));
+    return ListView.builder(
+      itemCount: matches.length,
+      itemBuilder: (_, index) {
+        final row = matches[index];
+        return ListTile(
+          leading: Icon(
+            row.score == null
+                ? Icons.description_outlined
+                : Icons.bookmark_outline,
+          ),
+          title: Text(row.title),
+          subtitle: row.score == null ? null : Text(row.score!),
+          onTap: _saving ? null : () => select(row.id),
+        );
+      },
+    );
   }
 
   Future<void> _save() async {
@@ -537,21 +620,22 @@ class _SetlistEditorState extends State<_SetlistEditor> {
       ],
     ),
     body: SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: ReorderableListView.builder(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 760;
+          final queue = ReorderableListView.builder(
             header: _details(),
             footer: Padding(
               padding: const EdgeInsets.all(16),
               child: Wrap(
                 spacing: 8,
                 children: [
-                  FilledButton.icon(
-                    onPressed: _saving ? null : _add,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add score'),
-                  ),
+                  if (!wide)
+                    FilledButton.icon(
+                      onPressed: _saving ? null : _add,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add score'),
+                    ),
                   TextButton.icon(
                     onPressed: _saving ? null : _pasteSelection,
                     icon: const Icon(Icons.content_paste),
@@ -591,14 +675,29 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                       true
                   ? const Text('Tap to choose a score')
                   : null,
-              onTap: _saving ? null : () => _add(index),
+              selected: wide && _replacement == _scores[index].key,
+              onTap: _saving
+                  ? null
+                  : () {
+                      if (!wide) {
+                        _add(index);
+                        return;
+                      }
+                      final key = _scores[index].key;
+                      setState(
+                        () => _replacement = _replacement == key ? null : key,
+                      );
+                    },
               trailing: PopupMenuButton<String>(
                 enabled: !_saving,
                 tooltip: 'Setlist item actions',
                 onSelected: (action) {
                   final row = _scores[index];
                   if (action == 'remove') {
-                    setState(() => _scores.removeAt(index));
+                    setState(() {
+                      if (_replacement == row.key) _replacement = null;
+                      _scores.removeAt(index);
+                    });
                   } else {
                     _copySelection(row, action == 'cut');
                   }
@@ -622,8 +721,63 @@ class _SetlistEditorState extends State<_SetlistEditor> {
                 ],
               ),
             ),
-          ),
-        ),
+          );
+          if (!wide)
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: queue,
+              ),
+            );
+          return Row(
+            children: [
+              Expanded(child: queue),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Score library',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          if (_replacement != null)
+                            TextButton(
+                              onPressed: () =>
+                                  setState(() => _replacement = null),
+                              child: const Text('Cancel replacement'),
+                            )
+                          else
+                            const Text('Tap a score to add it to the setlist.'),
+                          TextField(
+                            decoration: const InputDecoration(
+                              labelText: 'Search scores',
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                            onChanged: (value) => setState(
+                              () => _libraryQuery = value.trim().toLowerCase(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: _scorePicker(
+                        _libraryQuery,
+                        (id) => _insertSelection(id, replace: _replacement),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     ),
   );
