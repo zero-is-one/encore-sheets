@@ -13,6 +13,19 @@ on:
           - macos
           - windows
           - all
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      distribution:
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_RELEASE_KEYSTORE:
+        required: false
+      ANDROID_RELEASE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -41,12 +54,35 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Build Android APK
-        if: matrix.target == 'android'
+        if: matrix.target == 'android' && !inputs.distribution
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "ndk;28.2.13676358"
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
           cp build/app/outputs/flutter-apk/app-debug.apk EncoreSheets-android.apk
+      - name: Build and verify signed Android ARM64 APK
+        if: matrix.target == 'android' && inputs.distribution
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
+          ENCORESHEETS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_PASSWORD }}
+        run: |
+          : "${KEYSTORE_BASE64:?Missing Android release keystore}"
+          : "${ENCORESHEETS_KEYSTORE_PASSWORD:?Missing Android release password}"
+          umask 077
+          export ENCORESHEETS_RELEASE_KEYSTORE="$RUNNER_TEMP/encoresheets-release.p12"
+          trap 'rm -f -- "$ENCORESHEETS_RELEASE_KEYSTORE"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ENCORESHEETS_RELEASE_KEYSTORE"
+          unset KEYSTORE_BASE64
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "ndk;28.2.13676358" "build-tools;36.0.0"
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --target-platform android-arm64 --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk EncoreSheets-android-arm64.apk
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$tools/apksigner" verify --print-certs EncoreSheets-android-arm64.apk |
+            grep -Fx 'Signer #1 certificate SHA-256 digest: b8f88f88e9d532c05dba573a51caae6300bf72f2035c41b241aadf3a34115fde'
+          badging=$("$tools/aapt" dump badging EncoreSheets-android-arm64.apk)
+          grep "^package: name='com\.encoresheets\.app'" <<< "$badging"
+          grep -Fx "native-code: 'arm64-v8a'" <<< "$badging"
       - name: Build unsigned iPad device IPA
         if: matrix.target == 'ipad'
         run: |
@@ -64,6 +100,7 @@ jobs:
           fi
           flutter pub get --enforce-lockfile
           flutter build macos --release --no-pub
+          codesign --verify --deep --strict build/macos/Build/Products/Release/encoresheets.app
           ditto -c -k --keepParent build/macos/Build/Products/Release/encoresheets.app EncoreSheets-macos.zip
       - name: Build Windows app
         if: matrix.target == 'windows'
@@ -79,6 +116,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter build windows --release --no-pub
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path build/windows/x64/runner/Release/encoresheets.exe)) {
+            throw 'Missing EncoreSheets executable'
+          }
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath EncoreSheets-windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:

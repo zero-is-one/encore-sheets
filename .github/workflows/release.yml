@@ -1,0 +1,61 @@
+name: Prepare GitHub release
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/release'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [android, windows, macos]
+    uses: ./.github/workflows/builds.yml
+    with:
+      target: ${{ matrix.target }}
+      distribution: true
+    secrets:
+      ANDROID_RELEASE_KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
+      ANDROID_RELEASE_PASSWORD: ${{ secrets.ANDROID_RELEASE_PASSWORD }}
+
+  draft:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: EncoreSheets-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+$/\1/p' pubspec.yaml)
+          : "${version:?Expected a version such as 0.8.0+10 in pubspec.yaml}"
+          tag="v$version"
+          cd release-assets
+          files=(EncoreSheets-android-arm64.apk EncoreSheets-windows-x64.zip EncoreSheets-macos.zip)
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          cat > notes.md <<'EOF'
+          - **Android ARM64** — Install the signed APK. If you have a debug build, export your library before uninstalling it, then restore your backup in this build.
+          - **Windows x64** — Extract the ZIP and run `encoresheets.exe` from the extracted folder.
+          - **macOS** — Extract the ZIP and open the app. This build is ad-hoc signed and has no Apple notarization.
+          EOF
+          gh release create "$tag" "${files[@]}" SHA256SUMS.txt \
+            --draft --target "$GITHUB_SHA" --title "EncoreSheets $tag" \
+            --notes-file notes.md --generate-notes

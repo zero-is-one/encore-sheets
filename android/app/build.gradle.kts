@@ -29,11 +29,20 @@ android {
         versionName = flutter.versionName
     }
 
+    val releaseKeystore = providers.environmentVariable("ENCORESHEETS_RELEASE_KEYSTORE")
+    if (releaseKeystore.isPresent) {
+        signingConfigs.create("distribution") {
+            storeFile = file(releaseKeystore.get())
+            storeType = "PKCS12"
+            storePassword = providers.environmentVariable("ENCORESHEETS_KEYSTORE_PASSWORD").get()
+            keyAlias = "encoresheets"
+            keyPassword = storePassword
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("distribution") ?: signingConfigs.getByName("debug")
         }
     }
 }

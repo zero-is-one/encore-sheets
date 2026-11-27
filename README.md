@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="#test-builds">Test builds</a> ·
+  <a href="https://github.com/zero-is-one/encore-sheets/releases">Releases</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-works">Features</a> ·
   <a href="#build-from-source">Build from source</a> ·
@@ -23,6 +24,11 @@
 <p align="center">
   <a href="https://github.com/zero-is-one/encore-sheets/actions/workflows/checks.yml?query=branch%3Amain"><img src="https://github.com/zero-is-one/encore-sheets/actions/workflows/checks.yml/badge.svg?branch=main" alt="Flutter checks" /></a>
 </p>
+
+## Downloads
+
+See [GitHub Releases](https://github.com/zero-is-one/encore-sheets/releases)
+for published Android ARM64 APKs, Windows x64 ZIPs, and macOS ZIPs.
 
 ## Test builds
 
