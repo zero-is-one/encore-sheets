@@ -1298,6 +1298,7 @@ class _ReaderState extends State<Reader> {
                     _preferences.compactLibrary || !_appearance.showMetadata,
                 metadataIconKeys: _metadataSymbols,
                 focusSearch: focusSearch,
+                canSearchScore: _pages > 0 && _viewer.isReady,
                 browseState: _libraryBrowseState,
                 onBrowseState: _rememberLibraryBrowse,
               ),
@@ -1328,6 +1329,11 @@ class _ReaderState extends State<Reader> {
       if (_restricted(RestrictedTool.connections) &&
           const {'sync', 'cloud-files', 'ai-connections'}.contains(result))
         return;
+      if (result == 'find-in-current-score') {
+        setState(() => _picking = false);
+        await _findInScore();
+        return;
+      }
       if (result == 'ai-connections') {
         await _openReaderPanel<void>(
           (_) => AssistantConnectionScreen(connection: _assistantConnection),
@@ -6817,6 +6823,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.compact,
     required this.metadataIconKeys,
     required this.focusSearch,
+    required this.canSearchScore,
     required this.browseState,
     required this.onBrowseState,
   });
@@ -6834,6 +6841,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool compact;
   final Map<String, String> metadataIconKeys;
   final bool focusSearch;
+  final bool canSearchScore;
   final Map<String, dynamic> browseState;
   final ValueChanged<Map<String, dynamic>> onBrowseState;
 
@@ -6848,7 +6856,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    final saved = widget.browseState;
+    final saved = widget.focusSearch
+        ? const <String, dynamic>{}
+        : widget.browseState;
     _browseBy = saved['sort'] == 'Title' ? 'Title' : 'Recent';
     if (saved['collection'] case final String name
         when widget.library.collections.contains(name)) {
@@ -6876,15 +6886,16 @@ class _LibraryScreenState extends State<_LibraryScreen> {
 
   @override
   void dispose() {
-    widget.onBrowseState({
-      'sort': _browseBy,
-      'collection': _collection,
-      'exclude': _excludeCollection,
-      'unassigned': _unassigned,
-      'filterField': _filterField,
-      'category': _category,
-      'offset': _browseOffset,
-    });
+    if (!widget.focusSearch)
+      widget.onBrowseState({
+        'sort': _browseBy,
+        'collection': _collection,
+        'exclude': _excludeCollection,
+        'unassigned': _unassigned,
+        'filterField': _filterField,
+        'category': _category,
+        'offset': _browseOffset,
+      });
     _libraryScroll.dispose();
     super.dispose();
   }
@@ -7336,7 +7347,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 ],
               )
             : Text(
-                _unassigned
+                widget.focusSearch
+                    ? 'Search all scores'
+                    : _unassigned
                     ? 'Unassigned scores'
                     : _collection == null
                     ? ReaderText.library.of(context)
@@ -7350,11 +7363,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             onPressed: () => Navigator.pop(context, 'support'),
             icon: const Icon(Icons.help_outline),
           ),
-          IconButton(
-            tooltip: 'Libraries',
-            onPressed: _chooseCollection,
-            icon: const Icon(Icons.folder_copy_outlined),
-          ),
+          if (!widget.focusSearch)
+            IconButton(
+              tooltip: 'Libraries',
+              onPressed: _chooseCollection,
+              icon: const Icon(Icons.folder_copy_outlined),
+            ),
           IconButton(
             tooltip: 'Select scores',
             onPressed: widget.scores.isEmpty
@@ -7384,6 +7398,20 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
+                  if (widget.focusSearch)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: widget.canSearchScore
+                            ? () => Navigator.pop(
+                                context,
+                                'find-in-current-score',
+                              )
+                            : null,
+                        icon: const Icon(Icons.find_in_page_outlined),
+                        label: const Text('In this score'),
+                      ),
+                    ),
                   Wrap(
                     spacing: 8,
                     children: [
@@ -7409,33 +7437,34 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                           ),
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Filter by metadata',
-                        onSelected: (value) => setState(() {
-                          _filterField = value.isEmpty ? null : value;
-                          _category = null;
-                        }),
-                        itemBuilder: (_) => [
-                          for (final field in _fields.keys)
-                            PopupMenuItem(value: field, child: Text(field)),
-                          if (_filterField != null)
-                            const PopupMenuItem(
-                              value: '',
-                              child: Text('Clear filter'),
+                      if (!widget.focusSearch)
+                        PopupMenuButton<String>(
+                          tooltip: 'Filter by metadata',
+                          onSelected: (value) => setState(() {
+                            _filterField = value.isEmpty ? null : value;
+                            _category = null;
+                          }),
+                          itemBuilder: (_) => [
+                            for (final field in _fields.keys)
+                              PopupMenuItem(value: field, child: Text(field)),
+                            if (_filterField != null)
+                              const PopupMenuItem(
+                                value: '',
+                                child: Text('Clear filter'),
+                              ),
+                          ],
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                              horizontal: 4,
                             ),
-                        ],
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 10,
-                            horizontal: 4,
-                          ),
-                          child: Text(
-                            _filterField == null
-                                ? 'Filter ▾'
-                                : 'Filter by $_filterField ▾',
+                            child: Text(
+                              _filterField == null
+                                  ? 'Filter ▾'
+                                  : 'Filter by $_filterField ▾',
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                   if (categories.isNotEmpty)
