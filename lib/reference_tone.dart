@@ -11,7 +11,11 @@ class ReferenceTone {
   final _player = AudioPlayer();
   File? _file;
 
-  Future<void> play(int midi) async {
+  Future<void> play(
+    int midi, {
+    bool sustained = false,
+    ReferenceTimbre timbre = ReferenceTimbre.pure,
+  }) async {
     await stop();
     final temp = await getTemporaryDirectory();
     final wave = File(
@@ -19,8 +23,15 @@ class ReferenceTone {
     );
     _file = wave;
     try {
-      await wave.writeAsBytes(referenceToneWave(noteFrequency(midi)));
+      await wave.writeAsBytes(
+        referenceToneWave(
+          noteFrequency(midi),
+          sustained: sustained,
+          timbre: timbre,
+        ),
+      );
       await _player.setFilePath(wave.path);
+      await _player.setLoopMode(sustained ? LoopMode.one : LoopMode.off);
       unawaited(_player.play().catchError((Object _) {}));
     } catch (_) {
       await stop();

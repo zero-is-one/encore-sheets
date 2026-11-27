@@ -3,6 +3,15 @@ import 'dart:typed_data';
 
 enum RehearsalChannel { both, left, right }
 
+enum ReferenceTimbre {
+  pure('Pure tone'),
+  flute('Flute-like'),
+  reed('Reed-like');
+
+  const ReferenceTimbre(this.label);
+  final String label;
+}
+
 const rehearsalSampleRate = 22050;
 
 Uint8List _wave(
@@ -63,12 +72,35 @@ Uint8List metronomeWave(
   }, channel);
 }
 
-Uint8List referenceToneWave(double frequency) {
+Uint8List referenceToneWave(
+  double frequency, {
+  bool sustained = false,
+  ReferenceTimbre timbre = ReferenceTimbre.pure,
+}) {
   const length = 2;
-  return _wave(rehearsalSampleRate * length, (frame) {
+  final cycles = (frequency * length).round();
+  final frames = sustained
+      ? (cycles * rehearsalSampleRate / frequency).round()
+      : rehearsalSampleRate * length;
+  return _wave(frames, (frame) {
     final seconds = frame / rehearsalSampleRate;
-    final fade = math.min(1.0, math.min(seconds, length - seconds) * 35);
-    return math.sin(seconds * frequency * 2 * math.pi) * fade * .4;
+    final phase =
+        2 *
+        math.pi *
+        (sustained ? frame * cycles / frames : seconds * frequency);
+    final sample = switch (timbre) {
+      ReferenceTimbre.pure => math.sin(phase),
+      ReferenceTimbre.flute =>
+        math.sin(phase) * .85 + math.sin(2 * phase) * .15,
+      ReferenceTimbre.reed =>
+        math.sin(phase) * .65 +
+            math.sin(3 * phase) * .25 +
+            math.sin(5 * phase) * .10,
+    };
+    final fade = sustained
+        ? 1.0
+        : math.min(1.0, math.min(seconds, length - seconds) * 35);
+    return sample * fade * .4;
   }, RehearsalChannel.both);
 }
 

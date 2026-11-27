@@ -6,6 +6,17 @@ import 'package:record/record.dart';
 
 import 'pitch_detection.dart';
 import 'reference_tone.dart';
+import 'rehearsal_wave.dart';
+
+enum _TunerSensitivity {
+  quiet('Quiet input', .000005),
+  standard('Standard', .000015),
+  loud('Reduce background pickup', .00006);
+
+  const _TunerSensitivity(this.label, this.minimumEnergy);
+  final String label;
+  final double minimumEnergy;
+}
 
 class TunerDialog extends StatefulWidget {
   const TunerDialog({super.key, required this.tone, required this.microphone});
@@ -24,8 +35,10 @@ class _TunerDialogState extends State<TunerDialog> {
   StreamSubscription<Uint8List>? _stream;
   int _samples = 0;
   int _reference = 69;
+  ReferenceTimbre _timbre = ReferenceTimbre.pure;
+  _TunerSensitivity _sensitivity = _TunerSensitivity.standard;
   double? _frequency;
-  bool _listening = false, _busy = false;
+  bool _listening = false, _busy = false, _holding = false;
   String? _error;
 
   Future<void> _run(Future<void> Function() action) async {
@@ -48,6 +61,7 @@ class _TunerDialogState extends State<TunerDialog> {
       return;
     }
     await widget.tone.stop();
+    _holding = false;
     if (!await _recorder.hasPermission()) {
       _error = 'Microphone access is required for tuning.';
       return;
@@ -75,7 +89,13 @@ class _TunerDialogState extends State<TunerDialog> {
           if (_samples == _window) {
             _samples = 0;
             if (mounted)
-              setState(() => _frequency = estimatePitch(_pcm, _rate));
+              setState(
+                () => _frequency = estimatePitch(
+                  _pcm,
+                  _rate,
+                  minimumEnergy: _sensitivity.minimumEnergy,
+                ),
+              );
           }
         }
       },
@@ -92,6 +112,17 @@ class _TunerDialogState extends State<TunerDialog> {
     if (_listening) await _recorder.stop();
     _listening = false;
     _frequency = null;
+  }
+
+  Future<void> _toggleHold() async {
+    if (_holding) {
+      await widget.tone.stop();
+      _holding = false;
+      return;
+    }
+    await _stop();
+    await widget.tone.play(_reference, sustained: true, timbre: _timbre);
+    _holding = true;
   }
 
   @override
@@ -117,7 +148,7 @@ class _TunerDialogState extends State<TunerDialog> {
             if (_error case final error?) Text(error),
             DropdownButton<int>(
               value: _reference,
-              onChanged: _busy
+              onChanged: _busy || _holding
                   ? null
                   : (value) => setState(() => _reference = value!),
               items: [
@@ -126,18 +157,49 @@ class _TunerDialogState extends State<TunerDialog> {
               ],
             ),
             Text('${noteFrequency(_reference).toStringAsFixed(1)} Hz'),
+            DropdownButton<ReferenceTimbre>(
+              value: _timbre,
+              onChanged: _busy || _holding
+                  ? null
+                  : (value) => setState(() => _timbre = value!),
+              items: [
+                for (final timbre in ReferenceTimbre.values)
+                  DropdownMenuItem(value: timbre, child: Text(timbre.label)),
+              ],
+            ),
             TextButton.icon(
-              onPressed: _busy
+              onPressed: _busy || _holding
                   ? null
                   : () => _run(() async {
                       await _stop();
-                      await widget.tone.play(_reference);
+                      await widget.tone.play(_reference, timbre: _timbre);
                     }),
               icon: const Icon(Icons.volume_up_outlined),
               label: const Text('Play reference tone'),
             ),
+            TextButton.icon(
+              onPressed: _busy ? null : () => _run(_toggleHold),
+              icon: Icon(_holding ? Icons.stop : Icons.repeat),
+              label: Text(_holding ? 'Stop drone' : 'Hold note'),
+            ),
             if (widget.microphone) ...[
               const Divider(),
+              DropdownButtonFormField<_TunerSensitivity>(
+                initialValue: _sensitivity,
+                decoration: const InputDecoration(
+                  labelText: 'Tuner sensitivity',
+                ),
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _sensitivity = value!),
+                items: [
+                  for (final sensitivity in _TunerSensitivity.values)
+                    DropdownMenuItem(
+                      value: sensitivity,
+                      child: Text(sensitivity.label),
+                    ),
+                ],
+              ),
               if (_listening)
                 Text(
                   pitch == null

@@ -26,7 +26,11 @@ String noteLabel(int midi) => '${tuningNotes[midi % 12]}${midi ~/ 12 - 1}';
   return (midi: midi, cents: (semitones - midi) * 100);
 }
 
-double? estimatePitch(Uint8List bytes, int sampleRate) {
+double? estimatePitch(
+  Uint8List bytes,
+  int sampleRate, {
+  double minimumEnergy = .000015,
+}) {
   final view = ByteData.sublistView(bytes);
   final count = bytes.length ~/ 2;
   final maxLag = sampleRate ~/ 44;
@@ -43,7 +47,7 @@ double? estimatePitch(Uint8List bytes, int sampleRate) {
     samples[i] -= dc;
     energy += samples[i] * samples[i];
   }
-  if (energy / count < .000015) return null;
+  if (energy / count < minimumEnergy) return null;
   final first = math.max(2, sampleRate ~/ 1400);
   final scores = Float64List(maxLag + 1);
   var best = 0.0;
