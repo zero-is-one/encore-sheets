@@ -479,6 +479,15 @@ void _exportBackup(
             .map((id) => mapped[id])
             .whereType<String>(),
       }.toList();
+      if (portable['scoreTabPages'] case final Map saved) {
+        preferences['scoreTabPages'] = {
+          if (existingPreferences['scoreTabPages'] case final Map existing)
+            ...existing,
+          for (final entry in saved.entries)
+            if (mapped[entry.key] case final String target)
+              if (entry.value is int) target: entry.value,
+        };
+      }
       if (portable['setlistPlayHistory'] case final Map saved) {
         final history = <String, dynamic>{
           ...?existingPreferences['setlistPlayHistory']

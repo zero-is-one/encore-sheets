@@ -340,6 +340,7 @@ class _ReaderState extends State<Reader> {
   Duration? _lastHalfScroll;
   ReaderPreferences _preferences = const ReaderPreferences();
   List<String> _scoreTabIds = [];
+  final Map<String, int> _scoreTabPages = {};
   bool _savingTabs = false;
   static const _sharedImports = MethodChannel('encoresheets/import');
   static const _stylusChannel = MethodChannel('encoresheets/stylus');
@@ -552,8 +553,16 @@ class _ReaderState extends State<Reader> {
           }
           _drawing = DrawingSettings.fromJson(data['drawingSettings']);
           _scoreTabIds = ids
-              .where((id) => _library.lookup(id) != null)
+              .where((id) => _library.lookupSelection(id) != null)
               .toList();
+          _scoreTabPages.clear();
+          if (data['scoreTabPages'] case final Map pages) {
+            for (final id in _scoreTabIds) {
+              if (pages[id] case final int page when page > 0) {
+                _scoreTabPages[id] = page;
+              }
+            }
+          }
           if (data['personalStamps'] case final List stamps) {
             _personalStamps = stamps
                 .whereType<String>()
@@ -1908,7 +1917,12 @@ class _ReaderState extends State<Reader> {
     if (_savingTabs) return;
     setState(() => _savingTabs = true);
     try {
-      await _library.updatePreferences({'scoreTabs': ids});
+      final pages = Map.of(_scoreTabPages)
+        ..removeWhere((id, _) => !ids.contains(id));
+      await _library.updatePreferences({
+        'scoreTabs': ids,
+        'scoreTabPages': pages,
+      });
       if (mounted) setState(() => _scoreTabIds = ids);
     } catch (_) {
       if (mounted) {
@@ -1921,16 +1935,28 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  String? get _activeScoreTabId {
+    final score = _entry;
+    return score == null
+        ? null
+        : _itemBookmark?.selectionId(score.id) ?? score.id;
+  }
+
   Future<void> _switchScoreTab(String id) async {
     if (_picking) return;
     setState(() => _picking = true);
     try {
       await _libraryReady;
-      final score = _library.lookup(id);
-      if (score == null) {
+      final target = _library.lookupSelection(id);
+      if (target == null) {
         await _updateScoreTabs(_scoreTabIds.where((tab) => tab != id).toList());
       } else if (mounted) {
-        await _openLibraryScore(score);
+        final (score, bookmark) = target;
+        await _openLibraryScore(
+          score,
+          item: bookmark,
+          startPage: _scoreTabPages[id] ?? bookmark?.page,
+        );
       }
     } catch (_) {
       if (mounted) {
@@ -1961,21 +1987,37 @@ class _ReaderState extends State<Reader> {
               const SimpleDialogOption(
                 child: Text('Import a PDF from the score library first.'),
               ),
-            for (final score in scores)
+            for (final score in scores) ...[
               SimpleDialogOption(
                 onPressed: () => Navigator.pop(dialog, score.id),
                 child: Text(score.title),
               ),
+              for (final bookmark in score.bookmarks.where(
+                (item) => item.isItem,
+              ))
+                SimpleDialogOption(
+                  onPressed: () =>
+                      Navigator.pop(dialog, bookmark.selectionId(score.id)),
+                  child: Text('${score.title} · ${bookmark.title}'),
+                ),
+            ],
           ],
         ),
       );
       if (!mounted || id == null) return;
-      final score = _library.lookup(id);
-      if (score == null) return;
+      final target = _library.lookupSelection(id);
+      if (target == null) return;
       if (!_scoreTabIds.contains(id)) {
         await _updateScoreTabs([..._scoreTabIds, id]);
       }
-      if (mounted && _scoreTabIds.contains(id)) await _openLibraryScore(score);
+      if (mounted && _scoreTabIds.contains(id)) {
+        final (score, bookmark) = target;
+        await _openLibraryScore(
+          score,
+          item: bookmark,
+          startPage: _scoreTabPages[id] ?? bookmark?.page,
+        );
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3205,8 +3247,24 @@ class _ReaderState extends State<Reader> {
     if (opened && mounted) _focusPractice(opened: true);
     if (_presenting) unawaited(_updatePresentation());
     if (id == null) return;
+    final selection = _activeScoreTabId;
+    final saveTabPage =
+        _entry?.id == id &&
+        selection != null &&
+        _scoreTabIds.contains(selection) &&
+        _page == page &&
+        _scoreTabPages[selection] != page;
+    if (saveTabPage) _scoreTabPages[selection] = page;
     try {
       await _library.record(id, page, opened: opened);
+      if (saveTabPage) {
+        await _library.updatePreferences({
+          'scoreTabPages': {
+            for (final tab in _scoreTabIds)
+              if (_scoreTabPages[tab] case final int page) tab: page,
+          },
+        });
+      }
       _saveWarning = false;
     } catch (_) {
       if (!mounted || _saveWarning) return;
@@ -5898,35 +5956,50 @@ class _ReaderState extends State<Reader> {
     color: _rail,
     child: SizedBox(
       height: 48,
-      child: ListView.separated(
+      child: ReorderableListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         scrollDirection: Axis.horizontal,
-        itemCount: _scoreTabIds.length + 1,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        buildDefaultDragHandles: false,
+        itemCount: _scoreTabIds.length,
+        footer: IconButton(
+          tooltip: 'Open in new tab',
+          onPressed: _picking || _savingTabs ? null : _openNewScoreTab,
+          icon: const Icon(Icons.add),
+        ),
+        onReorderItem: (from, to) {
+          if (_picking || _savingTabs || from == to) return;
+          final ids = [..._scoreTabIds];
+          ids.insert(to, ids.removeAt(from));
+          _updateScoreTabs(ids);
+        },
         itemBuilder: (context, index) {
-          if (index == _scoreTabIds.length) {
-            return IconButton(
-              tooltip: 'Open in new tab',
-              onPressed: _picking || _savingTabs ? null : _openNewScoreTab,
-              icon: const Icon(Icons.add),
-            );
-          }
           final id = _scoreTabIds[index];
-          final title = _library.lookup(id)?.title ?? 'Saved score';
-          return InputChip(
-            label: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 170),
-              child: Text(title, overflow: TextOverflow.ellipsis),
+          final target = _library.lookupSelection(id);
+          final title = target?.$2?.title ?? target?.$1.title ?? 'Saved score';
+          return ReorderableDelayedDragStartListener(
+            key: ValueKey(id),
+            index: index,
+            enabled: !_picking && !_savingTabs,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(end: 8),
+              child: InputChip(
+                label: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 170),
+                  child: Text(title, overflow: TextOverflow.ellipsis),
+                ),
+                labelStyle: TextStyle(
+                  color: id == _activeScoreTabId ? _brass : _paper,
+                ),
+                selected: id == _activeScoreTabId,
+                onPressed: _picking ? null : () => _switchScoreTab(id),
+                deleteButtonTooltipMessage: 'Close tab',
+                onDeleted: _picking || _savingTabs
+                    ? null
+                    : () => _updateScoreTabs(
+                        _scoreTabIds.where((tab) => tab != id).toList(),
+                      ),
+              ),
             ),
-            labelStyle: TextStyle(color: id == _entry?.id ? _brass : _paper),
-            selected: id == _entry?.id && _itemBookmark == null,
-            onPressed: _picking ? null : () => _switchScoreTab(id),
-            deleteButtonTooltipMessage: 'Close tab',
-            onDeleted: _picking || _savingTabs
-                ? null
-                : () => _updateScoreTabs(
-                    _scoreTabIds.where((tab) => tab != id).toList(),
-                  ),
           );
         },
       ),
@@ -6345,8 +6418,8 @@ class _ReaderState extends State<Reader> {
           );
         }
       case _ReaderDisplay.scoreTabs:
-        if (_entry case final score? when !_scoreTabIds.contains(score.id)) {
-          await _updateScoreTabs([..._scoreTabIds, score.id]);
+        if (_activeScoreTabId case final id? when !_scoreTabIds.contains(id)) {
+          await _updateScoreTabs([..._scoreTabIds, id]);
         } else {
           await _openNewScoreTab();
         }
@@ -7637,19 +7710,38 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     final saved = widget.focusSearch
         ? const <String, dynamic>{}
         : widget.browseState;
-    _browseBy = saved['sort'] == 'Title' ? 'Title' : 'Recent';
+    if (saved['sort'] case final String sort
+        when _sortLabels.containsKey(sort)) {
+      _browseBy = sort;
+    }
     if (saved['collection'] case final String name
         when widget.library.collections.contains(name)) {
       _collection = name;
       _excludeCollection = saved['exclude'] == true;
     }
     _unassigned = saved['unassigned'] == true;
+    _filters.addAll(_readFilters(saved['filters']));
     if (saved['filterField'] case final String field
-        when _fields.containsKey(field)) {
-      _filterField = field;
-      _category = saved['category'] is String
-          ? saved['category'] as String
-          : null;
+        when _filters.isEmpty && _fields.containsKey(field)) {
+      if (saved['category'] case final String value when value.isNotEmpty) {
+        _filters[field] = value;
+      }
+    }
+    if (saved['filterPresets'] case final Map presets) {
+      for (final entry in presets.entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final filters = _readFilters(value['filters']);
+        final sort = value['sort'];
+        if (entry.key is String && filters.isNotEmpty) {
+          _filterPresets[entry.key as String] = (
+            filters: filters,
+            sort: sort is String && _sortLabels.containsKey(sort)
+                ? sort
+                : 'Recent',
+          );
+        }
+      }
     }
     final offset = saved['offset'];
     _browseOffset = offset is num && offset.isFinite
@@ -7664,18 +7756,24 @@ class _LibraryScreenState extends State<_LibraryScreen> {
 
   @override
   void dispose() {
-    if (!widget.focusSearch)
-      widget.onBrowseState({
-        'sort': _browseBy,
-        'collection': _collection,
-        'exclude': _excludeCollection,
-        'unassigned': _unassigned,
-        'filterField': _filterField,
-        'category': _category,
-        'offset': _browseOffset,
-      });
+    if (!widget.focusSearch) _saveBrowseState();
     _libraryScroll.dispose();
     super.dispose();
+  }
+
+  void _saveBrowseState() {
+    widget.onBrowseState({
+      'sort': _browseBy,
+      'collection': _collection,
+      'exclude': _excludeCollection,
+      'unassigned': _unassigned,
+      'filters': Map.of(_filters),
+      'filterPresets': {
+        for (final entry in _filterPresets.entries)
+          entry.key: {'filters': entry.value.filters, 'sort': entry.value.sort},
+      },
+      'offset': _browseOffset,
+    });
   }
 
   double _browseOffset = 0;
@@ -7713,7 +7811,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   String _query = '';
   String _browseBy = 'Recent';
   String? _filterField;
-  String? _category;
+  final Map<String, String> _filters = {};
+  final Map<String, ({Map<String, String> filters, String sort})>
+  _filterPresets = {};
   String? _collection;
   bool _excludeCollection = false;
   bool _unassigned = false;
@@ -7884,7 +7984,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       _collection = name;
       _excludeCollection = exclude;
       _unassigned = unassigned;
-      _category = null;
+      _filterField = null;
     });
     Navigator.pop(dialog);
   }
@@ -8021,10 +8121,97 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     'Genre': 'genre',
     'Label': 'label',
     'Tag': 'tags',
+    'Key': 'key',
+    'Rating': 'rating',
+    'Difficulty': 'difficulty',
   };
 
-  Iterable<String> _categories(ScoreEntry score) =>
-      (score.metadata[_fields[_filterField]] ?? '')
+  static const _sortLabels = {
+    'Recent': 'Recently opened',
+    'Title': 'Title',
+    'Composer': 'Composer',
+    'Genre': 'Genre',
+    'Rating': 'Rating (highest first)',
+  };
+
+  static Map<String, String> _readFilters(Object? source) => {
+    if (source is Map)
+      for (final field in _fields.keys)
+        if (source[field] case final String value when value.isNotEmpty)
+          field: value,
+  };
+
+  Future<void> _saveFilterPreset() async {
+    String name = '';
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Save metadata filter'),
+        content: TextField(
+          autofocus: true,
+          maxLength: 60,
+          decoration: const InputDecoration(labelText: 'Filter name'),
+          onChanged: (value) => name = value,
+          onSubmitted: (value) => Navigator.pop(dialog, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, name.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || saved == null || saved.isEmpty) return;
+    setState(
+      () =>
+          _filterPresets[saved] = (filters: Map.of(_filters), sort: _browseBy),
+    );
+    _saveBrowseState();
+  }
+
+  Future<void> _chooseFilterPreset() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Saved metadata filters'),
+        children: [
+          for (final name in _filterPresets.keys)
+            ListTile(
+              title: Text(name),
+              onTap: () => Navigator.pop(dialog, name),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Delete saved filter $name',
+                onPressed: () {
+                  setState(() => _filterPresets.remove(name));
+                  _saveBrowseState();
+                  Navigator.pop(dialog);
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final preset = _filterPresets[selected];
+    if (preset == null) return;
+    setState(() {
+      _filters
+        ..clear()
+        ..addAll(preset.filters);
+      _browseBy = preset.sort;
+      _filterField = null;
+    });
+    _saveBrowseState();
+  }
+
+  Iterable<String> _categories(ScoreEntry score, String? field) =>
+      (score.metadata[_fields[field]] ?? '')
           .split(',')
           .map((value) => value.trim())
           .where((value) => value.isNotEmpty);
@@ -8036,9 +8223,14 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       if (_collection == null) return true;
       return score.collections.contains(_collection) != _excludeCollection;
     }).toList();
-    final categories = inCollection.expand(_categories).toSet().toList()
-      ..sort();
-    final selectedCategory = categories.contains(_category) ? _category : null;
+    final categories =
+        inCollection
+            .expand((score) => _categories(score, _filterField))
+            .toSet()
+            .toList()
+          ..sort();
+    final selected = _filters[_filterField];
+    final selectedCategory = categories.contains(selected) ? selected : null;
     final visible = inCollection
         .where(
           (score) => [
@@ -8047,19 +8239,27 @@ class _LibraryScreenState extends State<_LibraryScreen> {
           ].any((value) => value.toLowerCase().contains(_query)),
         )
         .where(
-          (score) =>
-              selectedCategory == null ||
-              _categories(score).contains(selectedCategory),
+          (score) => _filters.entries.every(
+            (filter) => _categories(score, filter.key).contains(filter.value),
+          ),
         )
         .toList();
     if (_browseBy != 'Recent') {
-      visible.sort(
-        (a, b) => _searchOptions
-            .titleKey(a.title)
-            .compareTo(_searchOptions.titleKey(b.title)),
-      );
+      visible.sort((a, b) {
+        final field = _fields[_browseBy];
+        final av = a.metadata[field] ?? '';
+        final bv = b.metadata[field] ?? '';
+        final order = _browseBy == 'Rating'
+            ? (double.tryParse(bv) ?? 0).compareTo(double.tryParse(av) ?? 0)
+            : av.toLowerCase().compareTo(bv.toLowerCase());
+        return order != 0
+            ? order
+            : _searchOptions
+                  .titleKey(a.title)
+                  .compareTo(_searchOptions.titleKey(b.title));
+      });
     } else if (_query.isEmpty &&
-        selectedCategory == null &&
+        _filters.isEmpty &&
         _searchOptions.recentLimit > 0 &&
         visible.length > _searchOptions.recentLimit) {
       visible.removeRange(_searchOptions.recentLimit, visible.length);
@@ -8199,37 +8399,53 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         initialValue: _browseBy,
                         onSelected: (value) =>
                             setState(() => _browseBy = value),
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'Recent',
-                            child: Text('Recently opened'),
-                          ),
-                          PopupMenuItem(value: 'Title', child: Text('Title')),
+                        itemBuilder: (_) => [
+                          for (final option in _sortLabels.entries)
+                            PopupMenuItem(
+                              value: option.key,
+                              child: Text(option.value),
+                            ),
                         ],
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             vertical: 10,
                             horizontal: 4,
                           ),
-                          child: Text(
-                            'Sort by ${_browseBy == 'Recent' ? 'recent' : 'title'} ▾',
-                          ),
+                          child: Text('Sort by ${_browseBy.toLowerCase()} ▾'),
                         ),
                       ),
                       if (!widget.focusSearch)
                         PopupMenuButton<String>(
                           tooltip: 'Filter by metadata',
-                          onSelected: (value) => setState(() {
-                            _filterField = value.isEmpty ? null : value;
-                            _category = null;
-                          }),
+                          onSelected: (value) {
+                            if (value == 'save') {
+                              _saveFilterPreset();
+                            } else if (value == 'saved') {
+                              _chooseFilterPreset();
+                            } else {
+                              setState(() {
+                                _filterField = value.isEmpty ? null : value;
+                                if (value.isEmpty) _filters.clear();
+                              });
+                            }
+                          },
                           itemBuilder: (_) => [
                             for (final field in _fields.keys)
                               PopupMenuItem(value: field, child: Text(field)),
-                            if (_filterField != null)
+                            if (_filters.isNotEmpty) ...[
+                              const PopupMenuItem(
+                                value: 'save',
+                                child: Text('Save metadata filter…'),
+                              ),
                               const PopupMenuItem(
                                 value: '',
-                                child: Text('Clear filter'),
+                                child: Text('Clear metadata filters'),
+                              ),
+                            ],
+                            if (_filterPresets.isNotEmpty)
+                              const PopupMenuItem(
+                                value: 'saved',
+                                child: Text('Saved metadata filters…'),
                               ),
                           ],
                           child: Padding(
@@ -8238,9 +8454,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               horizontal: 4,
                             ),
                             child: Text(
-                              _filterField == null
+                              _filters.isEmpty
                                   ? 'Filter ▾'
-                                  : 'Filter by $_filterField ▾',
+                                  : 'Filter (${_filters.length}) ▾',
                             ),
                           ),
                         ),
@@ -8261,27 +8477,38 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             ),
                           ),
                       ],
-                      onChanged: (value) => setState(() => _category = value),
+                      onChanged: (value) {
+                        final field = _filterField;
+                        if (field == null || value == null) return;
+                        setState(() {
+                          _filters[field] = value;
+                          _filterField = null;
+                        });
+                      },
                     ),
                   if (_filterField != null && categories.isEmpty)
                     const Text(
                       'No values for this filter in the current library.',
                     ),
-                  if (selectedCategory case final active?)
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: InputChip(
-                        avatar: switch (metadataSymbols[widget
-                            .metadataIconKeys[_fields[_filterField]]]) {
-                          final IconData icon => Icon(icon, size: 16),
-                          null => null,
-                        },
-                        label: Text(
-                          '$_filterField: $active',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onDeleted: () => setState(() => _category = null),
-                      ),
+                  if (_filters.isNotEmpty)
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final filter in _filters.entries)
+                          InputChip(
+                            avatar: switch (metadataSymbols[widget
+                                .metadataIconKeys[_fields[filter.key]]]) {
+                              final IconData icon => Icon(icon, size: 16),
+                              null => null,
+                            },
+                            label: Text(
+                              '${filter.key}: ${filter.value}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onDeleted: () =>
+                                setState(() => _filters.remove(filter.key)),
+                          ),
+                      ],
                     ),
                   Wrap(
                     spacing: 8,

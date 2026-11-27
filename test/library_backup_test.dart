@@ -194,7 +194,8 @@ void main() {
       await original.createCollection('Empty library');
       await original.updatePreferences({
         'landscapeWidth': true,
-        'scoreTabs': [first.id],
+        'scoreTabs': [first.id, movement.selectionId(second.id)],
+        'scoreTabPages': {movement.selectionId(second.id): 3},
         'personalStamps': ['dolce'],
       });
       await original.assignCollections(second.id, ['Choir']);
@@ -267,7 +268,8 @@ void main() {
       expect(reopened.collections, ['Choir', 'Empty library']);
       final preferences = await reopened.storage.readPreferences();
       expect(preferences['landscapeWidth'], isTrue);
-      expect(preferences['scoreTabs'], [ids[1]]);
+      expect(preferences['scoreTabs'], [ids[1], ids.last]);
+      expect(preferences['scoreTabPages'], {ids.last: 3});
       expect(preferences['personalStamps'], ['dolce']);
       expect(score.flags, [3]);
       expect(score.jumps.single.target.page, 2);
