@@ -140,6 +140,13 @@ class _PageCropDialogState extends State<PageCropDialog> {
                     child: const Text('Auto fit'),
                   ),
                   TextButton(
+                    onPressed: _working || _crop.angle == 0
+                        ? null
+                        : () =>
+                              setState(() => _crop = _crop.copyWith(angle: 0)),
+                    child: const Text('Reset angle'),
+                  ),
+                  TextButton(
                     onPressed: _working
                         ? null
                         : () => setState(() => _crop = const PageCrop()),
