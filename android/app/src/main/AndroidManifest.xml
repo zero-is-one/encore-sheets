@@ -27,7 +27,7 @@
         <activity
             android:name=".ScoreWindowActivity"
             android:exported="false"
-            android:taskAffinity="${applicationId}.score-window"
+            android:taskAffinity="${applicationId}.score_window"
             android:documentLaunchMode="always"
             android:resizeableActivity="true" />
         <activity
