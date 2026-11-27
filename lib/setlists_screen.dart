@@ -426,6 +426,34 @@ class _SetlistEditorState extends State<_SetlistEditor> {
   String _libraryQuery = '';
   Object? _replacement;
 
+  Future<void> _pickFolder() async {
+    final folders =
+        widget.library.setlists
+            .map((list) => list.folder)
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final folder = await showDialog<String>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Choose setlist folder'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialog, ''),
+            child: const Text('No folder'),
+          ),
+          for (final name in folders)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, name),
+              child: Text(name),
+            ),
+        ],
+      ),
+    );
+    if (mounted && folder != null) _folder.text = folder;
+  }
+
   void _insertSelection(String id, {Object? replace}) {
     if (_saving) return;
     setState(() {
@@ -590,7 +618,14 @@ class _SetlistEditorState extends State<_SetlistEditor> {
         TextField(
           controller: _folder,
           enabled: !_saving,
-          decoration: const InputDecoration(labelText: 'Folder (optional)'),
+          decoration: InputDecoration(
+            labelText: 'Folder (optional)',
+            suffixIcon: IconButton(
+              tooltip: 'Choose existing folder',
+              onPressed: _saving ? null : _pickFolder,
+              icon: const Icon(Icons.folder_open),
+            ),
+          ),
         ),
         TextField(
           controller: _label,
