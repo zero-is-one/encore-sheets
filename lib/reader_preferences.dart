@@ -56,6 +56,7 @@ class ReaderPreferences {
     this.fullScreenPanels = false,
     this.largePageButtons = false,
     this.complexGestures = true,
+    this.cornerShortcuts = false,
     this.softMetronome = false,
     this.dockPanels = false,
     this.compactLibrary = false,
@@ -92,6 +93,7 @@ class ReaderPreferences {
       fullScreenPanels: json['fullScreenPanels'] == true,
       largePageButtons: json['largePageButtons'] == true,
       complexGestures: json['complexGestures'] != false,
+      cornerShortcuts: json['cornerShortcuts'] == true,
       softMetronome: json['softMetronome'] == true,
       dockPanels: json['dockPanels'] == true,
       compactLibrary: json['compactLibrary'] == true,
@@ -134,6 +136,7 @@ class ReaderPreferences {
   final bool sepia;
   final double pageDimming;
   final bool fullScreenPanels, largePageButtons, complexGestures, softMetronome;
+  final bool cornerShortcuts;
   final bool dockPanels, compactLibrary;
   final EmbeddedPdfContent embeddedPdfContent;
   final bool embeddedPdfLinks;
@@ -158,6 +161,7 @@ class ReaderPreferences {
     bool? fullScreenPanels,
     bool? largePageButtons,
     bool? complexGestures,
+    bool? cornerShortcuts,
     bool? softMetronome,
     bool? dockPanels,
     bool? compactLibrary,
@@ -183,6 +187,7 @@ class ReaderPreferences {
     fullScreenPanels: fullScreenPanels ?? this.fullScreenPanels,
     largePageButtons: largePageButtons ?? this.largePageButtons,
     complexGestures: complexGestures ?? this.complexGestures,
+    cornerShortcuts: cornerShortcuts ?? this.cornerShortcuts,
     softMetronome: softMetronome ?? this.softMetronome,
     dockPanels: dockPanels ?? this.dockPanels,
     compactLibrary: compactLibrary ?? this.compactLibrary,
@@ -211,6 +216,7 @@ class ReaderPreferences {
     'fullScreenPanels': fullScreenPanels,
     'largePageButtons': largePageButtons,
     'complexGestures': complexGestures,
+    'cornerShortcuts': cornerShortcuts,
     'softMetronome': softMetronome,
     'dockPanels': dockPanels,
     'compactLibrary': compactLibrary,

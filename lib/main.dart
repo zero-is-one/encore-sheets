@@ -281,6 +281,7 @@ class _ReaderState extends State<Reader> {
   Timer? _scoreExpiry;
   MeasureClip? _measureClipboard;
   Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
+  QuickReaderTool? _lastQuickTool;
   Map<String, String> _metadataSymbols = {};
   ReaderAppearanceOptions _appearance = const ReaderAppearanceOptions();
 
@@ -575,10 +576,32 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  bool _handleCornerShortcut(int edge, Offset position, Size viewport) {
+    if (!_preferences.cornerShortcuts ||
+        _showControls ||
+        _performance ||
+        _picking ||
+        position.dy > math.min(64, viewport.height * .12))
+      return false;
+    final cornerWidth = math.min(64, viewport.width * .16);
+    if (edge < 0 && position.dx <= cornerWidth) {
+      unawaited(_showLibrary());
+      return true;
+    }
+    if (_lastQuickTool case final tool?
+        when edge > 0 && position.dx >= viewport.width - cornerWidth) {
+      if (!_quickTools.contains(tool) || !_quickToolEnabled(tool)) return false;
+      unawaited(_runQuickTool(tool));
+      return true;
+    }
+    return false;
+  }
+
   Future<void> _configureGestures() async {
     var left = _preferences.left;
     var center = _preferences.center;
     var right = _preferences.right;
+    var cornerShortcuts = _preferences.cornerShortcuts;
     final configured = await showDialog<ReaderPreferences>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -603,12 +626,38 @@ class _ReaderState extends State<Reader> {
           );
           return AlertDialog(
             title: const Text('Reader gestures'),
+            scrollable: true,
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Theme.of(context).dividerColor),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: const [
+                      Expanded(child: Center(child: Text('Left'))),
+                      Expanded(child: Center(child: Text('Center'))),
+                      Expanded(child: Center(child: Text('Right'))),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
                 choice('Left', left, (value) => left = value),
                 choice('Center', center, (value) => center = value),
                 choice('Right', right, (value) => right = value),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Corner shortcuts'),
+                  subtitle: const Text(
+                    'With controls hidden, tap the top left to open the library '
+                    'or the top right to repeat your last Quick access tool.',
+                  ),
+                  value: cornerShortcuts,
+                  onChanged: (value) => update(() => cornerShortcuts = value),
+                ),
               ],
             ),
             actions: [
@@ -619,6 +668,7 @@ class _ReaderState extends State<Reader> {
                     left: ReaderTapAction.previous,
                     center: ReaderTapAction.controls,
                     right: ReaderTapAction.next,
+                    cornerShortcuts: false,
                   ),
                 ),
                 child: const Text('Reset'),
@@ -630,6 +680,7 @@ class _ReaderState extends State<Reader> {
                     left: left,
                     center: center,
                     right: right,
+                    cornerShortcuts: cornerShortcuts,
                     keepAwake: _preferences.keepAwake,
                     showNextTitle: _preferences.showNextTitle,
                   ),
@@ -781,6 +832,7 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _runQuickTool(QuickReaderTool tool) async {
+    _lastQuickTool = tool;
     switch (tool) {
       case QuickReaderTool.library:
         await _showLibrary();
@@ -5228,7 +5280,8 @@ class _ReaderState extends State<Reader> {
               _dispatchingEdgeLink = true;
               try {
                 if (!_followJumpAt(event.localPosition) &&
-                    !handleLinkTap(event.localPosition))
+                    !handleLinkTap(event.localPosition) &&
+                    !_handleCornerShortcut(step, event.localPosition, size))
                   _performTap(step);
               } finally {
                 _dispatchingEdgeLink = false;
