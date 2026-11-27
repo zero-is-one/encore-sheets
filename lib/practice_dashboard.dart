@@ -32,6 +32,30 @@ String practiceDuration(int seconds) {
   return minutes == 0 ? '${seconds}s' : '${minutes}m';
 }
 
+typedef _ReportPreset = ({
+  String name,
+  PracticePeriod period,
+  PracticeKind category,
+  PracticeReportStyle style,
+});
+
+_ReportPreset? _readReportPreset(Object? row) {
+  if (row is! Map || row['name'] is! String) return null;
+  final name = (row['name'] as String).trim();
+  final period = PracticePeriod.values
+      .where((value) => value.name == row['period'])
+      .firstOrNull;
+  final category = PracticeKind.values
+      .where((value) => value.name == row['category'])
+      .firstOrNull;
+  final style = PracticeReportStyle.values
+      .where((value) => value.name == row['style'])
+      .firstOrNull;
+  if (name.isEmpty || period == null || category == null || style == null)
+    return null;
+  return (name: name, period: period, category: category, style: style);
+}
+
 class PracticeDashboard extends StatefulWidget {
   const PracticeDashboard({
     super.key,
@@ -53,6 +77,7 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
   var _reportStyle = PracticeReportStyle.summary;
   List<PracticeEntry> _history = [];
   List<PracticeGoal> _goals = [];
+  List<_ReportPreset> _presets = [];
   bool _busy = true;
   String? _error;
 
@@ -68,6 +93,9 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
       final prefs = await widget.library.storage.readPreferences();
       _history = readPracticeActivity(prefs['practiceActivity']);
       _goals = readPracticeGoals(prefs['practiceGoals']);
+      if (prefs['practiceReportPresets'] case final List rows) {
+        _presets = rows.map(_readReportPreset).nonNulls.toList();
+      }
       if (prefs['practiceReportStyle'] == PracticeReportStyle.log.name) {
         _reportStyle = PracticeReportStyle.log;
       }
@@ -145,24 +173,31 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
     }
   }
 
-  Future<void> _exportReport() async {
-    final choice = await showDialog<PracticeReportStyle>(
-      context: context,
-      builder: (dialog) => SimpleDialog(
-        title: const Text('Practice report layout'),
-        children: [
-          for (final style in [
-            _reportStyle,
-            ...PracticeReportStyle.values.where((item) => item != _reportStyle),
-          ])
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialog, style),
-              child: Text(style.label),
-            ),
-        ],
-      ),
-    );
+  Future<PracticeReportStyle?> _chooseReportStyle() =>
+      showDialog<PracticeReportStyle>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('Practice report layout'),
+          children: [
+            for (final style in [
+              _reportStyle,
+              ...PracticeReportStyle.values.where(
+                (item) => item != _reportStyle,
+              ),
+            ])
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, style),
+                child: Text(style.label),
+              ),
+          ],
+        ),
+      );
+
+  Future<void> _exportReport({_ReportPreset? preset}) async {
+    final choice = preset?.style ?? await _chooseReportStyle();
     if (!mounted || choice == null) return;
+    final period = preset?.period ?? _period;
+    final category = preset?.category ?? _category;
     final box = context.findRenderObject() as RenderBox;
     final anchor = box.localToGlobal(Offset.zero) & box.size;
     final now = DateTime.now();
@@ -173,12 +208,11 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
     try {
       final bytes = await buildPracticeReport(
         history: _history.where(
-          (row) =>
-              row.selection.kind == _category && _period.includes(row, now),
+          (row) => row.selection.kind == category && period.includes(row, now),
         ),
         style: choice,
-        period: _period.label,
-        category: switch (_category) {
+        period: period.label,
+        category: switch (category) {
           PracticeKind.score => 'Scores',
           PracticeKind.bookmark => 'Bookmarks',
           PracticeKind.setlist => 'Setlists',
@@ -203,6 +237,101 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
     }
   }
 
+  Future<void> _saveReportPresets(List<_ReportPreset> updated) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.library.updatePreferences({
+        'practiceReportPresets': [
+          for (final preset in updated)
+            {
+              'name': preset.name,
+              'period': preset.period.name,
+              'category': preset.category.name,
+              'style': preset.style.name,
+            },
+        ],
+      });
+      _presets = updated;
+    } catch (_) {
+      _error = 'Could not save report settings.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _newReportPreset() async {
+    final style = await _chooseReportStyle();
+    if (!mounted || style == null) return;
+    var name = '';
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Name this report'),
+        content: TextField(
+          autofocus: true,
+          maxLength: 60,
+          decoration: const InputDecoration(labelText: 'Report name'),
+          onChanged: (value) => name = value.trim(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || accepted != true || name.isEmpty) return;
+    await _saveReportPresets([
+      ..._presets,
+      (name: name, period: _period, category: _category, style: style),
+    ]);
+  }
+
+  Future<void> _showReportPresets() async {
+    final action = await showDialog<({int index, bool remove})>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Saved practice reports'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialog, (index: -1, remove: false)),
+            child: const Text('Save current report settings'),
+          ),
+          for (final (index, preset) in _presets.indexed)
+            ListTile(
+              title: Text(preset.name),
+              subtitle: Text(
+                '${preset.period.label} · ${preset.category.name} · ${preset.style.label}',
+              ),
+              onTap: () => Navigator.pop(dialog, (index: index, remove: false)),
+              trailing: IconButton(
+                tooltip: 'Remove ${preset.name}',
+                onPressed: () =>
+                    Navigator.pop(dialog, (index: index, remove: true)),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action.index < 0) {
+      await _newReportPreset();
+    } else if (action.remove) {
+      await _saveReportPresets([..._presets]..removeAt(action.index));
+    } else {
+      await _exportReport(preset: _presets[action.index]);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -223,6 +352,12 @@ class _PracticeDashboardState extends State<PracticeDashboard> {
       appBar: AppBar(
         title: const Text('Practice activity'),
         actions: [
+          if (widget.allowExport)
+            IconButton(
+              tooltip: 'Saved practice reports',
+              onPressed: _busy ? null : _showReportPresets,
+              icon: const Icon(Icons.bookmark_outline),
+            ),
           if (widget.allowExport)
             IconButton(
               tooltip: 'Export practice report',
