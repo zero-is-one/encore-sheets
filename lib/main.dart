@@ -3157,7 +3157,6 @@ class _ReaderState extends State<Reader> {
       _seek = null;
       _inking = false;
       _annotationPage = null;
-      _showControls = !_followingSpread;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final ink in retiredInk) {
