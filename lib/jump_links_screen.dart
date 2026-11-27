@@ -116,10 +116,6 @@ class _JumpEditorState extends State<_JumpEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final count = widget.document.pages.length;
-    final current = _pages[_step].clamp(1, count);
-    final pdfPage = widget.document.pages[current - 1];
-    final point = _points[_step];
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.link == null ? 'New link' : 'Edit link'),
@@ -148,91 +144,130 @@ class _JumpEditorState extends State<_JumpEditor> {
                 onChanged: (_) => setState(() {}),
               ),
             ),
-            SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('Start point')),
-                ButtonSegment(value: 1, label: Text('Destination')),
-              ],
-              selected: {_step},
-              onSelectionChanged: (values) =>
-                  setState(() => _step = values.single),
-            ),
             Expanded(
               child: LayoutBuilder(
-                builder: (_, limits) {
-                  final ratio = pdfPage.width / pdfPage.height;
-                  final width = math.min(
-                    limits.maxWidth,
-                    limits.maxHeight * ratio,
-                  );
-                  final height = width / ratio;
-                  return Center(
-                    child: SizedBox(
-                      width: width,
-                      height: height,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapUp: (tap) {
-                          if (width <= 0 || height <= 0) return;
-                          setState(
-                            () => _points[_step] = JumpPoint(
-                              current,
-                              (tap.localPosition.dx / width).clamp(0.0, 1.0),
-                              (tap.localPosition.dy / height).clamp(0.0, 1.0),
-                            ),
-                          );
-                        },
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned.fill(
-                              child: PdfPageView(
-                                document: widget.document,
-                                pageNumber: current,
+                builder: (_, bounds) => bounds.maxWidth >= 720
+                    ? Row(
+                        children: [
+                          Expanded(child: _endpoint(0, labelled: true)),
+                          const VerticalDivider(width: 16),
+                          Expanded(child: _endpoint(1, labelled: true)),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          SegmentedButton<int>(
+                            segments: const [
+                              ButtonSegment(
+                                value: 0,
+                                label: Text('Start point'),
                               ),
-                            ),
-                            if (point != null && point.page == current)
-                              Positioned(
-                                left: point.x * width - 12,
-                                top: point.y * height - 12,
-                                child: Icon(
-                                  Icons.location_on,
-                                  color: _step == 0
-                                      ? Colors.blue
-                                      : Colors.orange,
-                                ),
+                              ButtonSegment(
+                                value: 1,
+                                label: Text('Destination'),
                               ),
-                          ],
-                        ),
+                            ],
+                            selected: {_step},
+                            onSelectionChanged: (values) =>
+                                setState(() => _step = values.single),
+                          ),
+                          Expanded(child: _endpoint(_step)),
+                        ],
                       ),
-                    ),
-                  );
-                },
               ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'Previous page',
-                  onPressed: current <= 1
-                      ? null
-                      : () => setState(() => _pages[_step] = current - 1),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Text('Page $current / $count · Tap the score to place'),
-                IconButton(
-                  tooltip: 'Next page',
-                  onPressed: current >= count
-                      ? null
-                      : () => setState(() => _pages[_step] = current + 1),
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _endpoint(int step, {bool labelled = false}) {
+    final count = widget.document.pages.length;
+    final current = _pages[step].clamp(1, count);
+    final pdfPage = widget.document.pages[current - 1];
+    final point = _points[step];
+    return Column(
+      children: [
+        if (labelled)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(step == 0 ? 'Start point' : 'Destination'),
+          ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (_, limits) {
+              final ratio = pdfPage.width / pdfPage.height;
+              final width = math.min(limits.maxWidth, limits.maxHeight * ratio);
+              final height = width / ratio;
+              return Center(
+                child: SizedBox(
+                  width: width,
+                  height: height,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: (tap) {
+                      if (width <= 0 || height <= 0) return;
+                      setState(
+                        () => _points[step] = JumpPoint(
+                          current,
+                          (tap.localPosition.dx / width).clamp(0.0, 1.0),
+                          (tap.localPosition.dy / height).clamp(0.0, 1.0),
+                        ),
+                      );
+                    },
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          child: PdfPageView(
+                            document: widget.document,
+                            pageNumber: current,
+                          ),
+                        ),
+                        if (point != null && point.page == current)
+                          Positioned(
+                            left: point.x * width - 12,
+                            top: point.y * height - 12,
+                            child: Icon(
+                              Icons.location_on,
+                              color: step == 0 ? Colors.blue : Colors.orange,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Previous page',
+              onPressed: current <= 1
+                  ? null
+                  : () => setState(() => _pages[step] = current - 1),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Flexible(
+              child: Text(
+                'Page $current / $count · Tap the score to place',
+                textAlign: TextAlign.center,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Next page',
+              onPressed: current >= count
+                  ? null
+                  : () => setState(() => _pages[step] = current + 1),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
