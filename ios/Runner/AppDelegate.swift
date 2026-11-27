@@ -310,6 +310,10 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     windows.setMethodCallHandler { [weak self] call, result in
+      if call.method == "isSupported" {
+        result(UIApplication.shared.supportsMultipleScenes)
+        return
+      }
       guard call.method == "open",
         let data = call.arguments as? [String: Any],
         let path = data["path"] as? String,

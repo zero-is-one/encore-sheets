@@ -228,7 +228,9 @@ class _ReaderState extends State<Reader> {
   final _ink = <int, PageInk>{};
   final _focus = FocusNode(debugLabel: 'Score reader');
   late final _library = ScoreLibrary(LibraryStorage.create());
-  late Future<void> _libraryReady = _library.load();
+  late Future<void> _libraryReady = _loadLibrary();
+  bool _openingFirstScore = true;
+  bool _appleScoreWindowsSupported = false;
   ScoreEntry? _entry;
   ScoreBookmark? _itemBookmark;
   XFile? _file;
@@ -237,7 +239,7 @@ class _ReaderState extends State<Reader> {
   int _page = 1;
   int _initialPage = 1;
   int? _previousPage;
-  ({String? id, int page})? _previousItem;
+  ({String id, int page})? _previousItem;
   int _pages = 0;
   double? _seek;
   bool _showControls = true;
@@ -291,6 +293,11 @@ class _ReaderState extends State<Reader> {
   FacePageTurn? _faceTurns;
   Timer? _scoreExpiry;
   MeasureClip? _measureClipboard;
+  bool _selectingPdf = false;
+  bool _placingMeasure = false;
+  bool _copyingMeasure = false;
+  int? _pdfSelectionPage;
+  List<Offset> _pdfSelection = [];
   Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
   QuickReaderTool? _lastQuickTool;
   Map<String, String> _metadataSymbols = {};
@@ -340,7 +347,6 @@ class _ReaderState extends State<Reader> {
   int _setIndex = 0;
   bool _performance = false;
   bool _halfPreview = false;
-  final _sampleSplits = <int, double>{};
   Duration? _lastHalfScroll;
   ReaderPreferences _preferences = const ReaderPreferences();
   List<String> _scoreTabIds = [];
@@ -379,13 +385,18 @@ class _ReaderState extends State<Reader> {
     return next?.$2?.title ?? next?.$1.title;
   }
 
-  String get _title => _itemBookmark?.title ?? _entry?.title ?? 'First Light';
+  String get _title =>
+      _itemBookmark?.title ??
+      _entry?.title ??
+      (_openingFirstScore ? 'Opening library…' : 'No score open');
   bool get _supportsSharedImport =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
   bool get _isAppleMobile =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  bool get _supportsScoreWindows =>
+      _supportsSharedImport && (!_isAppleMobile || _appleScoreWindowsSupported);
   bool get _autoStylus =>
       _drawing.autoEnter &&
       !_performance &&
@@ -427,6 +438,7 @@ class _ReaderState extends State<Reader> {
   void initState() {
     super.initState();
     _startupPreferences = _restorePreferences(startup: true);
+    unawaited(_openFirstScore());
     if (!kIsWeb) {
       _assistantTimer = Timer.periodic(
         const Duration(seconds: 45),
@@ -441,6 +453,7 @@ class _ReaderState extends State<Reader> {
       );
     }
     if (_isAppleMobile) {
+      unawaited(_checkScoreWindowSupport());
       _stylusChannel.setMethodCallHandler((call) async {
         if (call.method == 'switchTool') _switchStylusTool();
       });
@@ -488,6 +501,40 @@ class _ReaderState extends State<Reader> {
       _linksChannel.setMethodCallHandler((call) async {
         if (call.method == 'available') _requestScoreLinks();
       });
+    }
+  }
+
+  Future<void> _loadLibrary() async {
+    await _library.load();
+    try {
+      await _library.seedSampleScore(() async {
+        final pdf = await rootBundle.load('assets/first_light.pdf');
+        return XFile.fromData(
+          pdf.buffer.asUint8List(pdf.offsetInBytes, pdf.lengthInBytes),
+          name: 'First Light.pdf',
+          mimeType: 'application/pdf',
+        );
+      });
+    } catch (error) {
+      debugPrint('Could not add the bundled score: $error');
+    }
+  }
+
+  Future<void> _openFirstScore() async {
+    try {
+      await _libraryReady;
+      await _startupPreferences;
+      final scores = _library.recent;
+      final score =
+          scores.where((score) => score.isSample).firstOrNull ??
+          scores.firstOrNull;
+      if (mounted && _revision == 0 && score != null) {
+        await _openLibraryScore(score, onlyIfUnchanged: true);
+      }
+    } catch (error) {
+      debugPrint('Could not open the initial score: $error');
+    } finally {
+      if (mounted) setState(() => _openingFirstScore = false);
     }
   }
 
@@ -830,52 +877,175 @@ class _ReaderState extends State<Reader> {
     );
   }
 
-  Future<void> _measureRegion({required bool paste}) async {
-    if (_picking ||
-        !_viewer.isReady ||
-        _pages == 0 ||
-        _restricted(RestrictedTool.markup))
+  bool get _pdfSelectionAvailable =>
+      _pages > 0 &&
+      _entry?.validUntil == null &&
+      !_restricted(RestrictedTool.markup);
+
+  Rect? get _pdfSelectionBounds {
+    if (_pdfSelection.length < (_freeformSelection ? 3 : 2)) return null;
+    var bounds = Rect.fromPoints(_pdfSelection.first, _pdfSelection.last);
+    for (final point in _pdfSelection) {
+      bounds = bounds.expandToInclude(Rect.fromPoints(point, point));
+    }
+    return bounds.width >= .006 && bounds.height >= .006 ? bounds : null;
+  }
+
+  void _selectPdf({bool paste = false}) {
+    if (_picking || !_viewer.isReady || _restricted(RestrictedTool.markup)) {
       return;
-    final clip = _measureClipboard;
-    if (paste && (clip == null || _activeInkLayer == null)) return;
-    final number = _page;
-    final page = _viewer.document.pages[number - 1];
+    }
+    if (paste
+        ? _measureClipboard == null || _activeInkLayer == null
+        : !_pdfSelectionAvailable) {
+      return;
+    }
+    if (!_inking) _toggleInk();
+    setState(() {
+      _tool = InkTool.selection;
+      _stamp = null;
+      _shape = null;
+      _selectingPdf = true;
+      _placingMeasure = paste;
+      _pdfSelection = [];
+      _pdfSelectionPage = null;
+    });
+  }
+
+  Future<void> _copyPdfSelection({required bool cut}) async {
+    final number = _pdfSelectionPage;
+    final area = _pdfSelectionBounds;
+    if (!_pdfSelectionAvailable ||
+        !_viewer.isReady ||
+        _copyingMeasure ||
+        number == null ||
+        area == null ||
+        cut && _activeInkLayer == null) {
+      return;
+    }
     final revision = _revision;
-    setState(() => _picking = true);
+    final page = _viewer.document.pages[number - 1];
+    final selection = _pdfSelection;
+    final layer = _activeInkLayer;
+    final outline = _freeformSelection ? selection : const <Offset>[];
+    bool stillSelected() =>
+        mounted &&
+        revision == _revision &&
+        _inking &&
+        _pdfSelectionAvailable &&
+        _tool == InkTool.selection &&
+        _selectingPdf &&
+        identical(selection, _pdfSelection) &&
+        (!cut || layer == _activeInkLayer);
+    setState(() => _copyingMeasure = true);
     try {
-      final area = await showDialog<Rect>(
-        context: context,
-        builder: (_) =>
-            MeasureRegionDialog(page: page, clip: paste ? clip : null),
-      );
-      if (!mounted || area == null || revision != _revision) return;
-      if (paste) {
-        final ink = _ink.putIfAbsent(number, _newPageInk);
-        ink.pasteRaster(clip!.png, area);
-        if (!_inking) _toggleInk();
-      } else {
-        final copied = await copyMeasure(page, area);
-        if (!mounted) return;
-        setState(() => _measureClipboard = copied);
+      final clip = await copyMeasure(page, area, outline: outline);
+      if (!stillSelected()) return;
+      final cover = cut
+          ? await copyMeasure(page, area, outline: outline, cover: true)
+          : null;
+      if (!stillSelected()) return;
+      if (cover != null) {
+        _ink
+            .putIfAbsent(number, _newPageInk)
+            .pasteRaster(cover.png, area, select: false);
+      }
+      setState(() {
+        _measureClipboard = clip;
+        if (cut) _annotationPage = number;
+        _pdfSelection = [];
+        _pdfSelectionPage = null;
+      });
+    } catch (_) {
+      if (mounted && revision == _revision) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Measure copied. Use Paste measure on the destination page.',
-            ),
-          ),
+          const SnackBar(content: Text('Could not copy the selected music.')),
         );
       }
-    } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not copy or place this measure.'),
-          ),
-        );
     } finally {
-      _finishPicking();
+      if (mounted) setState(() => _copyingMeasure = false);
     }
   }
+
+  void _placeMeasure(PdfPage page, Offset point) {
+    final clip = _measureClipboard;
+    if (_restricted(RestrictedTool.markup) ||
+        _activeInkLayer == null ||
+        clip == null) {
+      return;
+    }
+    final number = page.pageNumber;
+    _ink
+        .putIfAbsent(number, _newPageInk)
+        .pasteRaster(clip.png, measurePlacement(page, clip, point));
+    setState(() {
+      _annotationPage = number;
+      _placingMeasure = false;
+      _selectingPdf = false;
+    });
+  }
+
+  Widget _pdfSelectionSurface(PdfPage page) => LayoutBuilder(
+    builder: (_, limits) {
+      final size = limits.biggest;
+      Offset normalized(Offset local) => Offset(
+        (local.dx / size.width).clamp(0.0, 1.0),
+        (local.dy / size.height).clamp(0.0, 1.0),
+      );
+      final number = page.pageNumber;
+      final outline = number == _pdfSelectionPage
+          ? _pdfSelection
+          : const <Offset>[];
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: _copyingMeasure
+            ? null
+            : (event) {
+                if (_placingMeasure) {
+                  _placeMeasure(page, normalized(event.localPosition));
+                } else {
+                  setState(() {
+                    _pdfSelection = [];
+                    _pdfSelectionPage = null;
+                  });
+                }
+              },
+        onPanDown: _placingMeasure || _copyingMeasure
+            ? null
+            : (event) {
+                setState(() {
+                  _pdfSelectionPage = number;
+                  _pdfSelection = [normalized(event.localPosition)];
+                });
+              },
+        onPanUpdate: _placingMeasure || _copyingMeasure
+            ? null
+            : (event) {
+                if (number != _pdfSelectionPage || _pdfSelection.isEmpty)
+                  return;
+                final point = normalized(event.localPosition);
+                setState(() {
+                  if (_freeformSelection) {
+                    _pdfSelection = [..._pdfSelection, point];
+                  } else {
+                    _pdfSelection = [_pdfSelection.first, point];
+                  }
+                });
+              },
+        onPanCancel: () {
+          if (number != _pdfSelectionPage || _pdfSelection.length > 1) return;
+          setState(() {
+            _pdfSelection = [];
+            _pdfSelectionPage = null;
+          });
+        },
+        child: CustomPaint(
+          painter: PdfSelectionOutline(outline, freeform: _freeformSelection),
+          child: const SizedBox.expand(),
+        ),
+      );
+    },
+  );
 
   Future<void> _runQuickTool(QuickReaderTool tool) async {
     _lastQuickTool = tool;
@@ -1676,11 +1846,6 @@ class _ReaderState extends State<Reader> {
         }
         return;
       }
-      if (result == 'sample') {
-        _playing = null;
-        if (_entry != null) _load(null, null, null);
-        return;
-      }
       if (result == 'setlists') {
         final setlist = await _openReaderPanel<Setlist>(
           (_) => SetlistsScreen(
@@ -1816,12 +1981,14 @@ class _ReaderState extends State<Reader> {
     int? startPage,
     ScoreBookmark? item,
     List<String> queue = const [],
+    bool onlyIfUnchanged = false,
   }) async {
+    final revision = _revision;
     if (_entry?.id != entry.id || _itemBookmark?.id != item?.id) {
       final local = await _library.storage.openScore(entry.id);
       final bytes = kIsWeb ? await local.readAsBytes() : null;
       final annotations = await _library.readInk(entry.id);
-      if (!mounted) return;
+      if (!mounted || onlyIfUnchanged && revision != _revision) return;
       _load(
         entry,
         local,
@@ -1837,7 +2004,7 @@ class _ReaderState extends State<Reader> {
       _playing = null;
       _libraryQueue = queue;
     });
-    _remember(entry.id, _page, opened: true);
+    if (!onlyIfUnchanged) _remember(entry.id, _page, opened: true);
   }
 
   Future<void> _syncAssistantIfReady() async {
@@ -3513,8 +3680,9 @@ class _ReaderState extends State<Reader> {
     if (meter != null && meter.running && _entry?.id != entry?.id) {
       unawaited(meter.stop().catchError((Object _) {}));
     }
-    if (_entry?.id != entry?.id) {
-      _previousItem = (id: _entry?.id, page: _page);
+    if (_entry case final current?
+        when current.id != entry?.id && _library.lookup(current.id) != null) {
+      _previousItem = (id: current.id, page: _page);
     }
     final savedLayers = annotations['layers'];
     final layers = <InkLayer>[
@@ -3573,6 +3741,10 @@ class _ReaderState extends State<Reader> {
       _seek = null;
       _inking = false;
       _annotationPage = null;
+      _selectingPdf = false;
+      _placingMeasure = false;
+      _pdfSelection = [];
+      _pdfSelectionPage = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final ink in retiredInk) {
@@ -3611,9 +3783,15 @@ class _ReaderState extends State<Reader> {
         layers: _inkLayers,
         active: _activeInkLayer,
         onShare: canTransfer ? _shareInkLayer : null,
+        canSelectPdf: _pdfSelectionAvailable,
+        pdfSelected: _selectingPdf && _tool == InkTool.selection,
       ),
     );
     if (!mounted || revision != _revision) return;
+    if (result == 'pdf') {
+      _selectPdf();
+      return;
+    }
     if (result == 'import') {
       await _importInkLayer();
       return;
@@ -3625,6 +3803,10 @@ class _ReaderState extends State<Reader> {
         if (layer.visible) layer.id,
     ];
     setState(() {
+      _selectingPdf = false;
+      _placingMeasure = false;
+      _pdfSelection = [];
+      _pdfSelectionPage = null;
       _inkLayers = settings.layers;
       _activeInkLayer = settings.active;
     });
@@ -4160,6 +4342,8 @@ class _ReaderState extends State<Reader> {
     setState(() {
       _page = target;
       _annotationPage = null;
+      _pdfSelection = [];
+      _pdfSelectionPage = null;
       _halfPreview = false;
     });
     if (_verticalScrolling) {
@@ -4191,11 +4375,6 @@ class _ReaderState extends State<Reader> {
     setState(() => _picking = true);
     try {
       final id = previous.id;
-      if (id == null) {
-        _playing = null;
-        _load(null, null, null, startPage: previous.page);
-        return;
-      }
       final score = _library.lookup(id);
       if (score == null) return;
       final local = await _library.storage.openScore(id);
@@ -4427,7 +4606,7 @@ class _ReaderState extends State<Reader> {
   Future<void> _openScoreWindow() async {
     final file = _file;
     if (file == null ||
-        !_supportsSharedImport ||
+        !_supportsScoreWindows ||
         !_readerActionAllowed(_ReaderDisplay.scoreWindow))
       return;
     final revision = _revision;
@@ -4454,6 +4633,20 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not open another score window.')),
         );
+    }
+  }
+
+  Future<void> _checkScoreWindowSupport() async {
+    try {
+      final supported = await const MethodChannel('encoresheets/score-windows')
+          .invokeMethod<bool>('isSupported');
+      if (mounted && supported == true) {
+        setState(() => _appleScoreWindowsSupported = true);
+      }
+    } on PlatformException {
+      // Score windows are optional.
+    } on MissingPluginException {
+      // The native build does not expose the capability yet.
     }
   }
 
@@ -4977,6 +5170,10 @@ class _ReaderState extends State<Reader> {
     _ink[_annotationPage ?? _page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
+      _selectingPdf = false;
+      _placingMeasure = false;
+      _pdfSelection = [];
+      _pdfSelectionPage = null;
       _fingerDrawingOverride = null;
       if (!_inking) _annotationPage = null;
       _halfPreview = false;
@@ -5249,12 +5446,12 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  double _splitFor(int page) =>
-      (_entry?.halfSplits ?? _sampleSplits)[page] ?? .5;
+  double _splitFor(int page) => _entry?.halfSplits[page] ?? .5;
 
   Future<void> _setHalfSplit() async {
     final page = _page;
     final scoreId = _entry?.id;
+    if (scoreId == null) return;
     var fraction = _splitFor(page);
     final selected = await showDialog<double>(
       context: context,
@@ -5290,10 +5487,6 @@ class _ReaderState extends State<Reader> {
       ),
     );
     if (selected == null || !mounted || scoreId != _entry?.id) return;
-    if (scoreId == null) {
-      setState(() => _sampleSplits[page] = selected);
-      return;
-    }
     try {
       await _library.updateScore(
         scoreId,
@@ -5353,7 +5546,22 @@ class _ReaderState extends State<Reader> {
   }
 
   Widget _score() {
+    final file = _file;
+    if (file == null) {
+      return Center(
+        child: _openingFirstScore
+            ? const CircularProgressIndicator()
+            : FilledButton.icon(
+                onPressed: _picking ? null : _showLibrary,
+                icon: const Icon(Icons.library_music_outlined),
+                label: Text(ReaderText.library.of(context)),
+              ),
+      );
+    }
     final revision = _revision;
+    final markupHandlesGestures =
+        _inking &&
+        (_allowFinger || _selectingPdf && _tool == InkTool.selection);
     final pageBeforeResize = _page;
     final vertical = _verticalScrolling;
     final scrollLayout = SequentialPagesLayout(
@@ -5426,10 +5634,9 @@ class _ReaderState extends State<Reader> {
         blurRadius: 14,
         offset: Offset(0, 6),
       ),
-      panEnabled:
-          (!_inking || !_allowFinger) && !_stylusDrawing && !_halfPageTurns,
+      panEnabled: !markupHandlesGestures && !_stylusDrawing && !_halfPageTurns,
       scaleEnabled:
-          (!_inking || !_allowFinger) &&
+          !markupHandlesGestures &&
           !_stylusDrawing &&
           !_performance &&
           !_halfPageTurns,
@@ -5646,6 +5853,8 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _page = page;
           _annotationPage = null;
+          _pdfSelection = [];
+          _pdfSelectionPage = null;
           _halfPreview = false;
         });
         _remember(_entry?.id, page);
@@ -5767,7 +5976,8 @@ class _ReaderState extends State<Reader> {
             child: InkSurface(
               key: ValueKey(page.pageNumber),
               ink: _ink.putIfAbsent(page.pageNumber, _newPageInk),
-              enabled: _inking,
+              enabled:
+                  _inking && !(_selectingPdf && _tool == InkTool.selection),
               allowFinger: _allowFinger,
               tool: _tool,
               width: _tool == InkTool.pen || !_inking
@@ -5802,7 +6012,15 @@ class _ReaderState extends State<Reader> {
             ),
           ),
         ),
+        if (_inking && _selectingPdf && _tool == InkTool.selection)
+          Positioned.fill(
+            child: ClipRect(
+              clipper: _PageCropClipper(_cropFor(page.pageNumber)),
+              child: _pdfSelectionSurface(page),
+            ),
+          ),
         if (_inking &&
+            !(_selectingPdf && _tool == InkTool.selection) &&
             _showRuler &&
             page.pageNumber == (_annotationPage ?? _page))
           Positioned.fill(
@@ -5884,13 +6102,6 @@ class _ReaderState extends State<Reader> {
                     onPressed: _picking ? null : _open,
                     child: const Text('Open another PDF'),
                   ),
-                  TextButton(
-                    onPressed: () {
-                      _playing = null;
-                      _load(null, null, null);
-                    },
-                    child: const Text('Open sample'),
-                  ),
                 ],
               ),
             ],
@@ -5899,16 +6110,6 @@ class _ReaderState extends State<Reader> {
       ),
     );
     final key = ValueKey(revision);
-    final file = _file;
-    if (file == null) {
-      return PdfViewer.asset(
-        'assets/first_light.pdf',
-        initialPageNumber: _initialPage,
-        key: key,
-        controller: _viewer,
-        params: params,
-      );
-    }
     final bytes = _bytes;
     if (bytes != null) {
       return PdfViewer.data(
@@ -6195,6 +6396,7 @@ class _ReaderState extends State<Reader> {
   Widget _readerTitle() {
     final composer = _entry?.metadata['composer'];
     return InkWell(
+      key: const ValueKey('reader-title'),
       onTap: _entry == null || _picking ? null : () => _editScore(_entry!),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -6400,9 +6602,9 @@ class _ReaderState extends State<Reader> {
       case _ReaderDisplay.faceTurns:
         _configureFaceTurns();
       case _ReaderDisplay.copyMeasure:
-        _measureRegion(paste: false);
+        _selectPdf();
       case _ReaderDisplay.pasteMeasure:
-        _measureRegion(paste: true);
+        _selectPdf(paste: true);
       case _ReaderDisplay.midiDevices:
         _showMidiDevices();
       case _ReaderDisplay.midiAutomation:
@@ -6814,7 +7016,7 @@ class _ReaderState extends State<Reader> {
                     value: _ReaderDisplay.ensemble,
                     child: Text('Ensemble sync'),
                   ),
-                if (_supportsSharedImport)
+                if (_supportsScoreWindows)
                   PopupMenuItem(
                     value: _ReaderDisplay.scoreWindow,
                     enabled: _file != null,
@@ -6885,7 +7087,9 @@ class _ReaderState extends State<Reader> {
                 ),
                 PopupMenuItem(
                   value: _ReaderDisplay.previousScore,
-                  enabled: _previousItem != null,
+                  enabled:
+                      _previousItem != null &&
+                      _library.lookup(_previousItem!.id) != null,
                   child: const Text('Return to previous score'),
                 ),
                 PopupMenuItem(
@@ -7017,7 +7221,49 @@ class _ReaderState extends State<Reader> {
                             !_scoreActions.contains(item.value),
                     },
               )
+              .map(
+                (item) => group == _ReaderMenu.score && !item.enabled
+                    ? _explainDisabledScoreAction(item)
+                    : item,
+              )
               .toList(),
+    );
+  }
+
+  PopupMenuItem<_ReaderDisplay> _explainDisabledScoreAction(
+    PopupMenuItem<_ReaderDisplay> item,
+  ) {
+    final reason = switch (item.value) {
+      _ReaderDisplay.pasteMeasure =>
+        _measureClipboard == null
+            ? 'Copy a measure first.'
+            : 'Select a visible annotation layer first.',
+      _ReaderDisplay.previousPage => 'Turn or jump to another page first.',
+      _ReaderDisplay.previousScore => 'Open another score first.',
+      _ReaderDisplay.scoreTabs =>
+        !_appearance.showTabs
+            ? 'Enable the score tab bar in Theme and menus.'
+            : _savingTabs
+            ? 'Wait for the tab changes to finish saving.'
+            : 'Import a score first.',
+      _ => 'Open a score from your library first.',
+    };
+    return PopupMenuItem<_ReaderDisplay>(
+      value: item.value,
+      enabled: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          item.child!,
+          Text(
+            reason,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -7149,7 +7395,8 @@ class _ReaderState extends State<Reader> {
                   InkTool.highlighter => 'Highlighter',
                   InkTool.eraser => 'Eraser',
                   InkTool.text => 'Text',
-                  InkTool.selection => 'Selection',
+                  InkTool.selection =>
+                    _selectingPdf ? 'PDF selection' : 'Selection',
                 },
             style: TextStyle(color: _brass, fontWeight: FontWeight.w600),
           ),
@@ -7311,7 +7558,7 @@ class _ReaderState extends State<Reader> {
           ],
         ),
         PopupMenuButton<bool>(
-          tooltip: 'Select annotations',
+          tooltip: 'Selection tool',
           icon: Icon(
             Icons.select_all,
             color: _tool == InkTool.selection ? _brass : null,
@@ -7321,6 +7568,8 @@ class _ReaderState extends State<Reader> {
             _stamp = null;
             _shape = null;
             _freeformSelection = freeform;
+            _pdfSelection = [];
+            _pdfSelectionPage = null;
           }),
           itemBuilder: (_) => const [
             PopupMenuItem(value: false, child: Text('Rectangle selection')),
@@ -7333,9 +7582,51 @@ class _ReaderState extends State<Reader> {
           icon: const Icon(Icons.straighten),
           onPressed: () => setState(() => _showRuler = !_showRuler),
         ),
+        if (_tool == InkTool.selection && _selectingPdf) ...[
+          if (_placingMeasure)
+            const Text('Tap the score to place')
+          else ...[
+            IconButton(
+              tooltip: 'Copy selected music',
+              icon: const Icon(Icons.content_copy),
+              onPressed: _pdfSelectionBounds != null && !_copyingMeasure
+                  ? () => _copyPdfSelection(cut: false)
+                  : null,
+            ),
+            IconButton(
+              tooltip: 'Cut selected music',
+              icon: const Icon(Icons.content_cut),
+              onPressed:
+                  _pdfSelectionBounds != null &&
+                      !_copyingMeasure &&
+                      _activeInkLayer != null
+                  ? () => _copyPdfSelection(cut: true)
+                  : null,
+            ),
+            IconButton(
+              tooltip: 'Place copied music',
+              icon: const Icon(Icons.content_paste),
+              onPressed:
+                  _measureClipboard != null &&
+                      _activeInkLayer != null &&
+                      !_copyingMeasure
+                  ? () => _selectPdf(paste: true)
+                  : null,
+            ),
+          ],
+        ],
         if (_ink[_annotationPage ?? _page] case final ink?
-            when _tool == InkTool.selection)
+            when _tool == InkTool.selection && !_selectingPdf)
           _selectionActions(ink),
+        if (_tool == InkTool.selection &&
+            !_selectingPdf &&
+            _measureClipboard != null &&
+            _activeInkLayer != null)
+          IconButton(
+            tooltip: 'Place copied music',
+            icon: const Icon(Icons.post_add),
+            onPressed: () => _selectPdf(paste: true),
+          ),
         IconButton(
           tooltip: 'Annotation layers',
           onPressed: _showInkLayers,
@@ -8374,7 +8665,6 @@ class _LibraryScreenState extends State<_LibraryScreen> {
               'setlists': ReaderText.setlists.of(context),
               'support': ReaderText.help.of(context),
               if (widget.persistent) 'backup': 'Backup & restore',
-              'sample': ReaderText.sample.of(context),
             }.entries
             .where(
               (entry) =>
@@ -8807,9 +9097,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                   title: Text(score.title),
                                   dense: widget.compact,
                                   subtitle: widget.compact
-                                      ? null
+                                      ? (score.isSample
+                                            ? const Text('Sample score')
+                                            : null)
                                       : Text(
                                           [
+                                            if (score.isSample) 'Sample score',
                                             if (score.metadata['composer']
                                                 case final composer?)
                                               composer,
@@ -8915,14 +9208,6 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             ),
                           ),
                   ),
-                  if (_query.isEmpty)
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context, 'sample'),
-                        child: Text(ReaderText.sample.of(context)),
-                      ),
-                    ),
                 ],
               ),
             ),

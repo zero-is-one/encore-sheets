@@ -25,6 +25,7 @@ void main() {
       await tester.pumpWidget(const EncoreSheets());
       await tester.pump();
 
+      final readerTitle = find.byKey(const ValueKey('reader-title'));
       final positions = [
         for (final label in labels) tester.getCenter(find.byTooltip(label)),
       ];
@@ -34,17 +35,14 @@ void main() {
       );
       expect(positions.map((point) => point.dy).toSet(), hasLength(1));
       if (size.width < 720) {
-        expect(
-          tester.getCenter(find.text('First Light')).dy,
-          lessThan(positions.first.dy),
-        );
+        expect(tester.getCenter(readerTitle).dy, lessThan(positions.first.dy));
       } else {
         for (final label in ['Display', 'Score actions']) {
           expect(find.byTooltip(label), findsOneWidget);
           expect(find.text(label), findsNothing);
         }
         final display = tester.getRect(find.byTooltip('Display'));
-        final title = tester.getRect(find.text('First Light'));
+        final title = tester.getRect(readerTitle);
         final scoreActions = tester.getRect(find.byTooltip('Score actions'));
         expect(positions[3].dx, lessThan(display.left));
         expect(

@@ -1,6 +1,8 @@
 import 'package:file_selector/file_selector.dart';
 
 import 'score_library.dart';
+import 'sample_dismissal_stub.dart'
+    if (dart.library.js_interop) 'sample_dismissal_web.dart';
 
 LibraryStorage createStorage() => _MemoryLibraryStorage();
 
@@ -12,7 +14,10 @@ class _MemoryLibraryStorage implements LibraryStorage {
   Map<String, dynamic> _preferences = {};
 
   @override
-  Future<Map<String, dynamic>> readPreferences() async => _preferences;
+  Future<Map<String, dynamic>> readPreferences() async => {
+    ..._preferences,
+    if (sampleDismissed()) 'firstLightSeeded': true,
+  };
 
   @override
   Future<void> writePreferences(Map<String, dynamic> preferences) async {
@@ -83,6 +88,15 @@ class _MemoryLibraryStorage implements LibraryStorage {
 
   @override
   Future<void> writeIndex(List<ScoreEntry> entries) async {
+    final previouslyVisible = _index.any(
+      (score) => score.isSample && score.deletedAt == null,
+    );
+    final visible = entries.any(
+      (score) => score.isSample && score.deletedAt == null,
+    );
+    if (previouslyVisible != visible) {
+      setSampleDismissed(!visible);
+    }
     _index = List.unmodifiable(entries);
   }
 

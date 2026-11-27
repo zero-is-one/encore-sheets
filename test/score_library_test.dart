@@ -33,6 +33,38 @@ class _TestEndpoint implements LibrarySyncEndpoint {
 }
 
 void main() {
+  test('the editable sample is seeded once and stays deleted', () async {
+    final folder = await Directory.systemTemp.createTemp('encore_sample');
+    addTearDown(() => folder.delete(recursive: true));
+    final library = ScoreLibrary(NativeLibraryStorage(directory: folder));
+    Future<XFile> samplePdf() async => XFile.fromData(
+      await File('assets/first_light.pdf').readAsBytes(),
+      name: 'First Light.pdf',
+    );
+
+    await library.load();
+    await Future.wait([
+      library.seedSampleScore(samplePdf),
+      library.seedSampleScore(samplePdf),
+    ]);
+    final sample = library.recent.single;
+    expect(sample.title, 'First Light');
+    expect(sample.isSample, isTrue);
+    expect(await library.storage.openScore(sample.id), isA<XFile>());
+    await library.savePageNote(sample.id, 1, 'Rehearse slowly');
+
+    final reopened = ScoreLibrary(NativeLibraryStorage(directory: folder));
+    await reopened.load();
+    expect(reopened.recent.single.pageNotes[1], 'Rehearse slowly');
+    await reopened.trashScores([sample.id]);
+
+    final afterDeletion = ScoreLibrary(NativeLibraryStorage(directory: folder));
+    await afterDeletion.load();
+    await afterDeletion.seedSampleScore(samplePdf);
+    expect(afterDeletion.recent, isEmpty);
+    expect(afterDeletion.recentlyDeleted.single.id, sample.id);
+  });
+
   test(
     'shared WebDAV merges offline edits and keeps personal markup local',
     () async {

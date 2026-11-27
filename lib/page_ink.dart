@@ -156,21 +156,18 @@ class PageInk extends ChangeNotifier {
     }
   }
 
-  void pasteRaster(Uint8List png, Rect placement) {
+  void pasteRaster(Uint8List png, Rect placement, {bool select = true}) {
     final layer = _activeLayer;
     if (layer == null || png.isEmpty) return;
-    _replaceStrokes(
-      [
-        ..._strokes,
-        _Stroke(
-          InkTool.pen,
-          [placement.topLeft, placement.bottomRight],
-          layer: layer,
-          raster: base64Encode(png),
-        ),
-      ],
-      selection: {_strokes.length},
-    );
+    _replaceStrokes([
+      ..._strokes,
+      _Stroke(
+        InkTool.pen,
+        [placement.topLeft, placement.bottomRight],
+        layer: layer,
+        raster: base64Encode(png),
+      ),
+    ], selection: select ? {_strokes.length} : const {});
     unawaited(prepareImages());
   }
 

@@ -7,7 +7,12 @@ import 'package:pdfrx/pdfrx.dart';
 
 typedef MeasureClip = ({Uint8List png, double width, double height});
 
-Future<MeasureClip> copyMeasure(PdfPage page, Rect area) async {
+Future<MeasureClip> copyMeasure(
+  PdfPage page,
+  Rect area, {
+  List<Offset> outline = const [],
+  bool cover = false,
+}) async {
   final scale = math.min(
     3.0,
     1700 / math.max(page.width * area.width, page.height * area.height),
@@ -27,7 +32,15 @@ Future<MeasureClip> copyMeasure(PdfPage page, Rect area) async {
   try {
     final image = await pixels.createImage();
     try {
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      final result = outline.isEmpty && !cover
+          ? image
+          : await _shapeMeasure(image, area, outline, cover: cover);
+      final ByteData? data;
+      try {
+        data = await result.toByteData(format: ui.ImageByteFormat.png);
+      } finally {
+        if (result != image) result.dispose();
+      }
       if (data == null || data.lengthInBytes > 3 * 1024 * 1024) {
         throw StateError('Choose a smaller section of the score.');
       }
@@ -44,140 +57,111 @@ Future<MeasureClip> copyMeasure(PdfPage page, Rect area) async {
   }
 }
 
-class MeasureRegionDialog extends StatefulWidget {
-  const MeasureRegionDialog({super.key, required this.page, this.clip});
-  final PdfPage page;
-  final MeasureClip? clip;
-
-  @override
-  State<MeasureRegionDialog> createState() => _MeasureRegionDialogState();
+Future<ui.Image> _shapeMeasure(
+  ui.Image image,
+  Rect area,
+  List<Offset> outline, {
+  required bool cover,
+}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final bounds = Rect.fromLTWH(
+    0,
+    0,
+    image.width.toDouble(),
+    image.height.toDouble(),
+  );
+  if (outline.isNotEmpty) {
+    canvas.clipPath(
+      Path()..addPolygon([
+        for (final point in outline)
+          Offset(
+            (point.dx - area.left) / area.width * bounds.width,
+            (point.dy - area.top) / area.height * bounds.height,
+          ),
+      ], true),
+      doAntiAlias: false,
+    );
+  }
+  if (cover) {
+    final rgba = (await image.toByteData())!.buffer.asUint8List();
+    final samples = <int>[
+      for (final y in [0, image.height - 1])
+        for (final x in [0, image.width - 1]) (y * image.width + x) * 4,
+    ];
+    final brightest = samples.reduce(
+      (a, b) =>
+          rgba[a] + rgba[a + 1] + rgba[a + 2] >=
+              rgba[b] + rgba[b + 1] + rgba[b + 2]
+          ? a
+          : b,
+    );
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..color = Color.fromARGB(
+          255,
+          rgba[brightest],
+          rgba[brightest + 1],
+          rgba[brightest + 2],
+        ),
+    );
+  } else {
+    canvas.drawImage(image, Offset.zero, Paint());
+  }
+  final picture = recorder.endRecording();
+  try {
+    return await picture.toImage(image.width, image.height);
+  } finally {
+    picture.dispose();
+  }
 }
 
-class _MeasureRegionDialogState extends State<MeasureRegionDialog> {
-  Rect? _area;
-  Offset? _start;
-
-  Offset _normalized(Offset at, Size size) => Offset(
-    (at.dx / size.width).clamp(0.0, 1.0),
-    (at.dy / size.height).clamp(0.0, 1.0),
+Rect measurePlacement(PdfPage page, MeasureClip clip, Offset point) {
+  final scale = math.min(
+    1.0,
+    math.min(page.width / clip.width, page.height / clip.height),
   );
+  final width = scale * clip.width / page.width;
+  final height = scale * clip.height / page.height;
+  return Rect.fromLTWH(
+    point.dx.clamp(0, 1 - width),
+    point.dy.clamp(0, 1 - height),
+    width,
+    height,
+  );
+}
 
-  Rect _placement(Offset point) {
-    final clip = widget.clip!;
-    final scale = math.min(
-      1.0,
-      math.min(
-        widget.page.width / clip.width,
-        widget.page.height / clip.height,
-      ),
-    );
-    final width = scale * clip.width / widget.page.width;
-    final height = scale * clip.height / widget.page.height;
-    return Rect.fromLTWH(
-      point.dx.clamp(0, 1 - width),
-      point.dy.clamp(0, 1 - height),
-      width,
-      height,
+class PdfSelectionOutline extends CustomPainter {
+  const PdfSelectionOutline(this.points, {required this.freeform});
+
+  final List<Offset> points;
+  final bool freeform;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) return;
+    Offset position(Offset point) =>
+        Offset(point.dx * size.width, point.dy * size.height);
+    final path = Path();
+    if (freeform) {
+      path.addPolygon(points.map(position).toList(), true);
+    } else {
+      path.addRect(
+        Rect.fromPoints(position(points.first), position(points.last)),
+      );
+    }
+    canvas.drawPath(path, Paint()..color = const Color(0x331683cd));
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xff1683cd)
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke,
     );
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.clip == null ? 'Copy a measure' : 'Place copied measure',
-    ),
-    scrollable: true,
-    content: SizedBox(
-      width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            widget.clip == null
-                ? 'Drag around the music to copy.'
-                : 'Tap or drag to position the copy.',
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 350,
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: widget.page.width / widget.page.height,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final size = constraints.biggest;
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: widget.clip == null
-                          ? null
-                          : (event) => setState(
-                              () => _area = _placement(
-                                _normalized(event.localPosition, size),
-                              ),
-                            ),
-                      onPanStart: (event) =>
-                          _start = _normalized(event.localPosition, size),
-                      onPanUpdate: (event) {
-                        final point = _normalized(event.localPosition, size);
-                        setState(
-                          () => _area = widget.clip == null
-                              ? Rect.fromPoints(_start ?? point, point)
-                              : _placement(point),
-                        );
-                      },
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          PdfPageView(
-                            document: widget.page.document,
-                            pageNumber: widget.page.pageNumber,
-                            maximumDpi: 110,
-                          ),
-                          if (_area case final area?)
-                            Positioned.fromRect(
-                              rect: Rect.fromLTWH(
-                                area.left * size.width,
-                                area.top * size.height,
-                                area.width * size.width,
-                                area.height * size.height,
-                              ),
-                              child: widget.clip == null
-                                  ? Container(
-                                      decoration: BoxDecoration(
-                                        color: const Color(0x44814acf),
-                                        border: Border.all(
-                                          color: const Color(0xff814acf),
-                                          width: 2,
-                                        ),
-                                      ),
-                                    )
-                                  : Image.memory(
-                                      widget.clip!.png,
-                                      fit: BoxFit.fill,
-                                    ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _area == null || _area!.width < .006 || _area!.height < .006
-            ? null
-            : () => Navigator.pop(context, _area),
-        child: Text(widget.clip == null ? 'Copy' : 'Place'),
-      ),
-    ],
-  );
+  bool shouldRepaint(PdfSelectionOutline oldDelegate) =>
+      points != oldDelegate.points || freeform != oldDelegate.freeform;
 }

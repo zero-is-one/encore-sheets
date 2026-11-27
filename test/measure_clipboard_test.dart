@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:image/image.dart' as image;
 import 'package:encoresheets/measure_clipboard.dart';
 import 'package:encoresheets/page_ink.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,4 +35,22 @@ void main() {
       expect(restored.snapshot(), saved);
     },
   );
+
+  test('freeform copy and cut cover follow the same outline', () async {
+    final document = await PdfDocument.openFile('assets/first_light.pdf');
+    addTearDown(document.dispose);
+    const area = Rect.fromLTWH(.1, .1, .4, .4);
+    const outline = [Offset(.1, .1), Offset(.5, .1), Offset(.1, .5)];
+    for (final cover in [false, true]) {
+      final clip = await copyMeasure(
+        document.pages.first,
+        area,
+        outline: outline,
+        cover: cover,
+      );
+      final raster = image.decodePng(clip.png)!;
+      expect(raster.getPixel(1, 1).a, 255);
+      expect(raster.getPixel(raster.width - 2, raster.height - 2).a, 0);
+    }
+  });
 }

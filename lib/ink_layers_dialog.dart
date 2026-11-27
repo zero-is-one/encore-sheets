@@ -15,11 +15,15 @@ class InkLayersDialog extends StatefulWidget {
     required this.layers,
     required this.active,
     this.onShare,
+    this.canSelectPdf = false,
+    this.pdfSelected = false,
   });
 
   final List<InkLayer> layers;
   final String? active;
   final Future<void> Function(InkLayer)? onShare;
+  final bool canSelectPdf;
+  final bool pdfSelected;
 
   @override
   State<InkLayersDialog> createState() => _InkLayersDialogState();
@@ -142,6 +146,14 @@ class _InkLayersDialogState extends State<InkLayersDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (widget.canSelectPdf)
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('PDF page'),
+                subtitle: const Text('Select printed music to copy or cut'),
+                selected: widget.pdfSelected,
+                onTap: () => Navigator.pop(context, 'pdf'),
+              ),
             for (final (index, layer) in _layers.indexed)
               ListTile(
                 title: Text(layer.name),
@@ -152,7 +164,7 @@ class _InkLayersDialogState extends State<InkLayersDialog> {
                     )
                     ? const Text('Clear on save')
                     : null,
-                selected: _active == layer.id,
+                selected: !widget.pdfSelected && _active == layer.id,
                 onTap: layer.visible
                     ? () => setState(() => _active = layer.id)
                     : null,

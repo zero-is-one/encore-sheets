@@ -13,7 +13,7 @@ import 'package:flutter/widgets.dart'
     show GridView, SizedBox, SliverGridDelegateWithFixedCrossAxisCount;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart'
-    show CheckedPopupMenuItem, Icons, IconTheme, InputChip, Slider;
+    show CheckedPopupMenuItem, IconButton, Icons, IconTheme, InputChip, Slider;
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
@@ -81,10 +81,19 @@ void main() {
 
     await waitUntil(
       () =>
+          find.byType(PdfViewer).evaluate().isNotEmpty &&
           viewer().controller!.isReady &&
           find.text('1 / 3').evaluate().isNotEmpty,
     );
     expect(viewer().params.paging, isNotNull);
+    await tester.tap(find.byTooltip('Score actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy a measure first.'), findsOneWidget);
+    await tester.tap(find.text('Add page note'));
+    await tester.pumpAndSettle();
+    expect(find.text('Page 1 note'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
     final enabledIcons = [
       Icons.library_music_outlined,
       Icons.tune,
@@ -116,8 +125,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
     expect(viewer().controller!.visibleRect, visiblePage);
+    await tester.tap(find.byTooltip('Annotation layers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('PDF page'));
+    await tester.pumpAndSettle();
+    final activeReader = viewer().controller!;
+    Offset pagePoint(double x, double y, {int page = 1}) {
+      final layout = activeReader.layout.pageLayouts[page - 1];
+      return tester.getTopLeft(find.byType(PdfViewer)) +
+          activeReader.documentToLocal(
+            layout.topLeft + Offset(layout.width * x, layout.height * y),
+          );
+    }
+
+    await tester.dragFrom(
+      pagePoint(.2, .25),
+      pagePoint(.55, .35) - pagePoint(.2, .25),
+    );
+    await tester.pumpAndSettle();
+    Finder markupButton(String label) => find.byWidgetPredicate(
+      (widget) => widget is IconButton && widget.tooltip == label,
+    );
+    final copyMusic = markupButton('Copy selected music');
+    expect(tester.widget<IconButton>(copyMusic).onPressed, isNotNull);
+    await tester.tap(copyMusic);
+    final placeMusic = markupButton('Place copied music');
+    await waitUntil(
+      () => tester.widget<IconButton>(placeMusic).onPressed != null,
+    );
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await waitUntil(() => find.text('2 / 3').evaluate().isNotEmpty);
+    await tester.tap(find.byIcon(Icons.draw_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(placeMusic);
+    await tester.pumpAndSettle();
+    expect(find.text('Tap the score to place'), findsOneWidget);
+    await tester.tapAt(pagePoint(.2, .45, page: 2));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Selection actions'), findsOneWidget);
+    await tester.tap(find.byTooltip('Undo stroke'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await waitUntil(() => find.text('1 / 3').evaluate().isNotEmpty);
     expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
 
     expect(find.byTooltip('Page thumbnails'), findsOneWidget);
@@ -137,7 +190,7 @@ void main() {
     await tester.ensureVisible(option);
     await tester.tap(option);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Vertical scrolling · Fit width'));
+    await tester.tap(find.text('Vertical scrolling · Fit width').first);
     await waitUntil(
       () =>
           viewer().params.paging == null &&
@@ -207,7 +260,7 @@ void main() {
     await tester.ensureVisible(scrolling);
     await tester.tap(scrolling);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Paged'));
+    await tester.tap(find.text('Paged').first);
     await waitUntil(
       () =>
           viewer().params.paging != null &&
@@ -333,6 +386,7 @@ void main() {
         tester.widget<InputChip>(find.widgetWithText(InputChip, title));
     await waitUntil(
       () =>
+          find.byType(PdfViewer).evaluate().isNotEmpty &&
           viewer().controller!.isReady &&
           find
               .widgetWithText(InputChip, 'Transition second')

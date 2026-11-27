@@ -70,6 +70,10 @@ class ScoreJump {
 }
 
 class ScoreEntry {
+  static const sampleMetadataKey = 'bundledSample';
+
+  bool get isSample => metadata[sampleMetadataKey] == 'firstLight';
+
   const ScoreEntry({
     required this.id,
     required this.title,
@@ -666,6 +670,7 @@ class ScoreLibrary {
       title: name,
       openedAt: now,
       pdfSourceId: original.storedPdfId,
+      metadata: {...original.metadata}..remove(ScoreEntry.sampleMetadataKey),
     );
     final annotations = await storage.readInk(original.id);
     try {
@@ -1102,12 +1107,40 @@ class ScoreLibrary {
     return result;
   }
 
+  Future<void> seedSampleScore(Future<XFile> Function() source) =>
+      _serialize(() async {
+        final preferences = await storage.readPreferences();
+        if (preferences['firstLightSeeded'] == true) return;
+        if (!_scores.values.any((score) => score.isSample)) {
+          await _import(await source(), bundledSample: true);
+        }
+        await storage.writePreferences({
+          ...preferences,
+          'firstLightSeeded': true,
+        });
+      });
+
   Future<(ScoreEntry, XFile)> import(
     XFile source, {
     ScoreEntry? template,
     Map<String, dynamic> annotations = const {},
     bool replace = false,
-  }) => _serialize(() async {
+  }) => _serialize(
+    () => _import(
+      source,
+      template: template,
+      annotations: annotations,
+      replace: replace,
+    ),
+  );
+
+  Future<(ScoreEntry, XFile)> _import(
+    XFile source, {
+    ScoreEntry? template,
+    Map<String, dynamic> annotations = const {},
+    bool replace = false,
+    bool bundledSample = false,
+  }) async {
     final now = DateTime.now().toUtc();
     final previous = replace && template != null ? lookup(template.id) : null;
     if (replace && previous == null)
@@ -1119,17 +1152,28 @@ class ScoreLibrary {
         .trim();
     var score = ScoreEntry(
       id: newRecordId(),
-      title: title.isEmpty ? 'Untitled score' : title,
+      title: bundledSample
+          ? 'First Light'
+          : (title.isEmpty ? 'Untitled score' : title),
       page: 1,
       openedAt: now,
+      metadata: bundledSample
+          ? const {ScoreEntry.sampleMetadataKey: 'firstLight'}
+          : const {},
     );
     if (template != null) {
+      final metadata = {...template.metadata}
+        ..remove(ScoreEntry.sampleMetadataKey);
+      if (previous?.isSample == true) {
+        metadata[ScoreEntry.sampleMetadataKey] = 'firstLight';
+      }
       score = template.copyWith(
         id: score.id,
         title: previous?.title ?? score.title,
         openedAt: now,
         recover: true,
         detachPdf: true,
+        metadata: metadata,
       );
     }
     final entries = Map.of(_scores);
@@ -1172,7 +1216,7 @@ class ScoreLibrary {
     _scores.addAll(entries);
     _setlists.addAll(lists);
     return (score, local);
-  });
+  }
 
   Future<void> record(String id, int page, {bool opened = false}) =>
       _serialize(() async {

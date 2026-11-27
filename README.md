@@ -43,8 +43,9 @@ its artifact is available.
 
 ## Quick start
 
-1. Open EncoreSheets to try the bundled **First Light** score. Use the arrows
-   to turn a page or open **Markup** to add an annotation.
+1. Open EncoreSheets to try **First Light**, the editable sample in your score
+   library. Use the arrows to turn a page or open **Markup** to add an
+   annotation. You can delete the sample from the library when you're done.
 2. Open **Score library → Import PDF** and select a score from your device.
 3. Open **Setlists → New setlist**. Give it a name, add your score, and tap
    **Save**.
