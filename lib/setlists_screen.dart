@@ -118,7 +118,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
   }, 'Could not share the setlist.');
 
   Future<void> _edit([Setlist? initial]) async {
-    await Navigator.of(context).push<void>(
+    await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute(
         builder: (_) =>
             _SetlistEditor(library: widget.library, initial: initial),

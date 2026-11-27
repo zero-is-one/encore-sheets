@@ -245,7 +245,12 @@ class _ReaderState extends State<Reader> {
   int? _annotationPage;
   bool _allowFinger = false;
   bool _picking = false;
-  bool _sidebarOpen = false;
+  static const _dockWidth = 368.0;
+  static const _dockMinimumWidth = 900.0;
+  Widget? _readerDock;
+  GlobalKey<NavigatorState>? _readerDockNavigator;
+  VoidCallback? _completeReaderDock;
+  ({int revision, int page, double center, double scale})? _dockVerticalAnchor;
   bool _saveWarning = false;
   bool _inkSaveWarning = false;
   bool _editingText = false;
@@ -670,6 +675,7 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
+    _completeReaderDock?.call();
     _autoScrollTicker.dispose();
     _scoreExpiry?.cancel();
     if (_supportsSharedImport) {
@@ -1218,42 +1224,109 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<T?> _openReaderPanel<T>(WidgetBuilder builder) async {
-    if (MediaQuery.sizeOf(context).width < 720 ||
-        _preferences.fullScreenPanels) {
+  bool get _wideReaderDock =>
+      _readerDock != null &&
+      MediaQuery.sizeOf(context).width >= _dockMinimumWidth;
+
+  bool get _pageNavigationBlocked => _picking && !_wideReaderDock;
+
+  void _backFromReaderDock() {
+    unawaited(_readerDockNavigator?.currentState?.maybePop());
+  }
+
+  void _captureDockVerticalAnchor() {
+    if (!_verticalScrolling || !_viewer.isReady || _pages == 0) return;
+    final pages = _viewer.layout.pageLayouts;
+    final visible = _viewer.visibleRect;
+    final pageNumber = verticalPageAt(
+      visible,
+      pages,
+      first: _firstPage,
+      last: _lastPage,
+    );
+    final page = pages[pageNumber - 1];
+    if (page.isEmpty) return;
+    _dockVerticalAnchor = (
+      revision: _revision,
+      page: pageNumber,
+      center: ((visible.center.dy - page.top) / page.height).clamp(0, 1),
+      scale: _viewer.currentZoom / _viewer.coverScale,
+    );
+  }
+
+  Future<T?> _openReaderDock<T>(WidgetBuilder builder) async {
+    final navigator = GlobalKey<NavigatorState>();
+    final result = Completer<T?>();
+    final route = MaterialPageRoute<T>(builder: builder);
+    void complete(T? value) {
+      if (!result.isCompleted) result.complete(value);
+    }
+
+    unawaited(route.popped.then(complete));
+    _captureDockVerticalAnchor();
+    setState(() {
+      _readerDockNavigator = navigator;
+      _completeReaderDock = () => complete(null);
+      _readerDock = Navigator(
+        key: navigator,
+        onGenerateInitialRoutes: (_, _) => [
+          MaterialPageRoute<void>(builder: (_) => const SizedBox.shrink()),
+          route,
+        ],
+      );
+    });
+    try {
+      return await result.future;
+    } finally {
+      if (mounted) {
+        if (_wideReaderDock) _captureDockVerticalAnchor();
+        setState(() {
+          _readerDock = null;
+          _readerDockNavigator = null;
+          _completeReaderDock = null;
+        });
+      }
+    }
+  }
+
+  Future<T?> _openReaderPanel<T>(
+    WidgetBuilder builder, {
+    bool dockable = false,
+  }) async {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width < 720 || _preferences.fullScreenPanels) {
       return Navigator.of(context).push<T>(MaterialPageRoute(builder: builder));
     }
-    final dock = _preferences.dockPanels && !_sidebarOpen;
-    if (dock) setState(() => _sidebarOpen = true);
-    try {
-      return await showGeneralDialog<T>(
-        context: context,
-        barrierDismissible: true,
-        barrierLabel: MaterialLocalizations.of(context)
-            .modalBarrierDismissLabel,
-        barrierColor: dock ? Colors.transparent : Colors.black38,
-        pageBuilder: (context, _, _) => SafeArea(
-          child: Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: SizedBox(
-              width: 368,
-              height: double.infinity,
-              child: Material(
-                elevation: 12,
-                clipBehavior: Clip.antiAlias,
-                borderRadius: const BorderRadiusDirectional.only(
-                  topEnd: Radius.circular(16),
-                  bottomEnd: Radius.circular(16),
-                ),
-                child: Builder(builder: builder),
+    if (dockable &&
+        _preferences.dockPanels &&
+        _readerDock == null &&
+        width >= _dockMinimumWidth) {
+      return _openReaderDock<T>(builder);
+    }
+    return showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black38,
+      pageBuilder: (context, _, _) => SafeArea(
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: SizedBox(
+            width: _dockWidth,
+            height: double.infinity,
+            child: Material(
+              elevation: 12,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: const BorderRadiusDirectional.only(
+                topEnd: Radius.circular(16),
+                bottomEnd: Radius.circular(16),
               ),
+              child: Builder(builder: builder),
             ),
           ),
         ),
-      );
-    } finally {
-      if (dock && mounted) setState(() => _sidebarOpen = false);
-    }
+      ),
+    );
   }
 
   void _rememberLibraryBrowse(Map<String, dynamic> state) {
@@ -1302,6 +1375,7 @@ class _ReaderState extends State<Reader> {
                 browseState: _libraryBrowseState,
                 onBrowseState: _rememberLibraryBrowse,
               ),
+              dockable: !focusSearch,
             );
       if (!mounted) return;
       if (_entry case final current?) {
@@ -1482,6 +1556,7 @@ class _ReaderState extends State<Reader> {
             library: _library,
             allowTransfers: !_restricted(RestrictedTool.transfers),
           ),
+          dockable: true,
         );
         if (setlist != null && mounted) await _playScore(setlist, 0);
         return;
@@ -1756,6 +1831,7 @@ class _ReaderState extends State<Reader> {
           pageCount: _pages,
           document: _viewer.document,
         ),
+        dockable: true,
       );
       if (!mounted || destination == null) return;
       final score = _library.lookup(destination.scoreId);
@@ -3215,7 +3291,7 @@ class _ReaderState extends State<Reader> {
   }
 
   void _go(int page) {
-    if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (_pageNavigationBlocked || !_viewer.isReady || _pages == 0) return;
     if (page > _lastPage && _hasNextScore) {
       _nextScore();
       return;
@@ -3224,7 +3300,7 @@ class _ReaderState extends State<Reader> {
   }
 
   void _turn(int step) {
-    if (_picking || !_viewer.isReady || _pages == 0) return;
+    if (_pageNavigationBlocked || !_viewer.isReady || _pages == 0) return;
     _stopAutoScroll();
     if (_ensemble?.leading == true && _leadingSpread) {
       _go(_page - (_page - _firstPage) % 2 + step * 2);
@@ -3645,7 +3721,8 @@ class _ReaderState extends State<Reader> {
       return KeyEventResult.handled;
     }
     final step = pageTurnForKey(key);
-    if (step == 0 || _picking || _pages == 0) return KeyEventResult.ignored;
+    if (step == 0 || _pageNavigationBlocked || _pages == 0)
+      return KeyEventResult.ignored;
     if (event is KeyDownEvent) _turn(step);
     return KeyEventResult.handled;
   }
@@ -4974,7 +5051,33 @@ class _ReaderState extends State<Reader> {
         }
       },
       onViewSizeChanged: (size, previous, controller) {
-        if (vertical || !mounted || previous == null || revision != _revision) {
+        if (!mounted || previous == null || revision != _revision) {
+          return;
+        }
+        if (vertical) {
+          final anchor = _dockVerticalAnchor;
+          _dockVerticalAnchor = null;
+          if (anchor == null || anchor.revision != revision) return;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || revision != _revision || !controller.isReady)
+              return;
+            final layout = controller.layout;
+            final page = layout.pageLayouts[anchor.page - 1];
+            final zoom = controller.coverScale * anchor.scale;
+            unawaited(
+              controller.goToPosition(
+                documentOffset: Offset(
+                  (layout.documentSize.width -
+                          controller.viewSize.width / zoom) /
+                      2,
+                  page.top +
+                      page.height * anchor.center -
+                      controller.viewSize.height / (2 * zoom),
+                ),
+                zoom: zoom,
+              ),
+            );
+          });
           return;
         }
         // Keep the score on the same page when the controls resize the viewport.
@@ -5266,69 +5369,103 @@ class _ReaderState extends State<Reader> {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: PopScope(
-      canPop: !_performance,
+      canPop: !_performance && _readerDock == null,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _performance) _togglePerformance();
+        if (didPop) return;
+        if (_readerDock != null) {
+          _backFromReaderDock();
+        } else if (_performance) {
+          _togglePerformance();
+        }
       },
       child: SafeArea(
-        minimum: _sidebarOpen && MediaQuery.sizeOf(context).width >= 720
-            ? EdgeInsets.only(
-                left: Directionality.of(context) == TextDirection.ltr ? 368 : 0,
-                right: Directionality.of(context) == TextDirection.rtl
-                    ? 368
-                    : 0,
-              )
-            : EdgeInsets.zero,
-        child: Focus(
-          focusNode: _focus,
-          autofocus: true,
-          onKeyEvent: _onKey,
-          child: Column(
-            children: [
-              if (_showControls && !_performance) _header(),
-              if (_showControls &&
-                  !_performance &&
-                  _appearance.showTabs &&
-                  _scoreTabIds.isNotEmpty)
-                _scoreTabs(),
-              Expanded(
-                key: const ValueKey('score-viewport'),
-                child: Stack(
-                  fit: StackFit.expand,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: EdgeInsetsDirectional.only(
+                start: _wideReaderDock ? _dockWidth : 0,
+              ),
+              child: Focus(
+                focusNode: _focus,
+                autofocus: true,
+                onKeyEvent: _onKey,
+                child: Column(
                   children: [
-                    _deskewedScore(),
-                    if (_inking) _markupOverlay(),
-                    if (_autoScrollTicker.isActive && !_performance)
-                      PositionedDirectional(
-                        end: 8,
-                        bottom: 8,
-                        child: _activeScrollControls(),
+                    if (_showControls && !_performance) _header(),
+                    if (_showControls &&
+                        !_performance &&
+                        _appearance.showTabs &&
+                        _scoreTabIds.isNotEmpty)
+                      _scoreTabs(),
+                    Expanded(
+                      key: const ValueKey('score-viewport'),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _deskewedScore(),
+                          if (_inking) _markupOverlay(),
+                          if (_autoScrollTicker.isActive && !_performance)
+                            PositionedDirectional(
+                              end: 8,
+                              bottom: 8,
+                              child: _activeScrollControls(),
+                            ),
+                          if (_missingFacingPage)
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => setState(
+                                () => _showControls = !_showControls,
+                              ),
+                              child: ColoredBox(
+                                color: Theme.of(context)
+                                    .scaffoldBackgroundColor,
+                                child: const Center(
+                                  child: Text('No facing page'),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    if (_missingFacingPage)
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () =>
-                            setState(() => _showControls = !_showControls),
-                        child: ColoredBox(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                          child: const Center(child: Text('No facing page')),
+                    ),
+                    if (_metronome case final meter?)
+                      MetronomeBeat(metronome: meter),
+                    if (_nextTitle case final title?)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          'Next: $title',
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                    if (_performance)
+                      _performanceBar()
+                    else if (_showControls)
+                      _footer(),
                   ],
                 ),
               ),
-              if (_metronome case final meter?) MetronomeBeat(metronome: meter),
-              if (_nextTitle case final title?)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text('Next: $title', overflow: TextOverflow.ellipsis),
+            ),
+            if (_readerDock case final panel?) ...[
+              if (!_wideReaderDock)
+                ModalBarrier(
+                  color: Colors.black38,
+                  dismissible: true,
+                  onDismiss: _backFromReaderDock,
                 ),
-              if (_performance)
-                _performanceBar()
-              else if (_showControls)
-                _footer(),
+              PositionedDirectional(
+                start: 0,
+                top: 0,
+                bottom: 0,
+                width: math.min(_dockWidth, MediaQuery.sizeOf(context).width),
+                child: Material(
+                  elevation: _wideReaderDock ? 2 : 12,
+                  clipBehavior: Clip.antiAlias,
+                  child: panel,
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     ),

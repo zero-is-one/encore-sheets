@@ -17,6 +17,8 @@ performance.
   In a vertical display, open **Display → Automatic scrolling** to set
   the speed and optionally continue to the next setlist score. Use **Input
   shortcuts** to assign a keyboard key or pedal to start and stop scrolling.
+  On wide tablets, **Display → More display settings → Sidebar and lists**
+  can show the library beside the score while you continue turning pages.
 - **Mark up a score.** Draw, highlight, add text or notation stamps, and organize
   annotations into layers. Copy a passage from the PDF and place it on the same
   page or another page. The app saves markup separately from the source PDF.

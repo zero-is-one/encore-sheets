@@ -60,6 +60,7 @@ void main() {
       );
       await library.saveSetlist(Setlist('assign', 'Assignment test', []));
       await library.updatePreferences({
+        'dockPanels': true,
         'readerShortcuts': {
           shortcutKey(LogicalKeyboardKey.keyS): ReaderShortcut.autoScroll.name,
         },
@@ -261,11 +262,27 @@ void main() {
     );
     await waitUntil(() => stop.evaluate().isEmpty);
 
+    await lastScore.goToPosition(
+      documentOffset: Offset(
+        lastScore.visibleRect.left,
+        lastScore.layout.pageLayouts[1].top,
+      ),
+    );
+    await waitUntil(() => lastScore.visibleRect.top > 20);
     await tester.tap(find.byTooltip('Score library'));
     await waitUntil(
       () => find.byTooltip('Add to setlist').evaluate().isNotEmpty,
     );
     await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byType(PdfViewer)).dx,
+      greaterThanOrEqualTo(368),
+    );
+    final beforeDockedTurn = viewer().controller!.visibleRect.top;
+    await tester.tap(find.byTooltip('Scroll down'));
+    await tester.pumpAndSettle();
+    expect(viewer().controller!.visibleRect.top, greaterThan(beforeDockedTurn));
+    expect(find.text('Score library'), findsOneWidget);
     await tester.tap(find.byTooltip('Add to setlist').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Assignment test'));
