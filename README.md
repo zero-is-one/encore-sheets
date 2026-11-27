@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="#test-builds">Test builds</a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="#what-works">Features</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="#file-formats">File formats</a> ·
@@ -33,6 +34,15 @@ its artifact is available.
 - **iPad** — The unsigned device IPA requires signing before installation.
 - **macOS and Windows** — The workflow produces preview ZIPs for testing the
   macOS app and the Windows x64 executable with its supporting files.
+
+## Quick start
+
+1. Open EncoreSheets to try the bundled **First Light** score. Use the arrows
+   to turn a page or open **Markup** to add an annotation.
+2. Open **Score library → Import PDF** and select a score from your device.
+3. Open **Setlists → New setlist**. Give it a name, add your score, and tap
+   **Save**.
+4. Open the saved setlist and tap **Play** to start reading in setlist order.
 
 ## What works
 
