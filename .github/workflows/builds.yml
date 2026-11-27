@@ -40,13 +40,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Set up Android SDK tools
-        if: matrix.target == 'android'
-        uses: android-actions/setup-android@v3
       - name: Build Android APK
         if: matrix.target == 'android'
         run: |
-          sdkmanager "platforms;android-36" "ndk;28.2.13676358"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "ndk;28.2.13676358"
           flutter pub get --enforce-lockfile
           flutter build apk --debug --no-pub
           cp build/app/outputs/flutter-apk/app-debug.apk EncoreSheets-android.apk
