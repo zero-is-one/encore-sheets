@@ -12,7 +12,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart'
     show GridView, SizedBox, SliverGridDelegateWithFixedCrossAxisCount;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_ui/material_ui.dart' show Icons, IconTheme;
+import 'package:material_ui/material_ui.dart'
+    show CheckedPopupMenuItem, Icons, IconTheme, Slider;
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
@@ -57,6 +58,7 @@ void main() {
       await library.saveSetlist(
         Setlist('auto-scroll', 'Scrolling rehearsal', [a.id, b.id]),
       );
+      await library.saveSetlist(Setlist('assign', 'Assignment test', []));
       await library.updatePreferences({
         'readerShortcuts': {
           shortcutKey(LogicalKeyboardKey.keyS): ReaderShortcut.autoScroll.name,
@@ -98,7 +100,24 @@ void main() {
       IconTheme.of(tester.element(find.byIcon(Icons.chevron_left))).color,
       isNot(ReaderPalette.classic.text),
     );
-    expect(find.byTooltip('Fit page or width'), findsOneWidget);
+    expect(find.byTooltip('Fit mode: Fit page'), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    final pageCount = tester.getCenter(find.text('1 / 3'));
+    final previous = tester.getCenter(find.byIcon(Icons.chevron_left));
+    final next = tester.getCenter(find.byIcon(Icons.chevron_right));
+    expect(previous.dx, lessThan(pageCount.dx));
+    expect(next.dx, greaterThan(pageCount.dx));
+    expect(next.dx - previous.dx, lessThan(160));
+    final scoreBounds = tester.getRect(find.byType(PdfViewer));
+    final visiblePage = viewer().controller!.visibleRect;
+    await tester.tap(find.byIcon(Icons.draw_outlined));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
+    expect(viewer().controller!.visibleRect, visiblePage);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
+
     await tester.tap(find.byTooltip('Page thumbnails'));
     await tester.pumpAndSettle();
     final thumbnails = tester.widget<GridView>(find.byType(GridView));
@@ -123,6 +142,16 @@ void main() {
           find.text('1 / 3').evaluate().isNotEmpty,
     );
     final controller = viewer().controller!;
+    await tester.tap(find.byTooltip('Fit mode: Fit width'));
+    await tester.pumpAndSettle();
+    final fitWidthItem = find.ancestor(
+      of: find.text('Fit width'),
+      matching: find.byType(CheckedPopupMenuItem<bool>),
+    );
+    final fitWidth = tester.widget<CheckedPopupMenuItem<bool>>(fitWidthItem);
+    expect(fitWidth.checked, isTrue);
+    await tester.tap(fitWidthItem);
+    await tester.pumpAndSettle();
     expect(
       controller.layout.pageLayouts[1].top,
       greaterThan(controller.layout.pageLayouts.first.bottom),
@@ -220,6 +249,18 @@ void main() {
       ),
     );
     await waitUntil(() => stop.evaluate().isEmpty);
+
+    await tester.tap(find.byTooltip('Score library'));
+    await waitUntil(
+      () => find.byTooltip('Add to setlist').evaluate().isNotEmpty,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add to setlist').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Assignment test'));
+    await waitUntil(
+      () => find.text('Score added to setlist.').evaluate().isNotEmpty,
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     for (var attempt = 0; attempt < 20; attempt++) {

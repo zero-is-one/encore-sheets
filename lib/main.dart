@@ -4339,7 +4339,6 @@ class _ReaderState extends State<Reader> {
       _inking = !_inking;
       if (!_inking) _annotationPage = null;
       _halfPreview = false;
-      _showControls = true;
     });
     _focus.requestFocus();
   }
@@ -5262,6 +5261,7 @@ class _ReaderState extends State<Reader> {
                   fit: StackFit.expand,
                   children: [
                     _deskewedScore(),
+                    if (_inking) _markupOverlay(),
                     if (_autoScrollTicker.isActive && !_performance)
                       PositionedDirectional(
                         end: 8,
@@ -6123,282 +6123,328 @@ class _ReaderState extends State<Reader> {
     if (mounted && destination != null) _go(destination);
   }
 
-  Widget _footer() => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-    child: Material(
-      color: _rail,
-      borderRadius: BorderRadius.circular(12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_inking)
-            Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    _stamp ??
-                        switch (_shape) {
-                          InkShape.line => 'Line',
-                          InkShape.rectangle => 'Rectangle',
-                          InkShape.oval => 'Oval',
-                          InkShape.arrow => 'Arrow',
-                          InkShape.ruler => 'Ruler',
-                          null => switch (_tool) {
-                            InkTool.pen => 'Pen',
-                            InkTool.highlighter => 'Highlighter',
-                            InkTool.eraser => 'Eraser',
-                            InkTool.text => 'Text',
-                            InkTool.selection => 'Selection',
-                          },
-                        },
-                    style: TextStyle(
-                      color: _brass,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
-                if (_tool == InkTool.pen)
-                  PopupMenuButton<int>(
-                    tooltip: 'Pen style',
-                    icon: const Icon(Icons.color_lens_outlined),
-                    onSelected: (index) {
-                      if (index < 0) {
-                        _configureDrawing();
-                      } else {
-                        _saveDrawing(_drawing.copyWith(selected: index));
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      for (final (index, preset) in _drawing.presets.indexed)
-                        CheckedPopupMenuItem(
-                          value: index,
-                          checked: _drawing.selected == index,
-                          child: Text(preset.name),
-                        ),
-                      const PopupMenuItem(
-                        value: -1,
-                        child: Text('Edit presets and stylus'),
-                      ),
-                    ],
-                  ),
-                _toolButton(
-                  InkTool.highlighter,
-                  Icons.highlight,
-                  'Highlighter',
-                ),
-                _toolButton(
-                  InkTool.eraser,
-                  Icons.backspace_outlined,
-                  'Erase strokes',
-                ),
-                _toolButton(InkTool.text, Icons.text_fields, 'Text annotation'),
-                PopupMenuButton<String>(
-                  tooltip: 'Notation stamps',
-                  icon: Icon(
-                    Icons.music_note,
-                    color: _stamp == null ? null : _brass,
-                  ),
-                  onSelected: _selectStamp,
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: '',
-                      child: Text('Create personal stamp'),
-                    ),
-                    for (final stamp in _personalStamps)
-                      PopupMenuItem(value: stamp, child: Text(stamp)),
-                    for (final entry in const {
-                      '𝄐': 'Fermata',
-                      '♯': 'Sharp',
-                      '♭': 'Flat',
-                      '♮': 'Natural',
-                      'pp': 'Pianissimo',
-                      'p': 'Piano',
-                      'mf': 'Mezzo-forte',
-                      'f': 'Forte',
-                      'ff': 'Fortissimo',
-                      '>': 'Accent',
-                      '𝄋': 'Segno',
-                      '𝄌': 'Coda',
-                    }.entries)
-                      PopupMenuItem(
-                        value: entry.key,
-                        child: Text('${entry.key}   ${entry.value}'),
-                      ),
-                    for (final entry in additionalMusicStamps.entries)
-                      PopupMenuItem(
-                        value: entry.key,
-                        child: Text('${entry.key}   ${entry.value}'),
-                      ),
-                  ],
-                ),
-                PopupMenuButton<InkShape>(
-                  tooltip: 'Draw shape',
-                  icon: Icon(
-                    Icons.interests_outlined,
-                    color: _shape == null ? null : _brass,
-                  ),
-                  onSelected: (shape) => setState(() {
-                    _shape = shape;
-                    _stamp = null;
-                    _tool = InkTool.pen;
-                  }),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: InkShape.line, child: Text('Line')),
-                    PopupMenuItem(
-                      value: InkShape.rectangle,
-                      child: Text('Rectangle'),
-                    ),
-                    PopupMenuItem(value: InkShape.oval, child: Text('Oval')),
-                    PopupMenuItem(value: InkShape.arrow, child: Text('Arrow')),
-                    PopupMenuItem(
-                      value: InkShape.ruler,
-                      child: Text('Ruler · 15° steps'),
-                    ),
-                  ],
-                ),
-                PopupMenuButton<bool>(
-                  tooltip: 'Select annotations',
-                  icon: Icon(
-                    Icons.select_all,
-                    color: _tool == InkTool.selection ? _brass : null,
-                  ),
-                  onSelected: (freeform) => setState(() {
-                    _tool = InkTool.selection;
-                    _stamp = null;
-                    _shape = null;
-                    _freeformSelection = freeform;
-                  }),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: false,
-                      child: Text('Rectangle selection'),
-                    ),
-                    PopupMenuItem(
-                      value: true,
-                      child: Text('Freeform selection'),
-                    ),
-                  ],
-                ),
-                if (_ink[_annotationPage ?? _page] case final ink?
-                    when _tool == InkTool.selection)
-                  _selectionActions(ink),
-                IconButton(
-                  tooltip: 'Annotation layers',
-                  onPressed: _showInkLayers,
-                  icon: const Icon(Icons.layers_outlined),
-                ),
-                Semantics(
-                  label: 'Allow finger drawing',
-                  child: ChoiceChip(
-                    label: const Text('Finger'),
-                    selected: _allowFinger,
-                    onSelected: (enabled) =>
-                        setState(() => _allowFinger = enabled),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Undo stroke',
-                  onPressed: () => _ink[_annotationPage ?? _page]?.undo(),
-                  icon: const Icon(Icons.undo),
-                ),
-                IconButton(
-                  tooltip: 'Redo stroke',
-                  onPressed: () => _ink[_annotationPage ?? _page]?.redo(),
-                  icon: const Icon(Icons.redo),
-                ),
-              ],
-            ),
-          Row(
-            children: [
-              IconButton(
-                tooltip: _verticalScrolling && !_inking
-                    ? 'Scroll up'
-                    : ReaderText.previous.of(context),
-                onPressed:
-                    _pages == 0 ||
-                        ((!_verticalScrolling || _inking) &&
-                            _page <= _firstPage &&
-                            !_halfPreview)
-                    ? null
-                    : () => _turn(-1),
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Expanded(
-                child: Slider(
-                  // A saved page is known before the PDF has loaded its count.
-                  value: _lastPage > _firstPage
-                      ? (_seek ?? _page.toDouble()).clamp(
-                          _firstPage.toDouble(),
-                          _lastPage.toDouble(),
-                        )
-                      : _firstPage.toDouble(),
-                  min: _firstPage.toDouble(),
-                  max: _lastPage > _firstPage
-                      ? _lastPage.toDouble()
-                      : (_firstPage + 1).toDouble(),
-                  divisions: _lastPage > _firstPage
-                      ? _lastPage - _firstPage
-                      : null,
-                  semanticFormatterCallback: (value) => 'Page ${value.round()}',
-                  onChanged: _lastPage > _firstPage
-                      ? (value) => setState(() => _seek = value)
-                      : null,
-                  onChangeEnd: (value) {
-                    setState(() => _seek = null);
-                    _go(value.round());
-                    _focus.requestFocus();
+  Widget _markupPalette() => Material(
+    color: _rail,
+    elevation: 3,
+    borderRadius: BorderRadius.circular(12),
+    child: Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(
+            _stamp ??
+                switch (_shape) {
+                  InkShape.line => 'Line',
+                  InkShape.rectangle => 'Rectangle',
+                  InkShape.oval => 'Oval',
+                  InkShape.arrow => 'Arrow',
+                  InkShape.ruler => 'Ruler',
+                  null => switch (_tool) {
+                    InkTool.pen => 'Pen',
+                    InkTool.highlighter => 'Highlighter',
+                    InkTool.eraser => 'Eraser',
+                    InkTool.text => 'Text',
+                    InkTool.selection => 'Selection',
                   },
+                },
+            style: TextStyle(color: _brass, fontWeight: FontWeight.w600),
+          ),
+        ),
+        TextButton(onPressed: _toggleInk, child: const Text('Done')),
+        _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
+        if (_tool == InkTool.pen)
+          PopupMenuButton<int>(
+            tooltip: 'Pen style',
+            icon: const Icon(Icons.color_lens_outlined),
+            onSelected: (index) {
+              if (index < 0) {
+                _configureDrawing();
+              } else {
+                _saveDrawing(_drawing.copyWith(selected: index));
+              }
+            },
+            itemBuilder: (_) => [
+              for (final (index, preset) in _drawing.presets.indexed)
+                CheckedPopupMenuItem(
+                  value: index,
+                  checked: _drawing.selected == index,
+                  child: Text(preset.name),
                 ),
-              ),
-              PopupMenuButton<bool>(
-                tooltip: 'Fit page or width',
-                enabled:
-                    _pages > 0 &&
-                    !_picking &&
-                    !_halfPageTurns &&
-                    _spreadStep == 0,
-                icon: const Icon(Icons.aspect_ratio),
-                onSelected: _quickFit,
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: false, child: Text('Fit page')),
-                  PopupMenuItem(value: true, child: Text('Fit width')),
-                ],
-              ),
-              Tooltip(
-                message: 'Page thumbnails',
-                child: OutlinedButton.icon(
-                  onPressed: _pages == 0 ? null : _showThumbnails,
-                  icon: const Icon(Icons.grid_view_outlined, size: 16),
-                  label: Text(
-                    _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: _verticalScrolling && !_inking
-                    ? 'Scroll down'
-                    : _page == _lastPage && _hasNextScore
-                    ? 'Next score'
-                    : ReaderText.next.of(context),
-                onPressed:
-                    _pages == 0 ||
-                        ((!_verticalScrolling || _inking) &&
-                            _page >= _lastPage &&
-                            !_hasNextScore)
-                    ? null
-                    : () => _turn(1),
-                icon: const Icon(Icons.chevron_right),
+              const PopupMenuItem(
+                value: -1,
+                child: Text('Edit presets and stylus'),
               ),
             ],
           ),
-        ],
-      ),
+        _toolButton(InkTool.highlighter, Icons.highlight, 'Highlighter'),
+        _toolButton(InkTool.eraser, Icons.backspace_outlined, 'Erase strokes'),
+        _toolButton(InkTool.text, Icons.text_fields, 'Text annotation'),
+        PopupMenuButton<String>(
+          tooltip: 'Notation stamps',
+          icon: Icon(Icons.music_note, color: _stamp == null ? null : _brass),
+          onSelected: _selectStamp,
+          itemBuilder: (_) => [
+            const PopupMenuItem(
+              value: '',
+              child: Text('Create personal stamp'),
+            ),
+            for (final stamp in _personalStamps)
+              PopupMenuItem(value: stamp, child: Text(stamp)),
+            for (final entry in const {
+              '𝄐': 'Fermata',
+              '♯': 'Sharp',
+              '♭': 'Flat',
+              '♮': 'Natural',
+              'pp': 'Pianissimo',
+              'p': 'Piano',
+              'mf': 'Mezzo-forte',
+              'f': 'Forte',
+              'ff': 'Fortissimo',
+              '>': 'Accent',
+              '𝄋': 'Segno',
+              '𝄌': 'Coda',
+            }.entries)
+              PopupMenuItem(
+                value: entry.key,
+                child: Text('${entry.key}   ${entry.value}'),
+              ),
+            for (final entry in additionalMusicStamps.entries)
+              PopupMenuItem(
+                value: entry.key,
+                child: Text('${entry.key}   ${entry.value}'),
+              ),
+          ],
+        ),
+        PopupMenuButton<InkShape>(
+          tooltip: 'Draw shape',
+          icon: Icon(
+            Icons.interests_outlined,
+            color: _shape == null ? null : _brass,
+          ),
+          onSelected: (shape) => setState(() {
+            _shape = shape;
+            _stamp = null;
+            _tool = InkTool.pen;
+          }),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: InkShape.line, child: Text('Line')),
+            PopupMenuItem(value: InkShape.rectangle, child: Text('Rectangle')),
+            PopupMenuItem(value: InkShape.oval, child: Text('Oval')),
+            PopupMenuItem(value: InkShape.arrow, child: Text('Arrow')),
+            PopupMenuItem(
+              value: InkShape.ruler,
+              child: Text('Ruler · 15° steps'),
+            ),
+          ],
+        ),
+        PopupMenuButton<bool>(
+          tooltip: 'Select annotations',
+          icon: Icon(
+            Icons.select_all,
+            color: _tool == InkTool.selection ? _brass : null,
+          ),
+          onSelected: (freeform) => setState(() {
+            _tool = InkTool.selection;
+            _stamp = null;
+            _shape = null;
+            _freeformSelection = freeform;
+          }),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: false, child: Text('Rectangle selection')),
+            PopupMenuItem(value: true, child: Text('Freeform selection')),
+          ],
+        ),
+        if (_ink[_annotationPage ?? _page] case final ink?
+            when _tool == InkTool.selection)
+          _selectionActions(ink),
+        IconButton(
+          tooltip: 'Annotation layers',
+          onPressed: _showInkLayers,
+          icon: const Icon(Icons.layers_outlined),
+        ),
+        Semantics(
+          label: 'Allow finger drawing',
+          child: ChoiceChip(
+            label: const Text('Finger'),
+            selected: _allowFinger,
+            onSelected: (enabled) => setState(() => _allowFinger = enabled),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Undo stroke',
+          onPressed: () => _ink[_annotationPage ?? _page]?.undo(),
+          icon: const Icon(Icons.undo),
+        ),
+        IconButton(
+          tooltip: 'Redo stroke',
+          onPressed: () => _ink[_annotationPage ?? _page]?.redo(),
+          icon: const Icon(Icons.redo),
+        ),
+      ],
     ),
   );
+
+  Widget _markupOverlay() => LayoutBuilder(
+    builder: (context, space) {
+      final viewport = Size(space.maxWidth, space.maxHeight);
+      var leftGutter = 0.0;
+      var rightGutter = 0.0;
+      if (_viewer.isReady && !_verticalScrolling && _spreadStep == 0) {
+        final page = _viewer.layout.pageLayouts[_page - 1];
+        leftGutter = _viewer.documentToLocal(page.topLeft).dx;
+        rightGutter =
+            viewport.width - _viewer.documentToLocal(page.bottomRight).dx;
+      }
+      final gutter = math.max(leftGutter, rightGutter);
+      if (viewport.width >= 720 && gutter >= 152) {
+        return Align(
+          alignment: rightGutter >= leftGutter
+              ? Alignment.centerRight
+              : Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: math.min(220, gutter - 16),
+                maxHeight: math.max(0, viewport.height - 16),
+              ),
+              child: SingleChildScrollView(child: _markupPalette()),
+            ),
+          ),
+        );
+      }
+      return Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: viewport.height * .45),
+            child: SingleChildScrollView(child: _markupPalette()),
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _footer() {
+    final fitWidth = _verticalScrolling
+        ? _scrollMode == ReaderScrollMode.fitWidth
+        : _readingAtWidth;
+    final canScrub = _pages > 0 && _lastPage - _firstPage >= 6;
+    final turns = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: _verticalScrolling && !_inking
+              ? 'Scroll up'
+              : ReaderText.previous.of(context),
+          onPressed:
+              _pages == 0 ||
+                  ((!_verticalScrolling || _inking) &&
+                      _page <= _firstPage &&
+                      !_halfPreview)
+              ? null
+              : () => _turn(-1),
+          icon: const Icon(Icons.chevron_left),
+        ),
+        Text(
+          _pages == 0 ? '–' : '${(_seek ?? _page).round()} / $_pages',
+          style: TextStyle(color: _brass, fontWeight: FontWeight.w600),
+        ),
+        IconButton(
+          tooltip: _verticalScrolling && !_inking
+              ? 'Scroll down'
+              : _page == _lastPage && _hasNextScore
+              ? 'Next score'
+              : ReaderText.next.of(context),
+          onPressed:
+              _pages == 0 ||
+                  ((!_verticalScrolling || _inking) &&
+                      _page >= _lastPage &&
+                      !_hasNextScore)
+              ? null
+              : () => _turn(1),
+          icon: const Icon(Icons.chevron_right),
+        ),
+      ],
+    );
+    final tools = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Page thumbnails',
+          onPressed: _pages == 0 ? null : _showThumbnails,
+          icon: const Icon(Icons.grid_view_outlined),
+        ),
+        PopupMenuButton<bool>(
+          tooltip: 'Fit mode: ${fitWidth ? 'Fit width' : 'Fit page'}',
+          enabled:
+              _pages > 0 && !_picking && !_halfPageTurns && _spreadStep == 0,
+          icon: const Icon(Icons.aspect_ratio),
+          onSelected: _quickFit,
+          itemBuilder: (_) => [
+            CheckedPopupMenuItem(
+              value: false,
+              checked: !fitWidth,
+              child: const Text('Fit page'),
+            ),
+            CheckedPopupMenuItem(
+              value: true,
+              checked: fitWidth,
+              child: const Text('Fit width'),
+            ),
+          ],
+        ),
+      ],
+    );
+    final slider = canScrub
+        ? Slider(
+            value: (_seek ?? _page.toDouble()).clamp(
+              _firstPage.toDouble(),
+              _lastPage.toDouble(),
+            ),
+            min: _firstPage.toDouble(),
+            max: _lastPage.toDouble(),
+            divisions: _lastPage - _firstPage,
+            semanticFormatterCallback: (value) => 'Page ${value.round()}',
+            onChanged: (value) => setState(() => _seek = value),
+            onChangeEnd: (value) {
+              setState(() => _seek = null);
+              _go(value.round());
+              _focus.requestFocus();
+            },
+          )
+        : null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+      child: Material(
+        color: _rail,
+        borderRadius: BorderRadius.circular(12),
+        child: LayoutBuilder(
+          builder: (context, space) {
+            final separateSlider = slider != null && space.maxWidth < 420;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    turns,
+                    if (slider != null && !separateSlider)
+                      Expanded(child: slider),
+                    tools,
+                  ],
+                ),
+                if (separateSlider) slider,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
 
   Widget _selectionActions(PageInk ink) => ListenableBuilder(
     listenable: ink,
@@ -6658,22 +6704,57 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       );
 
   Future<void> _dropIntoSetlist(String scoreId) async {
-    final listId = await showDialog<String>(
+    final setlists = widget.library.setlists;
+    final create = setlists.isEmpty;
+    var name = '';
+    final destination = await showDialog<String>(
       context: context,
-      builder: (dialog) => SimpleDialog(
-        title: const Text('Add score to setlist'),
-        children: [
-          for (final list in widget.library.setlists)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialog, list.id),
-              child: Text(list.name),
+      builder: (dialog) {
+        if (create) {
+          return StatefulBuilder(
+            builder: (_, update) => AlertDialog(
+              title: const Text('Create a setlist'),
+              content: TextField(
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Setlist name'),
+                onChanged: (value) => update(() => name = value.trim()),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: name.isEmpty
+                      ? null
+                      : () => Navigator.pop(dialog, name),
+                  child: const Text('Create and add score'),
+                ),
+              ],
             ),
-        ],
-      ),
+          );
+        }
+        return SimpleDialog(
+          title: const Text('Add score to setlist'),
+          children: [
+            for (final list in setlists)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialog, list.id),
+                child: Text(list.name),
+              ),
+          ],
+        );
+      },
     );
-    if (listId == null || !mounted) return;
+    if (destination == null || !mounted) return;
     try {
-      await widget.library.appendToSetlist(listId, scoreId);
+      if (create) {
+        await widget.library.saveSetlist(
+          Setlist(ScoreLibrary.newRecordId(), destination, [scoreId]),
+        );
+      } else {
+        await widget.library.appendToSetlist(destination, scoreId);
+      }
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Score added to setlist.')),
@@ -7316,10 +7397,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                       ),
                                     ),
                                   ),
-                                  child: const Tooltip(
-                                    message:
-                                        'Hold and drag to a tab or setlist',
-                                    child: Icon(Icons.drag_indicator),
+                                  child: IconButton(
+                                    tooltip: 'Add to setlist',
+                                    onPressed: () => _dropIntoSetlist(score.id),
+                                    icon: const Icon(Icons.playlist_add),
                                   ),
                                 ),
                                 title: Text(score.title),
@@ -7337,7 +7418,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                 trailing: PopupMenuButton<String>(
                                   tooltip: 'Options for ${score.title}',
                                   onSelected: (action) {
-                                    if (action == 'libraries') {
+                                    if (action == 'setlist') {
+                                      _dropIntoSetlist(score.id);
+                                    } else if (action == 'libraries') {
                                       _assignCollections(score);
                                     } else if (action == 'copy') {
                                       _copyLibraryScore(score);
@@ -7366,6 +7449,10 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     }
                                   },
                                   itemBuilder: (_) => [
+                                    const PopupMenuItem(
+                                      value: 'setlist',
+                                      child: Text('Add to setlist'),
+                                    ),
                                     const PopupMenuItem(
                                       value: 'copy',
                                       child: Text('Copy to clipboard'),
