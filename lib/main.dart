@@ -6450,6 +6450,19 @@ class _ReaderState extends State<Reader> {
     },
   );
 
+  String _scrubLabel(int page) {
+    ScoreBookmark? section;
+    for (final bookmark in _entry?.bookmarks ?? const <ScoreBookmark>[]) {
+      final end = bookmark.endPage;
+      if (bookmark.page < _firstPage ||
+          bookmark.page > page ||
+          end != null && page > end)
+        continue;
+      if (section == null || bookmark.page > section.page) section = bookmark;
+    }
+    return section == null ? 'Page $page' : 'Page $page · ${section.title}';
+  }
+
   Widget _footer() {
     final fitWidth = _verticalScrolling
         ? _scrollMode == ReaderScrollMode.fitWidth
@@ -6530,7 +6543,8 @@ class _ReaderState extends State<Reader> {
             min: _firstPage.toDouble(),
             max: _lastPage.toDouble(),
             divisions: _lastPage - _firstPage,
-            semanticFormatterCallback: (value) => 'Page ${value.round()}',
+            label: _scrubLabel((_seek ?? _page).round()),
+            semanticFormatterCallback: (value) => _scrubLabel(value.round()),
             onChanged: (value) => setState(() => _seek = value),
             onChangeEnd: (value) {
               setState(() => _seek = null);
