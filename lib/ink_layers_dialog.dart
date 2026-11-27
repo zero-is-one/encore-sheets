@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'page_ink.dart';
@@ -13,10 +14,12 @@ class InkLayersDialog extends StatefulWidget {
     super.key,
     required this.layers,
     required this.active,
+    this.onShare,
   });
 
   final List<InkLayer> layers;
   final String? active;
+  final Future<void> Function(InkLayer)? onShare;
 
   @override
   State<InkLayersDialog> createState() => _InkLayersDialogState();
@@ -72,6 +75,10 @@ class _InkLayersDialogState extends State<InkLayersDialog> {
 
   Future<void> _action(String action, InkLayer layer) async {
     final index = _layers.indexOf(layer);
+    if (action == 'share') {
+      await widget.onShare?.call(layer);
+      return;
+    }
     if (action == 'copy') {
       await _add(source: layer);
       return;
@@ -171,6 +178,13 @@ class _InkLayersDialogState extends State<InkLayersDialog> {
                   tooltip: 'Layer actions',
                   onSelected: (action) => _action(action, layer),
                   itemBuilder: (_) => [
+                    if (widget.onShare != null)
+                      PopupMenuItem(
+                        value: 'share',
+                        enabled:
+                            widget.layers.contains(layer) && _changes.isEmpty,
+                        child: const Text('Share layer'),
+                      ),
                     const PopupMenuItem(value: 'rename', child: Text('Rename')),
                     const PopupMenuItem(
                       value: 'copy',
@@ -213,6 +227,16 @@ class _InkLayersDialogState extends State<InkLayersDialog> {
       ),
     ),
     actions: [
+      if (widget.onShare != null)
+        TextButton(
+          onPressed:
+              listEquals(_layers, widget.layers) &&
+                  _changes.isEmpty &&
+                  _active == widget.active
+              ? () => Navigator.pop(context, 'import')
+              : null,
+          child: const Text('Import layer'),
+        ),
       TextButton(
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),

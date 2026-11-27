@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
@@ -20,6 +21,7 @@ import 'drawing_settings_dialog.dart';
 import 'page_crop.dart';
 import 'page_crop_dialog.dart';
 import 'ink_layers_dialog.dart';
+import 'ink_layer_package.dart';
 import 'pdf_assembly_screen.dart';
 import 'pdf_export_screen.dart';
 import 'pdf_rearrange.dart';
@@ -3310,12 +3312,26 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _showInkLayers() async {
     final revision = _revision;
-    final settings = await showDialog<InkLayerSettings>(
+    final canTransfer =
+        _entry != null &&
+        _entry?.validUntil == null &&
+        _pages > 0 &&
+        !_restricted(RestrictedTool.transfers);
+    final result = await showDialog<Object>(
       context: context,
-      builder: (_) =>
-          InkLayersDialog(layers: _inkLayers, active: _activeInkLayer),
+      builder: (_) => InkLayersDialog(
+        layers: _inkLayers,
+        active: _activeInkLayer,
+        onShare: canTransfer ? _shareInkLayer : null,
+      ),
     );
-    if (!mounted || settings == null || revision != _revision) return;
+    if (!mounted || revision != _revision) return;
+    if (result == 'import') {
+      await _importInkLayer();
+      return;
+    }
+    if (result is! InkLayerSettings) return;
+    final settings = result;
     final visible = [
       for (final layer in settings.layers)
         if (layer.visible) layer.id,
@@ -3332,6 +3348,158 @@ class _ReaderState extends State<Reader> {
       );
     }
     await _saveInk();
+  }
+
+  Future<String> _inkScoreDigest() async {
+    final bytes = _bytes ?? await _file!.readAsBytes();
+    return sha256.convert(bytes).toString();
+  }
+
+  void _inkTransferError(Object error, String fallback) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error is FormatException ? error.message : fallback),
+      ),
+    );
+  }
+
+  Future<void> _shareInkLayer(InkLayer layer) async {
+    if (_entry == null ||
+        _entry?.validUntil != null ||
+        _restricted(RestrictedTool.transfers))
+      return;
+    final box = context.findRenderObject() as RenderBox;
+    final origin = box.localToGlobal(Offset.zero) & box.size;
+    final snapshot = _inkSnapshot();
+    try {
+      final bytes = encodeInkLayer(layer, await _inkScoreDigest(), snapshot);
+      if (bytes.length > maxInkLayerBytes) {
+        throw const FormatException('The annotation layer is too large.');
+      }
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'application/json')],
+          fileNameOverrides: ['Annotation layer.$inkLayerExtension'],
+          sharePositionOrigin: origin,
+        ),
+      );
+    } catch (error) {
+      _inkTransferError(error, 'Could not share the annotation layer.');
+    }
+  }
+
+  Future<void> _importInkLayer() async {
+    final entry = _entry;
+    if (entry == null ||
+        entry.validUntil != null ||
+        _restricted(RestrictedTool.transfers) ||
+        _picking ||
+        _pages == 0)
+      return;
+    final revision = _revision;
+    setState(() => _picking = true);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Annotation layers',
+            extensions: ['json'],
+            mimeTypes: ['application/json'],
+            uniformTypeIdentifiers: ['public.json'],
+          ),
+        ],
+      );
+      if (file == null || !mounted || revision != _revision) return;
+      if (await file.length() > maxInkLayerBytes) {
+        throw const FormatException('The annotation layer is too large.');
+      }
+      final layerId = 'imported-${DateTime.now().microsecondsSinceEpoch}';
+      final layer = decodeInkLayer(
+        await file.readAsBytes(),
+        scoreDigest: await _inkScoreDigest(),
+        pageCount: _pages,
+        layerId: layerId,
+      );
+      if (!mounted || revision != _revision) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Import annotation layer'),
+          content: Text('Add “${layer.name}” to “${entry.title}”?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || revision != _revision) return;
+      final layers = [
+        ..._inkLayers,
+        (id: layerId, name: layer.name, visible: true),
+      ];
+      final visible = [
+        for (final layer in layers)
+          if (layer.visible) layer.id,
+      ];
+      final snapshot = _inkSnapshot();
+      snapshot['layers'] = [
+        for (final layer in layers)
+          {
+            'id': layer.id,
+            'name': layer.name,
+            'visible': layer.visible,
+            if (layer.id == layerId) 'active': true,
+          },
+      ];
+      for (final page in layer.pages.entries) {
+        snapshot['${page.key}'] = [
+          ...?_ink[page.key]?.snapshot(),
+          ...page.value,
+        ];
+      }
+      await _library.writeInk(entry.id, snapshot);
+      if (!mounted || revision != _revision) return;
+      final retired = <PageInk>[];
+      setState(() {
+        _inkLayers = layers;
+        _activeInkLayer = layerId;
+        for (final page in layer.pages.keys) {
+          if (_ink[page] case final previous?) retired.add(previous);
+          _ink[page] = PageInk(
+            saved: snapshot['$page'] as List<dynamic>,
+            onChanged: _saveInk,
+            activeLayer: layerId,
+            visibleLayers: visible,
+          );
+        }
+        for (final page in _ink.keys.where(
+          (page) => !layer.pages.containsKey(page),
+        )) {
+          _ink[page]!.configureLayers(
+            active: layerId,
+            visible: visible,
+            changes: [],
+          );
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final ink in retired) {
+          ink.dispose();
+        }
+      });
+    } catch (error) {
+      _inkTransferError(error, 'Could not import the annotation layer.');
+    } finally {
+      _finishPicking();
+    }
   }
 
   void _go(int page) {
