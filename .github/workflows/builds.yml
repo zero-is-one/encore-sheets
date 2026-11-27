@@ -83,6 +83,17 @@ jobs:
             grep -Fx 'Signer #1 certificate SHA-256 digest: b8f88f88e9d532c05dba573a51caae6300bf72f2035c41b241aadf3a34115fde'
           badging=$("$tools/aapt" dump badging EncoreSheets-android-arm64.apk)
           grep "^package: name='com\.encoresheets\.app'" <<< "$badging"
+          manifest=$("$tools/aapt" dump xmltree EncoreSheets-android-arm64.apk AndroidManifest.xml)
+          affinities=$(sed -nE 's/^[[:space:]]*A: android:taskAffinity\(0x[[:xdigit:]]+\)="([^"]*)".*/\1/p' <<< "$manifest")
+          while IFS= read -r affinity; do
+            [[ -z "$affinity" || "$affinity" == system ]] && continue
+            if [[ "$affinity" =~ ^([A-Za-z][A-Za-z0-9_]*\.)+[A-Za-z][A-Za-z0-9_]*$ ||
+                  "$affinity" =~ ^:([A-Za-z][A-Za-z0-9_]*\.)*[A-Za-z][A-Za-z0-9_]*$ ]]; then
+              continue
+            fi
+            printf 'Invalid Android task affinity: %s\n' "$affinity" >&2
+            exit 1
+          done <<< "$affinities"
           architectures=$(unzip -Z1 EncoreSheets-android-arm64.apk | awk -F/ '$1 == "lib" && $3 ~ /\.so$/ {print $2}' | sort -u)
           printf 'APK architectures: %s\n' "$architectures"
           test "$architectures" = arm64-v8a
