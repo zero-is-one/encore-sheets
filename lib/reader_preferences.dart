@@ -65,6 +65,7 @@ class ReaderPreferences {
     this.scrollMode = ReaderScrollMode.paged,
     this.autoScrollSeconds = 20,
     this.autoScrollSetlist = true,
+    this.startWithControlsHidden = false,
   });
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) {
@@ -108,6 +109,7 @@ class ReaderPreferences {
         _ => 20,
       },
       autoScrollSetlist: json['autoScrollSetlist'] != false,
+      startWithControlsHidden: json['startWithControlsHidden'] == true,
       pageFit:
           ReaderPageFit.values
               .where((mode) => mode.name == json['pageFit'])
@@ -139,6 +141,7 @@ class ReaderPreferences {
   final ReaderScrollMode scrollMode;
   final int autoScrollSeconds;
   final bool autoScrollSetlist;
+  final bool startWithControlsHidden;
 
   ReaderPreferences copyWith({
     ReaderTapAction? left,
@@ -164,6 +167,7 @@ class ReaderPreferences {
     ReaderScrollMode? scrollMode,
     int? autoScrollSeconds,
     bool? autoScrollSetlist,
+    bool? startWithControlsHidden,
   }) => ReaderPreferences(
     left: left ?? this.left,
     center: center ?? this.center,
@@ -188,6 +192,8 @@ class ReaderPreferences {
     scrollMode: scrollMode ?? this.scrollMode,
     autoScrollSeconds: autoScrollSeconds ?? this.autoScrollSeconds,
     autoScrollSetlist: autoScrollSetlist ?? this.autoScrollSetlist,
+    startWithControlsHidden:
+        startWithControlsHidden ?? this.startWithControlsHidden,
   );
 
   Map<String, dynamic> toJson() => {
@@ -214,5 +220,6 @@ class ReaderPreferences {
     'scrollMode': scrollMode.name,
     'autoScrollSeconds': autoScrollSeconds,
     'autoScrollSetlist': autoScrollSetlist,
+    'startWithControlsHidden': startWithControlsHidden,
   };
 }

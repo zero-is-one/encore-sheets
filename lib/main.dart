@@ -149,6 +149,7 @@ enum _ReaderDisplay {
   shareScoreLink,
   performance,
   hideControls,
+  cleanStartup,
   gestures,
   keepAwake,
   nextTitle,
@@ -401,7 +402,7 @@ class _ReaderState extends State<Reader> {
   @override
   void initState() {
     super.initState();
-    _startupPreferences = _restorePreferences();
+    _startupPreferences = _restorePreferences(startup: true);
     if (!kIsWeb) {
       _assistantTimer = Timer.periodic(
         const Duration(seconds: 45),
@@ -463,7 +464,7 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _restorePreferences() async {
+  Future<void> _restorePreferences({bool startup = false}) async {
     try {
       final data = await _library.storage.readPreferences();
       if (mounted) {
@@ -475,6 +476,15 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          if (startup &&
+              _preferences.startWithControlsHidden &&
+              [
+                _preferences.left,
+                _preferences.center,
+                _preferences.right,
+              ].contains(ReaderTapAction.controls)) {
+            _showControls = false;
+          }
           _practice.enabled = data['practiceTracking'] == true;
           _quickTools = readQuickReaderTools(data['quickReaderTools']);
           _metadataSymbols = readMetadataSymbols(data['metadataSymbols']);
@@ -5557,6 +5567,7 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.spreads,
     _ReaderDisplay.performance,
     _ReaderDisplay.hideControls,
+    _ReaderDisplay.cleanStartup,
     _ReaderDisplay.keepAwake,
     _ReaderDisplay.nextTitle,
     _ReaderDisplay.presentation,
@@ -5776,6 +5787,12 @@ class _ReaderState extends State<Reader> {
             }
           case _ReaderDisplay.hideControls:
             setState(() => _showControls = false);
+          case _ReaderDisplay.cleanStartup:
+            await _savePreferences(
+              _preferences.copyWith(
+                startWithControlsHidden: !_preferences.startWithControlsHidden,
+              ),
+            );
           case _ReaderDisplay.gestures:
             _configureGestures();
           case _ReaderDisplay.keepAwake:
@@ -6098,6 +6115,11 @@ class _ReaderState extends State<Reader> {
                         _preferences.right,
                       ].contains(ReaderTapAction.controls),
                   child: const Text('Hide controls'),
+                ),
+                CheckedPopupMenuItem(
+                  value: _ReaderDisplay.cleanStartup,
+                  checked: _preferences.startWithControlsHidden,
+                  child: const Text('Start with controls hidden'),
                 ),
                 const PopupMenuItem(
                   value: _ReaderDisplay.gestures,
