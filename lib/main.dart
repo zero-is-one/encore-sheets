@@ -245,7 +245,7 @@ class _ReaderState extends State<Reader> {
   Map<String, dynamic> _libraryBrowseState = {};
   bool _inking = false;
   int? _annotationPage;
-  bool _allowFinger = false;
+  bool _allowFinger = true;
   bool _picking = false;
   static const _dockWidth = 368.0;
   static const _dockMinimumWidth = 900.0;
