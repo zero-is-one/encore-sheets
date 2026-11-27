@@ -31,7 +31,9 @@ class PdfRearrangeScreen extends StatefulWidget {
 class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
   final _documents = <PdfDocument>[];
   final _pages = <({Object key, EditedPdfPage page, String label})>[];
+  final _selected = <Object>{};
   bool _busy = true;
+  bool _grid = false;
   String? _message;
 
   @override
@@ -190,10 +192,97 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
             label: row.label,
           );
         case 'remove':
+          _selected.remove(row.key);
           _pages.removeAt(index);
+        case 'earlier':
+          _pages.insert(index - 1, _pages.removeAt(index));
+        case 'later':
+          _pages.insert(index + 1, _pages.removeAt(index));
       }
     });
   }
+
+  Widget _pagePreview(EditedPdfPage edit, double dpi) => RotatedBox(
+    quarterTurns: edit.rotation,
+    child: PdfPageView(
+      document: edit.page.document,
+      pageNumber: edit.page.pageNumber,
+      maximumDpi: dpi,
+    ),
+  );
+
+  Widget _pageActions(int index) => PopupMenuButton<String>(
+    enabled: !_busy,
+    tooltip: 'Page actions',
+    onSelected: (action) => _editPage(index, action),
+    itemBuilder: (_) => [
+      const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+      const PopupMenuItem(value: 'rotate', child: Text('Rotate 90° clockwise')),
+      if (_grid) ...[
+        PopupMenuItem(
+          value: 'earlier',
+          enabled: index > 0,
+          child: const Text('Move earlier'),
+        ),
+        PopupMenuItem(
+          value: 'later',
+          enabled: index + 1 < _pages.length,
+          child: const Text('Move later'),
+        ),
+      ],
+      PopupMenuItem(
+        value: 'remove',
+        enabled: _pages.length > 1,
+        child: const Text('Remove'),
+      ),
+    ],
+  );
+
+  Widget _pageGrid() => GridView.builder(
+    padding: const EdgeInsets.all(12),
+    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 180,
+      mainAxisExtent: 186,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+    ),
+    itemCount: _pages.length,
+    itemBuilder: (_, index) {
+      final row = _pages[index];
+      return Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _busy
+              ? null
+              : () => setState(() {
+                  if (!_selected.remove(row.key)) _selected.add(row.key);
+                }),
+          child: Column(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: _pagePreview(row.page, 56),
+                ),
+              ),
+              Row(
+                children: [
+                  if (_selected.contains(row.key)) const Icon(Icons.check),
+                  Expanded(
+                    child: Text(
+                      '${index + 1} · ${row.label}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  _pageActions(index),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -203,6 +292,18 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
         title: Text(
           widget.scan == null ? 'Rearrange pages' : 'Review scanned pages',
         ),
+        actions: [
+          IconButton(
+            tooltip: _grid ? 'List view' : 'Grid view',
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                    _grid = !_grid;
+                    _selected.clear();
+                  }),
+            icon: Icon(_grid ? Icons.view_list : Icons.grid_view),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -229,77 +330,70 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
                         : () => _save(replace: true),
                     child: const Text('Replace score'),
                   ),
+                if (_grid && _selected.isNotEmpty)
+                  TextButton(
+                    onPressed: _busy || _selected.length >= _pages.length
+                        ? null
+                        : () => setState(() {
+                            _pages.removeWhere(
+                              (row) => _selected.contains(row.key),
+                            );
+                            _selected.clear();
+                          }),
+                    child: Text('Remove selected (${_selected.length})'),
+                  ),
               ],
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_message case final message?) Text(message),
             Expanded(
-              child: ReorderableListView.builder(
-                itemCount: _pages.length,
-                buildDefaultDragHandles: false,
-                onReorderItem: (oldIndex, newIndex) {
-                  if (_busy) return;
-                  setState(
-                    () => _pages.insert(newIndex, _pages.removeAt(oldIndex)),
-                  );
-                },
-                itemBuilder: (context, index) {
-                  final row = _pages[index];
-                  final page = row.page.page;
-                  return ListTile(
-                    key: ObjectKey(row.key),
-                    leading: ReorderableDragStartListener(
-                      index: index,
-                      enabled: !_busy,
-                      child: const Padding(
-                        padding: EdgeInsets.all(8),
-                        child: Icon(Icons.drag_handle),
-                      ),
-                    ),
-                    title: Text(row.label, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      'Position ${index + 1} · ${row.page.rotation * 90}°',
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 46,
-                          height: 56,
-                          child: RotatedBox(
-                            quarterTurns: row.page.rotation,
-                            child: PdfPageView(
-                              document: page.document,
-                              pageNumber: page.pageNumber,
-                              maximumDpi: 32,
+              child: _grid
+                  ? _pageGrid()
+                  : ReorderableListView.builder(
+                      itemCount: _pages.length,
+                      buildDefaultDragHandles: false,
+                      onReorderItem: (oldIndex, newIndex) {
+                        if (_busy) return;
+                        setState(
+                          () => _pages.insert(
+                            newIndex,
+                            _pages.removeAt(oldIndex),
+                          ),
+                        );
+                      },
+                      itemBuilder: (context, index) {
+                        final row = _pages[index];
+                        return ListTile(
+                          key: ObjectKey(row.key),
+                          leading: ReorderableDragStartListener(
+                            index: index,
+                            enabled: !_busy,
+                            child: const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Icon(Icons.drag_handle),
                             ),
                           ),
-                        ),
-                        PopupMenuButton<String>(
-                          enabled: !_busy,
-                          tooltip: 'Page actions',
-                          onSelected: (action) => _editPage(index, action),
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                              value: 'duplicate',
-                              child: Text('Duplicate'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'rotate',
-                              child: Text('Rotate 90° clockwise'),
-                            ),
-                            PopupMenuItem(
-                              value: 'remove',
-                              enabled: _pages.length > 1,
-                              child: const Text('Remove'),
-                            ),
-                          ],
-                        ),
-                      ],
+                          title: Text(
+                            row.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            'Position ${index + 1} · ${row.page.rotation * 90}°',
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 46,
+                                height: 56,
+                                child: _pagePreview(row.page, 32),
+                              ),
+                              _pageActions(index),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
