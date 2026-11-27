@@ -697,11 +697,19 @@ class _InkSurfaceState extends State<InkSurface> {
               : HitTestBehavior.translucent,
           onPointerDown: (event) {
             final stylus = isPenPointer(event);
-            if (_pointer != null ||
-                size.isEmpty ||
+            if (size.isEmpty ||
                 (!widget.enabled && !stylus) ||
                 (stylus ? event.buttons == 0 : event.buttons != kPrimaryButton))
               return;
+            final accepted =
+                stylus ||
+                event.kind == PointerDeviceKind.mouse ||
+                (event.kind == PointerDeviceKind.touch && widget.allowFinger);
+            if (!accepted) return;
+            if (_pointer != null) {
+              if (!stylus || _stylus) return;
+              _end(false);
+            }
             final erasing =
                 stylus &&
                 widget.switchTools &&
@@ -723,20 +731,14 @@ class _InkSurfaceState extends State<InkSurface> {
               widget.onEditStart?.call();
               _pointer = event.pointer;
               _activeTool = tool;
+              _stylus = stylus;
               widget.ink.beginSelection(
                 _point(event, size),
                 freeform: widget.freeformSelection,
               );
+              if (stylus) widget.onStylusStart?.call();
               return;
             }
-            final accepted = switch (event.kind) {
-              PointerDeviceKind.stylus ||
-              PointerDeviceKind.invertedStylus => true,
-              PointerDeviceKind.mouse => true,
-              PointerDeviceKind.touch => widget.allowFinger,
-              _ => false,
-            };
-            if (!accepted) return;
             widget.onEditStart?.call();
             _pointer = event.pointer;
             _activeTool = tool;
