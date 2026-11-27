@@ -5408,7 +5408,7 @@ class _ReaderState extends State<Reader> {
           _readerToolsMenu(),
         ];
         final title = _readerTitle();
-        final display = _readerToolsMenu(group: _ReaderMenu.display);
+        final display = _displayButton();
         final scoreActions = _readerToolsMenu(group: _ReaderMenu.score);
         final editing = [
           _quickAccessMenu(),
@@ -5453,7 +5453,7 @@ class _ReaderState extends State<Reader> {
             children: [
               ...navigation,
               const SizedBox(width: 12),
-              _readerToolsMenu(group: _ReaderMenu.display, labelled: true),
+              _displayButton(labelled: true),
               Expanded(child: title),
               _readerToolsMenu(group: _ReaderMenu.score, labelled: true),
               ...editing,
@@ -5619,15 +5619,322 @@ class _ReaderState extends State<Reader> {
     _ReaderDisplay.shareScoreLink,
   };
 
+  Future<void> _runReaderDisplayAction(_ReaderDisplay action) async {
+    if (!_readerActionAllowed(action)) return;
+    switch (action) {
+      case _ReaderDisplay.nowPlaying:
+        _showNowPlaying();
+      case _ReaderDisplay.findInScore:
+        _findInScore();
+      case _ReaderDisplay.pageNote:
+        _editPageNote(_page);
+      case _ReaderDisplay.pageActions:
+        _editScoreActions();
+      case _ReaderDisplay.scoreAudio:
+        _showScoreAudio();
+      case _ReaderDisplay.practiceRecordings:
+        _showPracticeRecordings();
+      case _ReaderDisplay.practiceActivity:
+        _showPracticeActivity();
+      case _ReaderDisplay.restrictions:
+        _showRestrictions();
+      case _ReaderDisplay.assistantConnections:
+        await _openReaderPanel<void>(
+          (_) => AssistantConnectionScreen(connection: _assistantConnection),
+        );
+      case _ReaderDisplay.support:
+        _showSupport();
+      case _ReaderDisplay.language:
+        _chooseLanguage();
+      case _ReaderDisplay.profiles:
+        _showSettingsProfiles();
+      case _ReaderDisplay.metadataSymbols:
+        _editMetadataSymbols();
+      case _ReaderDisplay.themeOptions:
+        _changeThemeOptions();
+      case _ReaderDisplay.maintenance:
+        _showMaintenance();
+      case _ReaderDisplay.appIcon:
+        chooseLauncherIcon(context);
+      case _ReaderDisplay.metronome:
+        _showMetronome();
+      case _ReaderDisplay.tuner:
+        _showTuner();
+      case _ReaderDisplay.piano:
+        _showPiano();
+      case _ReaderDisplay.inputShortcuts:
+        _showInputShortcuts();
+      case _ReaderDisplay.faceTurns:
+        _configureFaceTurns();
+      case _ReaderDisplay.copyMeasure:
+        _measureRegion(paste: false);
+      case _ReaderDisplay.pasteMeasure:
+        _measureRegion(paste: true);
+      case _ReaderDisplay.midiDevices:
+        _showMidiDevices();
+      case _ReaderDisplay.midiAutomation:
+        _showMidiAutomation();
+      case _ReaderDisplay.ensemble:
+        _showEnsemble();
+      case _ReaderDisplay.scoreWindow:
+        _openScoreWindow();
+      case _ReaderDisplay.presentation:
+        _togglePresentation();
+      case _ReaderDisplay.appearance:
+        _showAppearance();
+      case _ReaderDisplay.accessibility:
+        _showAccessibility();
+      case _ReaderDisplay.reflow:
+        _showReflow();
+      case _ReaderDisplay.panelOptions:
+        _showPanelOptions();
+      case _ReaderDisplay.embeddedPdf:
+        _showEmbeddedPdfSettings();
+      case _ReaderDisplay.fit:
+        _fit();
+      case _ReaderDisplay.fittingMode:
+        _choosePageFit();
+      case _ReaderDisplay.scrollMode:
+        await _chooseScrollMode();
+      case _ReaderDisplay.autoScroll:
+        await _showAutoScroll();
+      case _ReaderDisplay.zoomIn:
+        if (_viewer.isReady) _viewer.zoomUp();
+      case _ReaderDisplay.zoomOut:
+        if (_viewer.isReady) _viewer.zoomDown();
+      case _ReaderDisplay.previousPage:
+        if (_previousPage case final page?) _go(page);
+      case _ReaderDisplay.previousScore:
+        _returnToPreviousScore();
+      case _ReaderDisplay.bookmarks:
+        _showBookmarks();
+      case _ReaderDisplay.jumpLinks:
+        _showJumpLinks();
+      case _ReaderDisplay.halfTurns:
+        _savePreferences(
+          _preferences.copyWith(halfPageTurns: !_preferences.halfPageTurns),
+        );
+      case _ReaderDisplay.halfSplit:
+        _setHalfSplit();
+      case _ReaderDisplay.halfIndicator:
+        _savePreferences(
+          _preferences.copyWith(
+            halfPageIndicator: !_preferences.halfPageIndicator,
+          ),
+        );
+      case _ReaderDisplay.landscapeWidth:
+        _savePreferences(
+          _preferences.copyWith(landscapeWidth: !_preferences.landscapeWidth),
+        );
+      case _ReaderDisplay.spreads:
+        final step = await showDialog<int>(
+          context: context,
+          builder: (context) => SimpleDialog(
+            title: const Text('Page layout'),
+            children: [
+              for (final (step, label) in [
+                (0, 'Single page'),
+                (1, 'Two pages · advance one'),
+                (2, 'Two pages · advance two'),
+              ])
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(context, step),
+                  child: Text(label),
+                ),
+            ],
+          ),
+        );
+        if (step != null && mounted) {
+          _savePreferences(
+            _preferences.copyWith(
+              spreadStep: step,
+              halfPageTurns: step == 0 && _preferences.halfPageTurns,
+            ),
+          );
+        }
+      case _ReaderDisplay.performance:
+        _togglePerformance();
+      case _ReaderDisplay.exportPdf:
+        _showPdfExport();
+      case _ReaderDisplay.crop:
+        _showCrop();
+      case _ReaderDisplay.drawingSettings:
+        _configureDrawing();
+      case _ReaderDisplay.shareScorePackage:
+        _shareEditableScore();
+      case _ReaderDisplay.shareScoreLink:
+        if (_entry case final score?) {
+          final bookmark = _itemBookmark;
+          await copyReaderLink(
+            context,
+            bookmark == null
+                ? ReaderLinkTarget.score
+                : ReaderLinkTarget.bookmark,
+            bookmark?.selectionId(score.id) ?? score.id,
+          );
+        }
+      case _ReaderDisplay.scoreTabs:
+        if (_entry case final score?) {
+          _updateScoreTabs([
+            ..._scoreTabIds.where((id) => id != score.id),
+            if (!_scoreTabIds.contains(score.id)) score.id,
+          ]);
+        }
+      case _ReaderDisplay.hideControls:
+        setState(() => _showControls = false);
+      case _ReaderDisplay.cleanStartup:
+        await _savePreferences(
+          _preferences.copyWith(
+            startWithControlsHidden: !_preferences.startWithControlsHidden,
+          ),
+        );
+      case _ReaderDisplay.gestures:
+        _configureGestures();
+      case _ReaderDisplay.keepAwake:
+        _savePreferences(
+          _preferences.copyWith(
+            left: _preferences.left,
+            center: _preferences.center,
+            right: _preferences.right,
+            keepAwake: !_preferences.keepAwake,
+            showNextTitle: _preferences.showNextTitle,
+          ),
+        );
+      case _ReaderDisplay.nextTitle:
+        _savePreferences(
+          _preferences.copyWith(
+            left: _preferences.left,
+            center: _preferences.center,
+            right: _preferences.right,
+            keepAwake: _preferences.keepAwake,
+            showNextTitle: !_preferences.showNextTitle,
+          ),
+        );
+    }
+  }
+
+  Widget _displayButton({bool labelled = false}) {
+    if (labelled) {
+      return Tooltip(
+        message: 'Display',
+        child: TextButton.icon(
+          onPressed: _pages > 0 && !_picking ? _showDisplayPanel : null,
+          icon: const Icon(Icons.view_quilt_outlined, size: 18),
+          label: const Text('Display'),
+        ),
+      );
+    }
+    return IconButton(
+      tooltip: 'Display',
+      onPressed: _pages > 0 && !_picking ? _showDisplayPanel : null,
+      icon: const Icon(Icons.view_quilt_outlined),
+    );
+  }
+
+  Future<void> _showDisplayPanel() async {
+    final action = await showDialog<_ReaderDisplay>(
+      context: context,
+      builder: (dialog) {
+        Widget option(
+          String title,
+          String status,
+          IconData icon,
+          _ReaderDisplay action, {
+          bool enabled = true,
+        }) => ListTile(
+          leading: Icon(icon),
+          title: Text(title),
+          subtitle: Text(status),
+          enabled: enabled,
+          onTap: enabled ? () => Navigator.pop(dialog, action) : null,
+        );
+        return AlertDialog(
+          title: const Text('Display'),
+          scrollable: true,
+          contentPadding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                option(
+                  'Fit',
+                  _verticalScrolling
+                      ? (_scrollMode == ReaderScrollMode.fitWidth
+                            ? 'Fit width'
+                            : 'Fit page')
+                      : _preferences.pageFit.label,
+                  Icons.aspect_ratio,
+                  _verticalScrolling
+                      ? _ReaderDisplay.scrollMode
+                      : _ReaderDisplay.fittingMode,
+                ),
+                option(
+                  'Scrolling display · ${_scrollMode.label}',
+                  _verticalScrolling ? 'Continuous' : 'Page by page',
+                  Icons.swap_vert,
+                  _ReaderDisplay.scrollMode,
+                ),
+                option(
+                  'Layout',
+                  _spreadStep > 0 ? 'Two pages' : 'Single page',
+                  Icons.view_week_outlined,
+                  _ReaderDisplay.spreads,
+                  enabled: !_verticalScrolling,
+                ),
+                option(
+                  'Page turns',
+                  _halfPageTurns ? 'Half-page turns' : 'Full-page turns',
+                  Icons.chrome_reader_mode_outlined,
+                  _ReaderDisplay.halfTurns,
+                  enabled: !_verticalScrolling,
+                ),
+                option(
+                  'Automatic scrolling',
+                  _autoScrollTicker.isActive ? 'Running' : 'Stopped',
+                  Icons.play_circle_outline,
+                  _ReaderDisplay.autoScroll,
+                  enabled: _canAutoScroll,
+                ),
+                option(
+                  'Performance mode',
+                  _performance ? 'On' : 'Off',
+                  Icons.fullscreen,
+                  _ReaderDisplay.performance,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            _readerToolsMenu(
+              group: _ReaderMenu.display,
+              labelled: true,
+              labelOverride: 'More display settings',
+              select: (action) => Navigator.pop(dialog, action),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Done'),
+            ),
+          ],
+        );
+      },
+    );
+    if (mounted && action != null) await _runReaderDisplayAction(action);
+  }
+
   Widget _readerToolsMenu({
     _ReaderMenu group = _ReaderMenu.tools,
     bool labelled = false,
+    String? labelOverride,
+    ValueChanged<_ReaderDisplay>? select,
   }) {
-    final (label, icon) = switch (group) {
+    final (defaultLabel, icon) = switch (group) {
       _ReaderMenu.display => ('Display', Icons.view_quilt_outlined),
       _ReaderMenu.score => ('Score actions', Icons.more_horiz),
       _ReaderMenu.tools => (ReaderText.tools.of(context), Icons.tune),
     };
+    final label = labelOverride ?? defaultLabel;
     return PopupMenuButton<_ReaderDisplay>(
       tooltip: label,
       enabled: _pages > 0 && !_picking,
@@ -5645,202 +5952,7 @@ class _ReaderState extends State<Reader> {
               ),
             )
           : null,
-      onSelected: (action) async {
-        if (!_readerActionAllowed(action)) return;
-        switch (action) {
-          case _ReaderDisplay.nowPlaying:
-            _showNowPlaying();
-          case _ReaderDisplay.findInScore:
-            _findInScore();
-          case _ReaderDisplay.pageNote:
-            _editPageNote(_page);
-          case _ReaderDisplay.pageActions:
-            _editScoreActions();
-          case _ReaderDisplay.scoreAudio:
-            _showScoreAudio();
-          case _ReaderDisplay.practiceRecordings:
-            _showPracticeRecordings();
-          case _ReaderDisplay.practiceActivity:
-            _showPracticeActivity();
-          case _ReaderDisplay.restrictions:
-            _showRestrictions();
-          case _ReaderDisplay.assistantConnections:
-            await _openReaderPanel<void>(
-              (_) =>
-                  AssistantConnectionScreen(connection: _assistantConnection),
-            );
-          case _ReaderDisplay.support:
-            _showSupport();
-          case _ReaderDisplay.language:
-            _chooseLanguage();
-          case _ReaderDisplay.profiles:
-            _showSettingsProfiles();
-          case _ReaderDisplay.metadataSymbols:
-            _editMetadataSymbols();
-          case _ReaderDisplay.themeOptions:
-            _changeThemeOptions();
-          case _ReaderDisplay.maintenance:
-            _showMaintenance();
-          case _ReaderDisplay.appIcon:
-            chooseLauncherIcon(context);
-          case _ReaderDisplay.metronome:
-            _showMetronome();
-          case _ReaderDisplay.tuner:
-            _showTuner();
-          case _ReaderDisplay.piano:
-            _showPiano();
-          case _ReaderDisplay.inputShortcuts:
-            _showInputShortcuts();
-          case _ReaderDisplay.faceTurns:
-            _configureFaceTurns();
-          case _ReaderDisplay.copyMeasure:
-            _measureRegion(paste: false);
-          case _ReaderDisplay.pasteMeasure:
-            _measureRegion(paste: true);
-          case _ReaderDisplay.midiDevices:
-            _showMidiDevices();
-          case _ReaderDisplay.midiAutomation:
-            _showMidiAutomation();
-          case _ReaderDisplay.ensemble:
-            _showEnsemble();
-          case _ReaderDisplay.scoreWindow:
-            _openScoreWindow();
-          case _ReaderDisplay.presentation:
-            _togglePresentation();
-          case _ReaderDisplay.appearance:
-            _showAppearance();
-          case _ReaderDisplay.accessibility:
-            _showAccessibility();
-          case _ReaderDisplay.reflow:
-            _showReflow();
-          case _ReaderDisplay.panelOptions:
-            _showPanelOptions();
-          case _ReaderDisplay.embeddedPdf:
-            _showEmbeddedPdfSettings();
-          case _ReaderDisplay.fit:
-            _fit();
-          case _ReaderDisplay.fittingMode:
-            _choosePageFit();
-          case _ReaderDisplay.scrollMode:
-            await _chooseScrollMode();
-          case _ReaderDisplay.autoScroll:
-            await _showAutoScroll();
-          case _ReaderDisplay.zoomIn:
-            if (_viewer.isReady) _viewer.zoomUp();
-          case _ReaderDisplay.zoomOut:
-            if (_viewer.isReady) _viewer.zoomDown();
-          case _ReaderDisplay.previousPage:
-            if (_previousPage case final page?) _go(page);
-          case _ReaderDisplay.previousScore:
-            _returnToPreviousScore();
-          case _ReaderDisplay.bookmarks:
-            _showBookmarks();
-          case _ReaderDisplay.jumpLinks:
-            _showJumpLinks();
-          case _ReaderDisplay.halfTurns:
-            _savePreferences(
-              _preferences.copyWith(halfPageTurns: !_preferences.halfPageTurns),
-            );
-          case _ReaderDisplay.halfSplit:
-            _setHalfSplit();
-          case _ReaderDisplay.halfIndicator:
-            _savePreferences(
-              _preferences.copyWith(
-                halfPageIndicator: !_preferences.halfPageIndicator,
-              ),
-            );
-          case _ReaderDisplay.landscapeWidth:
-            _savePreferences(
-              _preferences.copyWith(
-                landscapeWidth: !_preferences.landscapeWidth,
-              ),
-            );
-          case _ReaderDisplay.spreads:
-            final step = await showDialog<int>(
-              context: context,
-              builder: (context) => SimpleDialog(
-                title: const Text('Page layout'),
-                children: [
-                  for (final (step, label) in [
-                    (0, 'Single page'),
-                    (1, 'Two pages · advance one'),
-                    (2, 'Two pages · advance two'),
-                  ])
-                    SimpleDialogOption(
-                      onPressed: () => Navigator.pop(context, step),
-                      child: Text(label),
-                    ),
-                ],
-              ),
-            );
-            if (step != null && mounted) {
-              _savePreferences(
-                _preferences.copyWith(
-                  spreadStep: step,
-                  halfPageTurns: step == 0 && _preferences.halfPageTurns,
-                ),
-              );
-            }
-          case _ReaderDisplay.performance:
-            _togglePerformance();
-          case _ReaderDisplay.exportPdf:
-            _showPdfExport();
-          case _ReaderDisplay.crop:
-            _showCrop();
-          case _ReaderDisplay.drawingSettings:
-            _configureDrawing();
-          case _ReaderDisplay.shareScorePackage:
-            _shareEditableScore();
-          case _ReaderDisplay.shareScoreLink:
-            if (_entry case final score?) {
-              final bookmark = _itemBookmark;
-              await copyReaderLink(
-                context,
-                bookmark == null
-                    ? ReaderLinkTarget.score
-                    : ReaderLinkTarget.bookmark,
-                bookmark?.selectionId(score.id) ?? score.id,
-              );
-            }
-          case _ReaderDisplay.scoreTabs:
-            if (_entry case final score?) {
-              _updateScoreTabs([
-                ..._scoreTabIds.where((id) => id != score.id),
-                if (!_scoreTabIds.contains(score.id)) score.id,
-              ]);
-            }
-          case _ReaderDisplay.hideControls:
-            setState(() => _showControls = false);
-          case _ReaderDisplay.cleanStartup:
-            await _savePreferences(
-              _preferences.copyWith(
-                startWithControlsHidden: !_preferences.startWithControlsHidden,
-              ),
-            );
-          case _ReaderDisplay.gestures:
-            _configureGestures();
-          case _ReaderDisplay.keepAwake:
-            _savePreferences(
-              _preferences.copyWith(
-                left: _preferences.left,
-                center: _preferences.center,
-                right: _preferences.right,
-                keepAwake: !_preferences.keepAwake,
-                showNextTitle: _preferences.showNextTitle,
-              ),
-            );
-          case _ReaderDisplay.nextTitle:
-            _savePreferences(
-              _preferences.copyWith(
-                left: _preferences.left,
-                center: _preferences.center,
-                right: _preferences.right,
-                keepAwake: _preferences.keepAwake,
-                showNextTitle: !_preferences.showNextTitle,
-              ),
-            );
-        }
-      },
+      onSelected: select ?? _runReaderDisplayAction,
       itemBuilder: (_) =>
           <PopupMenuItem<_ReaderDisplay>>[
                 PopupMenuItem(
