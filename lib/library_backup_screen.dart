@@ -160,7 +160,10 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
                   ? () => _run('Create backup', _export)
                   : null,
               icon: const Icon(Icons.save_alt),
-              label: const Text('Create backup'),
+              label: const Text('Create full backup'),
+            ),
+            const Text(
+              'Includes score PDFs and library data. Restoring adds copies to your library.',
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -185,10 +188,7 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
               label: const Text('Create metadata-only backup'),
             ),
             const Text(
-              'Metadata-only restore updates matching scores without copying PDFs.',
-            ),
-            const Text(
-              'Restore adds copies to your library and preserves existing items.',
+              'Excludes score PDFs. Restoring updates metadata on matching scores.',
             ),
             if (widget.library.storage.persistent)
               TextButton.icon(
