@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/scheduler.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 
@@ -24,9 +25,13 @@ class ReflowScreen extends StatefulWidget {
   State<ReflowScreen> createState() => _ReflowScreenState();
 }
 
-class _ReflowScreenState extends State<ReflowScreen> {
+class _ReflowScreenState extends State<ReflowScreen>
+    with SingleTickerProviderStateMixin {
   final _scroll = ScrollController();
   late final _zones = [...widget.saved];
+  late final Ticker _playback = createTicker(_advance);
+  Duration _previousTick = Duration.zero;
+  double _speed = 80;
   double _zoom = 1;
   double _extent = 1;
   int _index = 0;
@@ -82,7 +87,42 @@ class _ReflowScreenState extends State<ReflowScreen> {
     if (index != _index) setState(() => _index = index);
   }
 
+  void _advance(Duration elapsed) {
+    final seconds =
+        (elapsed - _previousTick).inMicroseconds /
+        Duration.microsecondsPerSecond;
+    _previousTick = elapsed;
+    if (!_scroll.hasClients || ModalRoute.of(context)?.isCurrent != true) {
+      _pause();
+      return;
+    }
+    final end = _scroll.position.maxScrollExtent;
+    final next = (_scroll.offset + _speed * seconds.clamp(0.0, .05)).clamp(
+      0.0,
+      end,
+    );
+    _scroll.jumpTo(next);
+    if (next >= end) _pause();
+  }
+
+  void _pause() {
+    if (!_playback.isActive) return;
+    setState(_playback.stop);
+  }
+
+  void _togglePlayback() {
+    if (_playback.isActive) {
+      _pause();
+      return;
+    }
+    if (!_scroll.hasClients || _scroll.position.maxScrollExtent <= 0) return;
+    if (_scroll.offset >= _scroll.position.maxScrollExtent) _scroll.jumpTo(0);
+    _previousTick = Duration.zero;
+    setState(() => _playback.start());
+  }
+
   void _jump(int index, {bool animate = true}) {
+    _pause();
     if (!_scroll.hasClients || _zones.isEmpty) return;
     final position = (index.clamp(0, _zones.length - 1) * _extent).clamp(
       0.0,
@@ -100,6 +140,7 @@ class _ReflowScreenState extends State<ReflowScreen> {
   }
 
   void _relayout(VoidCallback update) {
+    _pause();
     final index = _index;
     setState(update);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -108,6 +149,7 @@ class _ReflowScreenState extends State<ReflowScreen> {
   }
 
   Future<void> _edit() async {
+    _pause();
     final index = _index;
     final zone = _zones[index];
     var values = RangeValues(zone.top, zone.bottom);
@@ -185,6 +227,7 @@ class _ReflowScreenState extends State<ReflowScreen> {
 
   @override
   void dispose() {
+    _playback.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -252,39 +295,75 @@ class _ReflowScreenState extends State<ReflowScreen> {
                 ),
               ],
             ),
+            if (!_paged)
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _zones.length > 1 || _zoom > 1
+                        ? _togglePlayback
+                        : null,
+                    icon: Icon(
+                      _playback.isActive ? Icons.pause : Icons.play_arrow,
+                    ),
+                    label: Text(_playback.isActive ? 'Pause' : 'Play'),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: _speed,
+                      min: 20,
+                      max: 240,
+                      divisions: 22,
+                      label: '${_speed.round()} px/s',
+                      semanticFormatterCallback: (value) =>
+                          '${value.round()} pixels per second',
+                      onChanged: (value) => setState(() => _speed = value),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(right: 12),
+                    child: Text('Speed'),
+                  ),
+                ],
+              ),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, viewport) {
                   _extent = viewport.maxWidth * (_paged ? 1 : _zoom);
                   final renderWidth = viewport.maxWidth * _zoom;
-                  return ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    controller: _scroll,
-                    physics: _paged
-                        ? const NeverScrollableScrollPhysics()
-                        : null,
-                    itemExtent: _extent,
-                    itemCount: _zones.length,
-                    itemBuilder: (context, index) {
-                      final zone = _zones[index];
-                      return Center(
-                        child: ClipRect(
-                          child: SizedBox(
-                            width: _extent,
-                            child: OverflowBox(
-                              minWidth: renderWidth,
-                              maxWidth: renderWidth,
-                              child: PdfRegionImage(
-                                page: widget.document.pages[zone.page - 1],
-                                zone: zone,
-                                width: renderWidth,
-                                annotations: widget.annotations,
+                  return NotificationListener<ScrollStartNotification>(
+                    onNotification: (notification) {
+                      if (notification.dragDetails != null) _pause();
+                      return false;
+                    },
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      controller: _scroll,
+                      physics: _paged
+                          ? const NeverScrollableScrollPhysics()
+                          : null,
+                      itemExtent: _extent,
+                      itemCount: _zones.length,
+                      itemBuilder: (context, index) {
+                        final zone = _zones[index];
+                        return Center(
+                          child: ClipRect(
+                            child: SizedBox(
+                              width: _extent,
+                              child: OverflowBox(
+                                minWidth: renderWidth,
+                                maxWidth: renderWidth,
+                                child: PdfRegionImage(
+                                  page: widget.document.pages[zone.page - 1],
+                                  zone: zone,
+                                  width: renderWidth,
+                                  annotations: widget.annotations,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   );
                 },
               ),
