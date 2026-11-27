@@ -239,6 +239,7 @@ class _ReaderState extends State<Reader> {
   int _pages = 0;
   double? _seek;
   bool _showControls = true;
+  bool _markupPaletteAtTop = false;
   Map<String, dynamic> _libraryBrowseState = {};
   bool _inking = false;
   int? _annotationPage;
@@ -477,6 +478,7 @@ class _ReaderState extends State<Reader> {
         if (!mounted) return;
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
+          _markupPaletteAtTop = data['markupPaletteAtTop'] == true;
           _libraryBrowseState =
               (data['libraryBrowseState'] is Map<String, dynamic>)
               ? data['libraryBrowseState'] as Map<String, dynamic>
@@ -6262,7 +6264,25 @@ class _ReaderState extends State<Reader> {
     if (mounted && destination != null) _go(destination);
   }
 
-  Widget _markupPalette() => Material(
+  void _moveMarkupPalette() {
+    setState(() => _markupPaletteAtTop = !_markupPaletteAtTop);
+    unawaited(
+      _library
+          .updatePreferences({'markupPaletteAtTop': _markupPaletteAtTop})
+          .catchError((Object _) {}),
+    );
+  }
+
+  void _selectMarkupPreset(int index) {
+    setState(() {
+      _tool = InkTool.pen;
+      _stamp = null;
+      _shape = null;
+    });
+    unawaited(_saveDrawing(_drawing.copyWith(selected: index)));
+  }
+
+  Widget _markupPalette({required bool wide, bool canMove = false}) => Material(
     color: _rail,
     elevation: 3,
     borderRadius: BorderRadius.circular(12),
@@ -6292,7 +6312,48 @@ class _ReaderState extends State<Reader> {
           ),
         ),
         TextButton(onPressed: _toggleInk, child: const Text('Done')),
+        if (canMove)
+          IconButton(
+            tooltip: _markupPaletteAtTop
+                ? 'Move markup tools to bottom'
+                : 'Move markup tools to top',
+            onPressed: _moveMarkupPalette,
+            icon: Icon(
+              _markupPaletteAtTop
+                  ? Icons.vertical_align_bottom
+                  : Icons.vertical_align_top,
+            ),
+          ),
         _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
+        if (wide)
+          for (final (index, preset) in _drawing.presets.take(3).indexed)
+            IconButton(
+              tooltip: 'Pen preset: ${preset.name}',
+              isSelected:
+                  _tool == InkTool.pen &&
+                  _stamp == null &&
+                  _shape == null &&
+                  _drawing.selected == index,
+              style:
+                  _tool == InkTool.pen &&
+                      _stamp == null &&
+                      _shape == null &&
+                      _drawing.selected == index
+                  ? IconButton.styleFrom(
+                      backgroundColor: _brass.withValues(alpha: .18),
+                    )
+                  : null,
+              onPressed: () => _selectMarkupPreset(index),
+              icon: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(preset.argb),
+                  border: Border.all(color: _paper, width: 1),
+                ),
+              ),
+            ),
         if (_tool == InkTool.pen)
           PopupMenuButton<int>(
             tooltip: 'Pen style',
@@ -6449,18 +6510,22 @@ class _ReaderState extends State<Reader> {
                 maxWidth: math.min(220, gutter - 16),
                 maxHeight: math.max(0, viewport.height - 16),
               ),
-              child: SingleChildScrollView(child: _markupPalette()),
+              child: SingleChildScrollView(child: _markupPalette(wide: true)),
             ),
           ),
         );
       }
       return Align(
-        alignment: Alignment.bottomCenter,
+        alignment: _markupPaletteAtTop
+            ? Alignment.topCenter
+            : Alignment.bottomCenter,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: viewport.height * .45),
-            child: SingleChildScrollView(child: _markupPalette()),
+            child: SingleChildScrollView(
+              child: _markupPalette(wide: viewport.width >= 720, canMove: true),
+            ),
           ),
         ),
       );
