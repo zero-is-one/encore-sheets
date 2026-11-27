@@ -298,6 +298,7 @@ class _ReaderState extends State<Reader> {
   Color get _brass => _appearance.palette.accent;
   bool _faceReverse = false;
   double _faceSensitivity = 23;
+  FaceGestureMode _faceGestureMode = FaceGestureMode.headTurn;
   ReaderRestrictions? _restrictions;
   String? _language;
   late final Future<void> _startupPreferences;
@@ -457,13 +458,16 @@ class _ReaderState extends State<Reader> {
     );
     if (_supportsSharedImport) {
       _faceChannel.setMethodCallHandler((call) async {
-        if (call.method != 'yaw' || _faceTurns == null || !mounted) return;
-        if (_picking || _inking || _restricted(RestrictedTool.connections)) {
-          _faceTurns!.update(null);
+        final detector = _faceTurns;
+        if (call.method != 'sample' || detector == null || !mounted) return;
+        if (_picking ||
+            _inking ||
+            _restricted(RestrictedTool.connections) ||
+            ModalRoute.isCurrentOf(context) == false) {
+          detector.update(null);
           return;
         }
-        final angle = call.arguments;
-        final step = _faceTurns!.update(angle is num ? angle.toDouble() : null);
+        final step = detector.update(detector.mode.readSample(call.arguments));
         if (step != 0) _turn(_faceReverse ? -step : step);
       });
       _sharedImports.setMethodCallHandler((call) async {
@@ -901,27 +905,51 @@ class _ReaderState extends State<Reader> {
     }
     var sense = _faceSensitivity;
     var reverse = _faceReverse;
+    var mode = _faceGestureMode;
     final enabled = await showDialog<bool>(
       context: context,
       builder: (dialog) => StatefulBuilder(
         builder: (context, refresh) => AlertDialog(
-          title: const Text('Turn pages with head gestures'),
+          title: const Text('Face gestures'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Face the front camera for a moment, then turn your head left or right. Camera images stay on this device.',
+              DropdownButtonFormField<FaceGestureMode>(
+                initialValue: mode,
+                decoration: const InputDecoration(labelText: 'Gesture'),
+                items: [
+                  for (final gesture in FaceGestureMode.values)
+                    DropdownMenuItem(
+                      value: gesture,
+                      child: Text(gesture.label),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) refresh(() => mode = value);
+                },
               ),
+              const SizedBox(height: 12),
+              Text(mode.instructions),
+              const Text('Camera images stay on this device.'),
+              const SizedBox(height: 12),
+              const Text('Gesture threshold'),
               Slider(
                 value: sense,
                 min: 15,
                 max: 35,
                 divisions: 20,
-                label: '${sense.round()}°',
+                label: mode == FaceGestureMode.headTurn
+                    ? '${sense.round()}°'
+                    : '${((sense - 15) * 5).round()}%',
                 onChanged: (value) => refresh(() => sense = value),
               ),
               SwitchListTile(
-                title: const Text('Reverse directions'),
+                title: Text(
+                  mode == FaceGestureMode.mouth
+                      ? 'Turn to the previous page'
+                      : 'Reverse directions',
+                ),
                 value: reverse,
                 onChanged: (value) => refresh(() => reverse = value),
               ),
@@ -941,14 +969,20 @@ class _ReaderState extends State<Reader> {
       ),
     );
     if (!mounted || enabled != true) return;
-    final detector = FacePageTurn(threshold: sense);
+    final threshold = switch (mode) {
+      FaceGestureMode.headTurn => sense,
+      FaceGestureMode.wink => .40 + (sense - 15) * .015,
+      FaceGestureMode.mouth => .07 + (sense - 15) * .005,
+    };
+    final detector = FacePageTurn(threshold: threshold, mode: mode);
     setState(() {
       _faceSensitivity = sense;
+      _faceGestureMode = mode;
       _faceReverse = reverse;
       _faceTurns = detector;
     });
     try {
-      await _faceChannel.invokeMethod<void>('start');
+      await _faceChannel.invokeMethod<void>('start', mode.name);
     } catch (_) {
       if (!mounted || _faceTurns != detector) return;
       _stopFaceTurns();
@@ -6420,6 +6454,16 @@ class _ReaderState extends State<Reader> {
                   _ReaderDisplay.autoScroll,
                   enabled: _canAutoScroll,
                 ),
+                if (_supportsSharedImport &&
+                    !_restricted(RestrictedTool.connections))
+                  option(
+                    'Face gestures',
+                    _faceTurns == null
+                        ? 'Off'
+                        : '${_faceGestureMode.label} · On',
+                    Icons.face_outlined,
+                    _ReaderDisplay.faceTurns,
+                  ),
                 option(
                   'Performance mode',
                   _performance ? 'On' : 'Off',
@@ -6579,8 +6623,8 @@ class _ReaderState extends State<Reader> {
                     value: _ReaderDisplay.faceTurns,
                     child: Text(
                       _faceTurns == null
-                          ? 'Head gesture page turns'
-                          : 'Stop head gesture page turns',
+                          ? 'Face gestures'
+                          : 'Stop face gestures',
                     ),
                   ),
                 const PopupMenuItem(

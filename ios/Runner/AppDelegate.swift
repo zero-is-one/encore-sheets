@@ -11,11 +11,11 @@ import Vision
 private final class HeadGestureCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   private let session = AVCaptureSession()
   private let captureQueue = DispatchQueue(label: "app.encoresheets.face")
-  private let sample: (Double?) -> Void
+  private let sample: ([String: Double]?) -> Void
   private var lastFrame = 0.0
   private var configured = false
 
-  init(sample: @escaping (Double?) -> Void) { self.sample = sample }
+  init(sample: @escaping ([String: Double]?) -> Void) { self.sample = sample }
 
   func start(orientation: AVCaptureVideoOrientation, completion: @escaping (Bool) -> Void) {
     captureQueue.async {
@@ -56,11 +56,40 @@ private final class HeadGestureCapture: NSObject, AVCaptureVideoDataOutputSample
     let now = ProcessInfo.processInfo.systemUptime
     guard now - lastFrame >= 0.085 else { return }
     lastFrame = now
-    let request = VNDetectFaceRectanglesRequest()
+    let request = VNDetectFaceLandmarksRequest()
     try? VNImageRequestHandler(cmSampleBuffer: buffer).perform([request])
     let faces = request.results ?? []
-    let yaw = faces.count == 1 ? faces.first?.yaw?.doubleValue : nil
-    DispatchQueue.main.async { self.sample(yaw.map { -$0 * 180 / .pi }) }
+    let measurements: [String: Double]?
+    if faces.count == 1, let face = faces.first, let image = CMSampleBufferGetImageBuffer(buffer) {
+      let aspect = Double(CVPixelBufferGetHeight(image)) / Double(CVPixelBufferGetWidth(image))
+      measurements = measure(face, imageAspect: aspect)
+    } else {
+      measurements = nil
+    }
+    DispatchQueue.main.async { self.sample(measurements) }
+  }
+
+  private func measure(_ face: VNFaceObservation, imageAspect: Double) -> [String: Double]? {
+    guard let yaw = face.yaw?.doubleValue, face.boundingBox.width > 0 else { return nil }
+    var measurements = ["yaw": -yaw * 180 / .pi]
+    let landmarks = face.landmarks
+    let scale = Double(face.boundingBox.height / face.boundingBox.width) * imageAspect
+    if let left = openness(landmarks?.leftEye), let right = openness(landmarks?.rightEye),
+       max(left, right) * scale >= 0.12 {
+      measurements["wink"] = (left - right) / max(left, right)
+    }
+    if let mouth = openness(landmarks?.innerLips) {
+      measurements["mouth"] = mouth * scale
+    }
+    return measurements
+  }
+
+  private func openness(_ region: VNFaceLandmarkRegion2D?) -> Double? {
+    guard let points = region?.normalizedPoints, points.count >= 3,
+          let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+          let minY = points.map(\.y).min(), let maxY = points.map(\.y).max(),
+          maxX > minX else { return nil }
+    return Double((maxY - minY) / (maxX - minX))
   }
 }
 
@@ -172,11 +201,11 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
           DispatchQueue.main.async {
             guard generation == self.faceGeneration else { result(nil); return }
             guard granted else {
-              result(FlutterError(code: "camera_permission", message: "Allow camera access to use head gestures.", details: nil))
+              result(FlutterError(code: "camera_permission", message: "Allow camera access to use face gestures.", details: nil))
               return
             }
             let capture = self.headGestureCapture ?? HeadGestureCapture {
-              faceChannel.invokeMethod("yaw", arguments: $0)
+              faceChannel.invokeMethod("sample", arguments: $0)
             }
             self.headGestureCapture = capture
             let interface = self.frontController?.view.window?.windowScene?.interfaceOrientation

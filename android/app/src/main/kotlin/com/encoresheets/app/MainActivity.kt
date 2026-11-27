@@ -21,7 +21,7 @@ class ScoreActionFileProvider : FileProvider()
 
 class MainActivity : FlutterActivity() {
     private var faceCamera: HeadGestureCamera? = null
-    private var facePermission: MethodChannel.Result? = null
+    private var facePermission: Pair<String, MethodChannel.Result>? = null
 
     private fun openScoreActionFile(id: String, name: String): Boolean {
         if (!id.matches(Regex("[a-f0-9]{32}")) || name.isEmpty() ||
@@ -40,9 +40,9 @@ class MainActivity : FlutterActivity() {
         return true
     }
 
-    private fun startFaceCamera(result: MethodChannel.Result) {
+    private fun startFaceCamera(mode: String, result: MethodChannel.Result) {
         try {
-            faceCamera?.start()
+            faceCamera?.start(mode)
             result.success(null)
         } catch (error: Exception) {
             result.error("front_camera", error.message, null)
@@ -52,11 +52,11 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode != 8043) return
-        val pending = facePermission ?: return
+        val (mode, pending) = facePermission ?: return
         facePermission = null
         if (results.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
-            startFaceCamera(pending)
-        else pending.error("camera_permission", "Allow camera access to use head gestures.", null)
+            startFaceCamera(mode, pending)
+        else pending.error("camera_permission", "Allow camera access to use face gestures.", null)
     }
 
     override fun onStop() {
@@ -276,19 +276,20 @@ class MainActivity : FlutterActivity() {
                 }
             }
         val faceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "encoresheets/face")
-        faceCamera = HeadGestureCamera(this) { faceChannel.invokeMethod("yaw", it) }
+        faceCamera = HeadGestureCamera(this) { faceChannel.invokeMethod("sample", it) }
         faceChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "start" -> {
+                    val mode = call.arguments as? String ?: "headTurn"
                     if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        startFaceCamera(result)
+                        startFaceCamera(mode, result)
                     } else if (facePermission == null) {
-                        facePermission = result
+                        facePermission = mode to result
                         requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 8043)
                     } else result.error("camera_pending", "Camera permission is pending.", null)
                 }
                 "stop" -> {
-                    facePermission?.success(null)
+                    facePermission?.second?.success(null)
                     facePermission = null
                     faceCamera?.stop()
                     result.success(null)
