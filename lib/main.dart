@@ -270,6 +270,7 @@ class _ReaderState extends State<Reader> {
   String? _activeInkLayer = defaultInkLayer.id;
   String? _stamp;
   List<String> _personalStamps = [];
+  List<String> _favoriteStamps = [];
   DrawingSettings _drawing = const DrawingSettings();
   bool _stylusDrawing = false;
   bool _lastReaderPointerStylus = false;
@@ -493,6 +494,16 @@ class _ReaderState extends State<Reader> {
         setState(() {
           _preferences = ReaderPreferences.fromJson(data);
           _markupPaletteAtTop = data['markupPaletteAtTop'] == true;
+          _favoriteStamps = switch (data['favoriteStamps']) {
+            final List values =>
+              values
+                  .whereType<String>()
+                  .where((stamp) => stamp.isNotEmpty && stamp.length <= 80)
+                  .toSet()
+                  .take(4)
+                  .toList(),
+            _ => [],
+          };
           _favoriteShape = InkShape.values
               .where((shape) => shape.name == data['favoriteInkShape'])
               .firstOrNull;
@@ -6985,11 +6996,28 @@ class _ReaderState extends State<Reader> {
         _toolButton(InkTool.highlighter, Icons.highlight, 'Highlighter'),
         _toolButton(InkTool.eraser, Icons.backspace_outlined, 'Erase strokes'),
         _toolButton(InkTool.text, Icons.text_fields, 'Text annotation'),
+        for (final stamp in _favoriteStamps)
+          InputChip(
+            label: Text(stamp),
+            selected: _stamp == stamp,
+            onPressed: () => _selectStamp(stamp),
+            deleteButtonTooltipMessage: 'Remove favorite stamp',
+            onDeleted: () => _saveFavoriteStamps(
+              _favoriteStamps.where((item) => item != stamp).toList(),
+            ),
+          ),
         PopupMenuButton<String>(
           tooltip: 'Notation stamps',
           icon: Icon(Icons.music_note, color: _stamp == null ? null : _brass),
           onSelected: _selectStamp,
           itemBuilder: (_) => [
+            if (_stamp case final stamp?
+                when !_favoriteStamps.contains(stamp) &&
+                    _favoriteStamps.length < 4)
+              PopupMenuItem(
+                onTap: () => _saveFavoriteStamps([..._favoriteStamps, stamp]),
+                child: Text('Favorite $stamp'),
+              ),
             const PopupMenuItem(
               value: '',
               child: Text('Create personal stamp'),
@@ -7112,6 +7140,19 @@ class _ReaderState extends State<Reader> {
     _stamp = null;
     _tool = InkTool.pen;
   });
+
+  Future<void> _saveFavoriteStamps(List<String> stamps) async {
+    try {
+      await _library.updatePreferences({'favoriteStamps': stamps});
+      if (mounted) setState(() => _favoriteStamps = stamps);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save favorite stamps.')),
+        );
+      }
+    }
+  }
 
   Future<void> _setFavoriteShape(InkShape? shape) async {
     try {
