@@ -46,6 +46,12 @@ void main() {
         final display = tester.getRect(find.byTooltip('Display'));
         final title = tester.getRect(find.text('First Light'));
         final scoreActions = tester.getRect(find.byTooltip('Score actions'));
+        expect(positions[3].dx, lessThan(display.left));
+        expect(
+          tester.getCenter(find.byTooltip('Quick access')).dx,
+          greaterThan(scoreActions.right),
+        );
+        expect(title.center.dx, closeTo(size.width / 2, 1));
         expect(title.left, closeTo(display.right, 1));
         expect(title.right, closeTo(scoreActions.left, 1));
       }

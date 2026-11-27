@@ -5911,13 +5911,13 @@ class _ReaderState extends State<Reader> {
             onPressed: _picking ? null : () => _showLibrary(setlists: true),
             icon: const Icon(Icons.queue_music),
           ),
-        ];
-        final utilities = [
           IconButton(
             tooltip: ReaderText.search.of(context),
             onPressed: _picking ? null : () => _showLibrary(focusSearch: true),
             icon: const Icon(Icons.search),
           ),
+        ];
+        final utilities = [
           _audioToolsMenu(),
           _readerToolsMenu(),
         ];
@@ -5979,8 +5979,8 @@ class _ReaderState extends State<Reader> {
                   ),
                 ),
               ),
-              ...editing,
               const SizedBox(width: 12),
+              ...editing,
               ...utilities,
             ],
           ),
