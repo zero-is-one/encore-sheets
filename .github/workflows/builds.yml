@@ -76,7 +76,7 @@ jobs:
           unset KEYSTORE_BASE64
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "ndk;28.2.13676358" "build-tools;36.0.0"
           flutter pub get --enforce-lockfile
-          flutter build apk --release --target-platform android-arm64 --no-pub
+          flutter build apk --release --target-platform android-arm64 --android-project-arg=disable-abi-filtering=true --no-pub
           cp build/app/outputs/flutter-apk/app-release.apk EncoreSheets-android-arm64.apk
           tools="$ANDROID_HOME/build-tools/36.0.0"
           "$tools/apksigner" verify --print-certs EncoreSheets-android-arm64.apk |
