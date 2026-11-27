@@ -39,7 +39,10 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
+      - name: Set up Android SDK tools
+        if: matrix.target == 'android'
+        uses: android-actions/setup-android@v3
       - name: Build Android APK
         if: matrix.target == 'android'
         run: |
