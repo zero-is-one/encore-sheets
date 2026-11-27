@@ -1,10 +1,36 @@
-# EncoreSheets
+<p align="center">
+  <img src="assets/brand/app-icon-classic.png" width="96" height="96" alt="EncoreSheets" />
+</p>
 
-An offline sheet music reader for Android and iPad, built with Flutter. Import
-PDF scores, mark them up, and organize them into setlists for rehearsal and
-performance.
+<h1 align="center">EncoreSheets</h1>
 
-[Build from source](#build-from-source) · [File formats](#file-formats) · [Report an issue](https://github.com/zero-is-one/encoresheets/issues)
+<p align="center">
+  <strong>An offline sheet music reader for Android and iPad.</strong><br />
+  Import PDF scores, mark them up, and organize them into setlists for rehearsal and performance.
+</p>
+
+<p align="center">
+  <a href="#test-builds">Test builds</a> ·
+  <a href="#what-works">Features</a> ·
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="#file-formats">File formats</a> ·
+  <a href="https://github.com/zero-is-one/encoresheets/issues">Report an issue</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zero-is-one/encoresheets/actions/workflows/checks.yml?query=branch%3Amain"><img src="https://github.com/zero-is-one/encoresheets/actions/workflows/checks.yml/badge.svg?branch=main" alt="Flutter checks" /></a>
+</p>
+
+## Test builds
+
+Open a successful [Build test packages](https://github.com/zero-is-one/encoresheets/actions/workflows/builds.yml)
+run and look under **Artifacts**. Sign in to GitHub to download a package while
+its artifact is available.
+
+- **Android** — The workflow can build a debug APK for testing.
+- **iPad** — The unsigned device IPA requires signing before installation.
+- **macOS and Windows** — The workflow produces preview ZIPs for testing the
+  macOS app and the Windows x64 executable with its supporting files.
 
 ## What works
 
@@ -43,23 +69,6 @@ performance.
   to sync scores, metadata, and setlists while keeping personal annotations on
   each device.
 
-## Shared library setup
-
-1. Create a dedicated HTTPS WebDAV folder and give each device read and write
-   access. The server must support WebDAV folder listing and file writes.
-2. On each device, open **Score library → Tools → Device sync**. Enter the
-   same folder URL and your WebDAV credentials, then tap **Connect WebDAV**.
-   Each connected device can publish its local scores and setlists to the folder.
-3. Tap **Refresh now** to send and receive changes. EncoreSheets also checks
-   periodically while the app is open and when you return to it. Reconnect
-   after restarting the app.
-
-Sync merges edits to different catalog fields, including individual metadata
-fields. Same-field conflicts use the latest published revision. If two devices
-publish the same revision concurrently, both pick the same winner by device ID.
-Ink, page notes, reading position, and reader settings stay local. WebDAV sync
-supports PDFs up to 50 MB and skips scores with an access deadline.
-
 ## Build from source
 
 Requires Flutter 3.50 or later. Android development requires the Android SDK.
@@ -94,6 +103,23 @@ flutter test
 The library also imports scanned pages and creates PDFs from templates or
 from TXT, RTF, DOC, and DOCX documents.
 
+## Shared library setup
+
+1. Create a dedicated HTTPS WebDAV folder and give each device read and write
+   access. The server must support WebDAV folder listing and file writes.
+2. On each device, open **Score library → Tools → Device sync**. Enter the
+   same folder URL and your WebDAV credentials, then tap **Connect WebDAV**.
+   Each connected device can publish its local scores and setlists to the folder.
+3. Tap **Refresh now** to send and receive changes. EncoreSheets also checks
+   periodically while the app is open and when you return to it. Reconnect
+   after restarting the app.
+
+Sync merges edits to different catalog fields, including individual metadata
+fields. Same-field conflicts use the latest published revision. If two devices
+publish the same revision concurrently, both pick the same winner by device ID.
+Ink, page notes, reading position, and reader settings stay local. WebDAV sync
+supports PDFs up to 50 MB and skips scores with an access deadline.
+
 ## Backup and recovery
 
 Use **Score library → Tools → Backup & restore** to export a full library ZIP
@@ -119,7 +145,7 @@ python tools/library_backups.py verify "EncoreSheets backup.zip"
 python tools/library_backups.py copy "EncoreSheets backup.zip" "Backups"
 ```
 
-## Assistant connections
+## AI assistants (MCP)
 
 EncoreSheets can connect to a self-hosted MCP server from the installed app.
 It uploads score titles, composers, durations, and setlist membership while
