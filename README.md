@@ -15,6 +15,7 @@
   <a href="#build-from-source">Build from source</a> ·
   <a href="#file-formats">File formats</a> ·
   <a href="#license">License</a> ·
+  <a href="DISCLAIMER.md">Disclaimer</a> ·
   <a href="https://github.com/zero-is-one/encoresheets/issues">Report an issue</a>
 </p>
 
@@ -185,11 +186,11 @@ OAuth endpoints before exposing a deployment.
 
 ## License
 
-EncoreSheets does not currently have a project-wide software license. Bundled
-third-party components and assets are subject to their own terms.
+EncoreSheets is available under the [MIT License](LICENSE-MIT) or the
+[Apache License 2.0](LICENSE-APACHE), at your option. Third-party components
+and assets retain their own licenses and attribution.
 
 ## Disclaimer
 
-EncoreSheets is in development. GitHub Actions artifacts are test builds.
-Keep copies of your original scores and export a library backup before relying
-on a test build for rehearsal or performance.
+GitHub Actions artifacts are test builds. See the [disclaimer](DISCLAIMER.md)
+for warranty terms and guidance on using test builds and sharing scores.
