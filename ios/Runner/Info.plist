@@ -51,7 +51,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan sheet music or use head gestures to turn pages.</string>
+	<string>Scan sheet music and Wi-Fi pairing codes, or use head gestures to turn pages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose sheet music images to turn into a PDF.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -61,7 +61,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connect to Bluetooth MIDI pedals and controllers.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Share score and page changes with musicians on your local network.</string>
+	<string>Sync your library with another device on Wi-Fi or share page turns with musicians on your local network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

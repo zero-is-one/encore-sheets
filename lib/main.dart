@@ -1682,6 +1682,11 @@ class _ReaderState extends State<Reader> {
               _lastSync = null;
             },
             refresh: _syncLibrary,
+            syncOverWifi: _supportsSharedImport
+                ? (endpoint) async {
+                    await _runLibrarySync(endpoint);
+                  }
+                : null,
             reset: _library.resetSyncState,
             lastSuccess: _lastSync,
           ),
@@ -1814,10 +1819,10 @@ class _ReaderState extends State<Reader> {
   Future<DateTime> _syncLibrary() => _syncRunning ??= _runLibrarySync()
       .whenComplete(() => _syncRunning = null);
 
-  Future<DateTime> _runLibrarySync() async {
+  Future<DateTime> _runLibrarySync([LibrarySyncEndpoint? endpoint]) async {
     await _libraryReady;
     final updated = await _library.synchronize(
-      _webDavSync ?? _syncEndpoint,
+      endpoint ?? _webDavSync ?? _syncEndpoint,
       mayApply: () => mounted && !_inking && !_stylusDrawing && !_performance,
     );
     if (_entry case final current?
@@ -1850,7 +1855,9 @@ class _ReaderState extends State<Reader> {
         }
       }
     }
-    return _lastSync = DateTime.now();
+    final completed = DateTime.now();
+    if (endpoint == null) _lastSync = completed;
+    return completed;
   }
 
   Future<void> _updateScoreTabs(List<String> ids) async {

@@ -30,6 +30,9 @@ dependencies:
   xml: ^7.1.0
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+  cryptography: ^2.9.0
+  qr: 3.0.3
+  mobile_scanner: ^7.5.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

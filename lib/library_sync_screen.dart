@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'library_sync.dart';
 import 'webdav_library_sync.dart';
+import 'wifi_library_sync_screen.dart';
+import 'wifi_library_sync.dart';
 
 class LibrarySyncScreen extends StatefulWidget {
   const LibrarySyncScreen({
@@ -11,6 +13,7 @@ class LibrarySyncScreen extends StatefulWidget {
     required this.setWebDav,
     required this.refresh,
     required this.reset,
+    this.syncOverWifi,
     this.lastSuccess,
   });
 
@@ -19,6 +22,7 @@ class LibrarySyncScreen extends StatefulWidget {
   final Future<void> Function(WebDavLibrarySync?) setWebDav;
   final Future<DateTime> Function() refresh;
   final Future<void> Function() reset;
+  final WifiSyncApply? syncOverWifi;
   final DateTime? lastSuccess;
 
   @override
@@ -101,6 +105,23 @@ class _LibrarySyncScreenState extends State<LibrarySyncScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (widget.syncOverWifi case final sync?) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.wifi),
+                title: const Text('Pair over Wi-Fi'),
+                subtitle: const Text('Sync two devices on the same network.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _busy
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => WifiLibrarySyncScreen(apply: sync),
+                        ),
+                      ),
+              ),
+              const Divider(),
+            ],
             const Text('Shared library'),
             const Text(
               'Connect each device to the same WebDAV folder to share scores, metadata, and setlists. Ink, page notes, and reader settings stay on each device.',

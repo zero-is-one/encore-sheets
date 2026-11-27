@@ -117,6 +117,22 @@ from TXT, RTF, DOC, and DOCX documents.
 
 ## Shared library setup
 
+### Pair over Wi-Fi
+
+1. Connect both devices to the same Wi-Fi network. On each device, open
+   **Score library → Tools → Device sync → Pair over Wi-Fi**.
+2. Tap **Show pairing code** on one device. On the other device, tap
+   **Join another device**, then scan the QR code or paste the pairing code.
+3. Tap **Review sync** and confirm. Keep both screens open until both libraries
+   are up to date. Use the same device to show the code for later syncs so
+   EncoreSheets can reuse its sync history.
+
+Wi-Fi pairing transfers scores, metadata, and setlists over an encrypted local
+connection. Ink, page notes, reading positions, and reader settings stay on each
+device. Previously synced deletions also apply.
+
+### Shared WebDAV folder
+
 1. Create a dedicated HTTPS WebDAV folder and give each device read and write
    access. The server must support WebDAV folder listing and file writes.
 2. On each device, open **Score library → Tools → Device sync**. Enter the
