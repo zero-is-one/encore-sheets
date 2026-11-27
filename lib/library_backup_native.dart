@@ -488,6 +488,10 @@ void _exportBackup(
               if (entry.value is int) target: entry.value,
         };
       }
+      if (portable['activeScoreTab'] case final String selected) {
+        preferences['activeScoreTab'] =
+            mapped[selected] ?? existingPreferences['activeScoreTab'];
+      }
       if (portable['setlistPlayHistory'] case final Map saved) {
         final history = <String, dynamic>{
           ...?existingPreferences['setlistPlayHistory']

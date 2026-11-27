@@ -13,7 +13,7 @@ import 'package:flutter/widgets.dart'
     show GridView, SizedBox, SliverGridDelegateWithFixedCrossAxisCount;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart'
-    show CheckedPopupMenuItem, Icons, IconTheme, Slider;
+    show CheckedPopupMenuItem, Icons, IconTheme, InputChip, Slider;
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
@@ -255,7 +255,7 @@ void main() {
           find.text('Transition second').evaluate().isNotEmpty,
     );
     expect(stop, findsOneWidget);
-    final lastScore = viewer().controller!;
+    var lastScore = viewer().controller!;
     await lastScore.goToPosition(
       documentOffset: Offset(
         lastScore.visibleRect.left,
@@ -263,6 +263,29 @@ void main() {
       ),
     );
     await waitUntil(() => stop.evaluate().isEmpty);
+
+    await lastScore.goToPosition(documentOffset: Offset.zero);
+    await waitUntil(() => lastScore.visibleRect.top <= 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await waitUntil(
+      () =>
+          viewer().controller != lastScore &&
+          viewer().controller!.isReady &&
+          find.text('Transition first').evaluate().isNotEmpty &&
+          find.text('3 / 3').evaluate().isNotEmpty,
+    );
+    final reopenedFirst = viewer().controller!;
+    await reopenedFirst.goToPosition(
+      documentOffset: Offset(0, reopenedFirst.layout.documentSize.height),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await waitUntil(
+      () =>
+          viewer().controller != reopenedFirst &&
+          viewer().controller!.isReady &&
+          find.text('Transition second').evaluate().isNotEmpty,
+    );
+    lastScore = viewer().controller!;
 
     await lastScore.goToPosition(
       documentOffset: Offset(
@@ -290,6 +313,43 @@ void main() {
     await tester.tap(find.text('Assignment test'));
     await waitUntil(
       () => find.text('Score added to setlist.').evaluate().isNotEmpty,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() async {
+      final library = ScoreLibrary(NativeLibraryStorage(directory: root));
+      await library.load();
+      final setlist = library.setlists.firstWhere(
+        (list) => list.id == 'auto-scroll',
+      );
+      await library.updatePreferences({
+        'scoreTabs': setlist.scores,
+        'scoreTabPages': {setlist.scores.last: 2},
+        'activeScoreTab': setlist.scores.last,
+      });
+    });
+    await tester.pumpWidget(const EncoreSheets());
+    InputChip tab(String title) =>
+        tester.widget<InputChip>(find.widgetWithText(InputChip, title));
+    await waitUntil(
+      () =>
+          viewer().controller!.isReady &&
+          find
+              .widgetWithText(InputChip, 'Transition second')
+              .evaluate()
+              .isNotEmpty &&
+          tab('Transition second').selected &&
+          find.text('2 / 3').evaluate().isNotEmpty,
+    );
+    tab('Transition second').onDeleted!();
+    await waitUntil(
+      () =>
+          viewer().controller!.isReady &&
+          tab('Transition first').selected &&
+          find
+              .widgetWithText(InputChip, 'Transition second')
+              .evaluate()
+              .isEmpty,
     );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

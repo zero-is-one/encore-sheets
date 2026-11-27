@@ -360,6 +360,7 @@ class _ReaderState extends State<Reader> {
 
   bool get _hasNextScore =>
       _playing != null && _setIndex + 1 < _playing!.scores.length;
+  bool get _hasPreviousScore => _playing != null && _setIndex > 0;
 
   int get _firstPage =>
       (_itemBookmark?.page ?? 1).clamp(1, _pages > 0 ? _pages : 1);
@@ -581,6 +582,13 @@ class _ReaderState extends State<Reader> {
         _focusPractice();
         _requestWidgetRefresh();
         if (_preferences.keepAwake) _keepScreenAwake(true);
+        if (data['activeScoreTab'] case final String id
+            when startup &&
+                _scoreTabIds.contains(id) &&
+                _entry == null &&
+                !_picking) {
+          await _switchScoreTab(id);
+        }
       }
     } catch (_) {
       // Use the default controls if preferences are unavailable.
@@ -1927,8 +1935,16 @@ class _ReaderState extends State<Reader> {
       await _library.updatePreferences({
         'scoreTabs': ids,
         'scoreTabPages': pages,
+        'activeScoreTab': ids.contains(_activeScoreTabId)
+            ? _activeScoreTabId
+            : null,
       });
-      if (mounted) setState(() => _scoreTabIds = ids);
+      if (mounted) {
+        setState(() {
+          _scoreTabIds = ids;
+          _scoreTabPages.removeWhere((id, _) => !ids.contains(id));
+        });
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1945,6 +1961,20 @@ class _ReaderState extends State<Reader> {
     return score == null
         ? null
         : _itemBookmark?.selectionId(score.id) ?? score.id;
+  }
+
+  Future<void> _closeScoreTab(String id) async {
+    final index = _scoreTabIds.indexOf(id);
+    if (index < 0 || _savingTabs || _picking) return;
+    final wasActive = id == _activeScoreTabId;
+    final remaining = [..._scoreTabIds]..removeAt(index);
+    await _updateScoreTabs(remaining);
+    if (mounted &&
+        wasActive &&
+        !_scoreTabIds.contains(id) &&
+        remaining.isNotEmpty) {
+      await _switchScoreTab(remaining[math.min(index, remaining.length - 1)]);
+    }
   }
 
   Future<void> _switchScoreTab(String id) async {
@@ -3027,8 +3057,12 @@ class _ReaderState extends State<Reader> {
     _focus.requestFocus();
   }
 
-  Future<void> _playScore(Setlist setlist, int index) async {
-    if (index == 0) {
+  Future<void> _playScore(
+    Setlist setlist,
+    int index, {
+    bool fromEnd = false,
+  }) async {
+    if (index == 0 && !fromEnd) {
       setlist = setlist.copyWith(
         scores: setlist.scores.where(
           (id) => _library.lookupSelection(id) != null,
@@ -3042,8 +3076,22 @@ class _ReaderState extends State<Reader> {
     final local = await _library.storage.openScore(entry.id);
     final bytes = kIsWeb ? await local.readAsBytes() : null;
     final annotations = await _library.readInk(entry.id);
+    var start = item?.page ?? 1;
+    if (fromEnd) {
+      if (item?.endPage case final end?) {
+        start = end;
+      } else {
+        final document = bytes == null
+            ? await PdfDocument.openFile(local.path)
+            : await PdfDocument.openData(bytes, sourceName: local.name);
+        try {
+          start = document.pages.length;
+        } finally {
+          await document.dispose();
+        }
+      }
+    }
     if (!mounted) return;
-    final start = item?.page ?? 1;
     _load(
       entry,
       local,
@@ -3085,15 +3133,23 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _nextScore() async {
-    if (_picking || !_hasNextScore) return;
+  Future<void> _nextScore() => _stepSetlist(1);
+
+  Future<void> _stepSetlist(int step) async {
+    if (_picking || (step > 0 ? !_hasNextScore : !_hasPreviousScore)) return;
     setState(() => _picking = true);
     try {
-      await _playScore(_playing!, _setIndex + 1);
+      await _playScore(_playing!, _setIndex + step, fromEnd: step < 0);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open the next score.')),
+          SnackBar(
+            content: Text(
+              step > 0
+                  ? 'Could not open the next score.'
+                  : 'Could not open the previous score.',
+            ),
+          ),
         );
       }
     } finally {
@@ -3260,14 +3316,21 @@ class _ReaderState extends State<Reader> {
         _page == page &&
         _scoreTabPages[selection] != page;
     if (saveTabPage) _scoreTabPages[selection] = page;
+    final saveActiveTab =
+        opened && _entry?.id == id && _scoreTabIds.contains(selection);
     try {
       await _library.record(id, page, opened: opened);
-      if (saveTabPage) {
+      if (saveTabPage || saveActiveTab) {
         await _library.updatePreferences({
-          'scoreTabPages': {
-            for (final tab in _scoreTabIds)
-              if (_scoreTabPages[tab] case final int page) tab: page,
-          },
+          if (saveTabPage)
+            'scoreTabPages': {
+              for (final tab in _scoreTabIds)
+                if (_scoreTabPages[tab] case final int page) tab: page,
+            },
+          if (saveActiveTab &&
+              selection == _activeScoreTabId &&
+              _scoreTabIds.contains(selection))
+            'activeScoreTab': selection,
         });
       }
       _saveWarning = false;
@@ -3727,10 +3790,14 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  void _go(int page) {
+  void _go(int page, {bool backwardTurn = false}) {
     if (_pageNavigationBlocked || !_viewer.isReady || _pages == 0) return;
     if (page > _lastPage && _hasNextScore) {
       _nextScore();
+      return;
+    }
+    if (backwardTurn && page < _firstPage && _hasPreviousScore) {
+      _stepSetlist(-1);
       return;
     }
     _jumpToPage(page);
@@ -3740,7 +3807,7 @@ class _ReaderState extends State<Reader> {
     if (_pageNavigationBlocked || !_viewer.isReady || _pages == 0) return;
     _stopAutoScroll();
     if (_ensemble?.leading == true && _leadingSpread) {
-      _go(_page - (_page - _firstPage) % 2 + step * 2);
+      _go(_page - (_page - _firstPage) % 2 + step * 2, backwardTurn: step < 0);
       return;
     }
     if (_verticalScrolling && !_inking) {
@@ -3748,12 +3815,16 @@ class _ReaderState extends State<Reader> {
       return;
     }
     if (_spreadStep > 0) {
-      _go(_page + step * _spreadStep);
+      _go(_page + step * _spreadStep, backwardTurn: step < 0);
       return;
     }
     if (_readingAtWidth && !_inking && _turnPageSection(step)) return;
     if (!_halfPageTurns || _inking) {
-      _go(_page + step);
+      _go(_page + step, backwardTurn: step < 0);
+      return;
+    }
+    if (step < 0 && _page == _firstPage && !_halfPreview && _hasPreviousScore) {
+      _stepSetlist(-1);
       return;
     }
     final turn = advanceHalfTurn(
@@ -4030,6 +4101,10 @@ class _ReaderState extends State<Reader> {
 
   void _turnVertical(int step) {
     final visible = _viewer.visibleRect;
+    if (step < 0 && visible.top <= 1 && _hasPreviousScore) {
+      _stepSetlist(-1);
+      return;
+    }
     final bottom = math.max(
       0.0,
       _viewer.layout.documentSize.height - visible.height,
@@ -5351,9 +5426,13 @@ class _ReaderState extends State<Reader> {
         blurRadius: 14,
         offset: Offset(0, 6),
       ),
-      panEnabled: !_inking && !_stylusDrawing && !_halfPageTurns,
+      panEnabled:
+          (!_inking || !_allowFinger) && !_stylusDrawing && !_halfPageTurns,
       scaleEnabled:
-          !_inking && !_stylusDrawing && !_performance && !_halfPageTurns,
+          (!_inking || !_allowFinger) &&
+          !_stylusDrawing &&
+          !_performance &&
+          !_halfPageTurns,
       scrollByMouseWheel: _halfPageTurns || (vertical && _inking) ? null : .2,
       enableKeyboardNavigation: false,
       horizontalCacheExtent: 1.5,
@@ -6007,9 +6086,7 @@ class _ReaderState extends State<Reader> {
                 deleteButtonTooltipMessage: 'Close tab',
                 onDeleted: _picking || _savingTabs
                     ? null
-                    : () => _updateScoreTabs(
-                        _scoreTabIds.where((tab) => tab != id).toList(),
-                      ),
+                    : () => _closeScoreTab(id),
               ),
             ),
           );
@@ -7389,12 +7466,15 @@ class _ReaderState extends State<Reader> {
         IconButton(
           tooltip: _verticalScrolling && !_inking
               ? 'Scroll up'
+              : _page == _firstPage && _hasPreviousScore && !_halfPreview
+              ? 'Previous score'
               : ReaderText.previous.of(context),
           onPressed:
               _pages == 0 ||
                   ((!_verticalScrolling || _inking) &&
                       _page <= _firstPage &&
-                      !_halfPreview)
+                      !_halfPreview &&
+                      !_hasPreviousScore)
               ? null
               : () => _turn(-1),
           icon: const Icon(Icons.chevron_left),

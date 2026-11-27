@@ -196,6 +196,7 @@ void main() {
         'landscapeWidth': true,
         'scoreTabs': [first.id, movement.selectionId(second.id)],
         'scoreTabPages': {movement.selectionId(second.id): 3},
+        'activeScoreTab': movement.selectionId(second.id),
         'personalStamps': ['dolce'],
       });
       await original.assignCollections(second.id, ['Choir']);
@@ -270,6 +271,7 @@ void main() {
       expect(preferences['landscapeWidth'], isTrue);
       expect(preferences['scoreTabs'], [ids[1], ids.last]);
       expect(preferences['scoreTabPages'], {ids.last: 3});
+      expect(preferences['activeScoreTab'], ids.last);
       expect(preferences['personalStamps'], ['dolce']);
       expect(score.flags, [3]);
       expect(score.jumps.single.target.page, 2);
