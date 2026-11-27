@@ -245,7 +245,11 @@ class _ReaderState extends State<Reader> {
   Map<String, dynamic> _libraryBrowseState = {};
   bool _inking = false;
   int? _annotationPage;
-  bool _allowFinger = true;
+  bool? _fingerDrawingOverride;
+  Timer? _recentStylus;
+  bool get _allowFinger =>
+      _fingerDrawingOverride ??
+      (!_stylusDrawing && !(_recentStylus?.isActive ?? false));
   bool _picking = false;
   static const _dockWidth = 368.0;
   static const _dockMinimumWidth = 900.0;
@@ -764,6 +768,7 @@ class _ReaderState extends State<Reader> {
     _completeReaderDock?.call();
     _autoScrollTicker.dispose();
     _scoreExpiry?.cancel();
+    _recentStylus?.cancel();
     if (_supportsSharedImport) {
       _stopFaceTurns(rebuild: false);
       _faceChannel.setMethodCallHandler(null);
@@ -4897,6 +4902,7 @@ class _ReaderState extends State<Reader> {
     _ink[_annotationPage ?? _page]?.finish(commit: false);
     setState(() {
       _inking = !_inking;
+      _fingerDrawingOverride = null;
       if (!_inking) _annotationPage = null;
       _halfPreview = false;
     });
@@ -4921,7 +4927,13 @@ class _ReaderState extends State<Reader> {
 
   void _stylusFinished(bool commit) {
     if (!mounted || !_stylusDrawing) return;
-    setState(() => _stylusDrawing = false);
+    setState(() {
+      _stylusDrawing = false;
+      _recentStylus?.cancel();
+      _recentStylus = Timer(const Duration(minutes: 15), () {
+        if (mounted) setState(() => _recentStylus = null);
+      });
+    });
     if (!commit || _picking || _performance) return;
     if (_inking && _drawing.autoExit ||
         !_inking && _autoStylus && !_drawing.autoExit) {
@@ -5677,7 +5689,7 @@ class _ReaderState extends State<Reader> {
               key: ValueKey(page.pageNumber),
               ink: _ink.putIfAbsent(page.pageNumber, _newPageInk),
               enabled: _inking,
-              allowFinger: _allowFinger || _shape != null,
+              allowFinger: _allowFinger,
               tool: _tool,
               width: _tool == InkTool.pen || !_inking
                   ? _drawing.preset.width
@@ -7257,7 +7269,8 @@ class _ReaderState extends State<Reader> {
           child: ChoiceChip(
             label: const Text('Finger'),
             selected: _allowFinger,
-            onSelected: (enabled) => setState(() => _allowFinger = enabled),
+            onSelected: (enabled) =>
+                setState(() => _fingerDrawingOverride = enabled),
           ),
         ),
         IconButton(
