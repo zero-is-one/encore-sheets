@@ -355,7 +355,7 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
     linksChannel?.invokeMethod("available", arguments: nil)
   }
 
-  @objc func application(
+  override func application(
     _ application: UIApplication,
     configurationForConnecting connectingSceneSession: UISceneSession,
     options: UIScene.ConnectionOptions
