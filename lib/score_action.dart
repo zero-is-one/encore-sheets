@@ -1,8 +1,13 @@
+import 'rehearsal_wave.dart';
+
 enum ScoreActionKind {
   score('Open score'),
+  nextSetlist('Next score in setlist'),
+  previousSetlist('Previous score in setlist'),
   note('Open page note'),
   audio('Play or pause linked audio'),
   tempo('Set metronome tempo'),
+  toggleMetronome('Start or stop metronome'),
   pitch('Play reference pitch'),
   midi('Send MIDI message'),
   website('Open website'),
@@ -11,6 +16,8 @@ enum ScoreActionKind {
 
   const ScoreActionKind(this.label);
   final String label;
+
+  bool get usesTempo => this == tempo || this == toggleMetronome;
 }
 
 class ScoreAction {
@@ -24,6 +31,7 @@ class ScoreAction {
     this.selection,
     this.parameter,
     this.showLabel = false,
+    this.timbre = ReferenceTimbre.pure,
   });
 
   final String title;
@@ -35,6 +43,7 @@ class ScoreAction {
   final String? selection;
   final String? parameter;
   final bool showLabel;
+  final ReferenceTimbre timbre;
 
   static const fileExtensions = {
     'pdf',
@@ -114,7 +123,8 @@ class ScoreAction {
   static bool validParameter(ScoreActionKind kind, String? text) {
     final number = int.tryParse(text ?? '');
     return switch (kind) {
-      ScoreActionKind.tempo => number != null && number >= 25 && number <= 280,
+      ScoreActionKind.tempo || ScoreActionKind.toggleMetronome =>
+        number != null && number >= 25 && number <= 280,
       ScoreActionKind.pitch => number != null && number >= 48 && number <= 84,
       ScoreActionKind.midi => midiBytes(text ?? '') != null,
       ScoreActionKind.website ||
@@ -134,6 +144,7 @@ class ScoreAction {
     selection: selection,
     parameter: parameter,
     showLabel: showLabel,
+    timbre: timbre,
   );
 
   ScoreAction retarget(String id) => ScoreAction(
@@ -146,6 +157,7 @@ class ScoreAction {
     selection: id,
     parameter: parameter,
     showLabel: showLabel,
+    timbre: timbre,
   );
 
   ScoreAction withParameter(String value) => ScoreAction(
@@ -158,6 +170,7 @@ class ScoreAction {
     selection: selection,
     parameter: value,
     showLabel: showLabel,
+    timbre: timbre,
   );
 
   static ScoreAction? fromJson(Object? value) {
@@ -198,6 +211,11 @@ class ScoreAction {
         selection: selection is String ? selection : null,
         parameter: parameter,
         showLabel: value['showLabel'] == true,
+        timbre:
+            ReferenceTimbre.values
+                .where((item) => item.name == value['timbre'])
+                .firstOrNull ??
+            ReferenceTimbre.pure,
       );
     }
     return null;
@@ -213,5 +231,7 @@ class ScoreAction {
     if (selection != null) 'selection': selection,
     if (parameter != null) 'parameter': parameter,
     if (showLabel) 'showLabel': true,
+    if (kind == ScoreActionKind.pitch && timbre != ReferenceTimbre.pure)
+      'timbre': timbre.name,
   };
 }

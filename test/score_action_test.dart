@@ -1,3 +1,4 @@
+import 'package:encoresheets/rehearsal_wave.dart';
 import 'package:encoresheets/score_action.dart';
 import 'package:encoresheets/score_action_destination.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,27 @@ ScoreAction action(ScoreActionKind kind, String parameter) => ScoreAction(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('new score actions preserve existing tempo and pitch defaults', () {
+    final tempo = action(ScoreActionKind.tempo, '96').toJson();
+    expect(ScoreAction.fromJson(tempo)?.kind, ScoreActionKind.tempo);
+    final pitch = action(ScoreActionKind.pitch, '69').toJson();
+    expect(ScoreAction.fromJson(pitch)?.timbre, ReferenceTimbre.pure);
+    final reed = ScoreAction.fromJson({...pitch, 'timbre': 'reed'})!;
+    expect(reed.reposition(2, .3, .5).toJson()['timbre'], 'reed');
+    for (final kind in [
+      ScoreActionKind.toggleMetronome,
+      ScoreActionKind.nextSetlist,
+      ScoreActionKind.previousSetlist,
+    ]) {
+      final data = action(kind, kind.usesTempo ? '120' : '').toJson();
+      expect(ScoreAction.fromJson(data)?.kind, kind);
+    }
+    expect(
+      ScoreAction.validParameter(ScoreActionKind.toggleMetronome, '0'),
+      isFalse,
+    );
+  });
 
   test('optional page action labels survive persistence and editing', () {
     final original = action(ScoreActionKind.website, 'https://example.com');

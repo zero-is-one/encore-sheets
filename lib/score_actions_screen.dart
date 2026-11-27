@@ -6,6 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'score_action.dart';
 import 'score_action_destination.dart';
 import 'pitch_detection.dart';
+import 'rehearsal_wave.dart';
 import 'score_library.dart';
 
 class ScoreActionsScreen extends StatefulWidget {
@@ -49,6 +50,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
     var y = current?.y ?? .25;
     var selection = current?.selection;
     var parameter = current?.parameter ?? '';
+    var timbre = current?.timbre ?? ReferenceTimbre.pure;
     XFile? attachment;
     final choices = {
       for (final score in widget.library.recent) ...{
@@ -99,7 +101,7 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                     kind = value!;
                     parameter = switch (kind) {
                       _ when kind == current?.kind => current?.parameter ?? '',
-                      ScoreActionKind.tempo => '96',
+                      _ when kind.usesTempo => '96',
                       ScoreActionKind.pitch => '69',
                       _ => '',
                     };
@@ -134,21 +136,31 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                     ],
                     onChanged: (value) => refresh(() => parameter = '$value'),
                   ),
-                if (kind == ScoreActionKind.tempo ||
-                    kind == ScoreActionKind.midi)
+                if (kind == ScoreActionKind.pitch)
+                  DropdownButtonFormField<ReferenceTimbre>(
+                    initialValue: timbre,
+                    decoration: const InputDecoration(labelText: 'Sound'),
+                    items: [
+                      for (final sound in ReferenceTimbre.values)
+                        DropdownMenuItem(
+                          value: sound,
+                          child: Text(sound.label),
+                        ),
+                    ],
+                    onChanged: (value) => refresh(() => timbre = value!),
+                  ),
+                if (kind.usesTempo || kind == ScoreActionKind.midi)
                   TextFormField(
                     key: ValueKey(kind),
                     initialValue: parameter,
-                    keyboardType: kind == ScoreActionKind.tempo
+                    keyboardType: kind.usesTempo
                         ? TextInputType.number
                         : TextInputType.text,
                     decoration: InputDecoration(
-                      labelText: kind == ScoreActionKind.tempo
+                      labelText: kind.usesTempo
                           ? 'Tempo (BPM)'
                           : 'MIDI message (hex)',
-                      hintText: kind == ScoreActionKind.tempo
-                          ? '25–280'
-                          : 'Example: C0 05',
+                      hintText: kind.usesTempo ? '25–280' : 'Example: C0 05',
                     ),
                     onChanged: (value) =>
                         refresh(() => parameter = value.trim()),
@@ -318,6 +330,9 @@ class _ScoreActionsScreenState extends State<ScoreActionsScreen> {
                             : null,
                         parameter: parameter.isEmpty ? null : parameter,
                         showLabel: showLabel,
+                        timbre: kind == ScoreActionKind.pitch
+                            ? timbre
+                            : ReferenceTimbre.pure,
                       ),
                       kind == ScoreActionKind.externalFile ? attachment : null,
                     )),

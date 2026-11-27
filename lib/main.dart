@@ -2078,6 +2078,35 @@ class _ReaderState extends State<Reader> {
 
   Future<void> _runScoreAction(ScoreAction action) async {
     if (_picking || _inking) return;
+    if (action.kind == ScoreActionKind.nextSetlist ||
+        action.kind == ScoreActionKind.previousSetlist) {
+      final setlist = _playing;
+      final index =
+          _setIndex + (action.kind == ScoreActionKind.nextSetlist ? 1 : -1);
+      if (setlist == null ||
+          index < 0 ||
+          index >= setlist.scores.length ||
+          _library.lookupSelection(setlist.scores[index]) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No adjacent score is available in this setlist.'),
+          ),
+        );
+        return;
+      }
+      setState(() => _picking = true);
+      try {
+        await _playScore(setlist, index);
+      } catch (_) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open the setlist score.')),
+          );
+      } finally {
+        _finishPicking();
+      }
+      return;
+    }
     if (const {
       ScoreActionKind.website,
       ScoreActionKind.externalApp,
@@ -2088,6 +2117,7 @@ class _ReaderState extends State<Reader> {
     }
     if (const {
       ScoreActionKind.tempo,
+      ScoreActionKind.toggleMetronome,
       ScoreActionKind.pitch,
       ScoreActionKind.midi,
     }.contains(action.kind)) {
@@ -2184,6 +2214,14 @@ class _ReaderState extends State<Reader> {
     setState(() => _picking = true);
     try {
       switch (action.kind) {
+        case ScoreActionKind.toggleMetronome:
+          final meter = _rehearsalMeter;
+          if (meter.running) {
+            await meter.stop();
+          } else {
+            meter.bpm = int.parse(action.parameter!);
+            await meter.start();
+          }
         case ScoreActionKind.tempo:
           final tempo = int.parse(action.parameter!);
           final meter = _rehearsalMeter;
@@ -2203,6 +2241,7 @@ class _ReaderState extends State<Reader> {
         case ScoreActionKind.pitch:
           await (_referenceTone ??= ReferenceTone()).play(
             int.parse(action.parameter!),
+            timbre: action.timbre,
           );
         case ScoreActionKind.midi:
           if (_restricted(RestrictedTool.connections)) return;
@@ -5462,8 +5501,13 @@ class _ReaderState extends State<Reader> {
                         switch (action.kind) {
                           ScoreActionKind.note => Icons.sticky_note_2_outlined,
                           ScoreActionKind.score => Icons.open_in_new,
+                          ScoreActionKind.nextSetlist => Icons.skip_next,
+                          ScoreActionKind.previousSetlist =>
+                            Icons.skip_previous,
                           ScoreActionKind.audio => Icons.play_arrow,
                           ScoreActionKind.tempo => Icons.speed,
+                          ScoreActionKind.toggleMetronome =>
+                            Icons.timer_outlined,
                           ScoreActionKind.pitch => Icons.music_note,
                           ScoreActionKind.website => Icons.language,
                           ScoreActionKind.externalApp => Icons.launch,
