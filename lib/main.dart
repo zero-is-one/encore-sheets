@@ -358,6 +358,8 @@ class _ReaderState extends State<Reader> {
   Duration? _lastHalfScroll;
   ReaderPreferences _preferences = const ReaderPreferences();
   List<String> _scoreTabIds = [];
+  String? _selectedTabInstance;
+  String? _lastOpenedScoreTab;
   final Map<String, int> _scoreTabPages = {};
   bool _savingTabs = false;
   static const _sharedImports = MethodChannel('encoresheets/import');
@@ -612,9 +614,7 @@ class _ReaderState extends State<Reader> {
             };
           }
           _drawing = DrawingSettings.fromJson(data['drawingSettings']);
-          _scoreTabIds = ids
-              .where((id) => _library.lookupSelection(id) != null)
-              .toList();
+          _scoreTabIds = ids.where((id) => _lookupTab(id) != null).toList();
           _scoreTabPages.clear();
           if (data['scoreTabPages'] case final Map pages) {
             for (final id in _scoreTabIds) {
@@ -1674,6 +1674,7 @@ class _ReaderState extends State<Reader> {
     bool setlists = false,
     bool focusSearch = false,
     String? entryAction,
+    String? revealScoreId,
   }) async {
     if (_picking) return;
     setState(() => _picking = true);
@@ -1709,6 +1710,7 @@ class _ReaderState extends State<Reader> {
                         !_appearance.showMetadata,
                     metadataIconKeys: _metadataSymbols,
                     focusSearch: focusSearch,
+                    revealScoreId: revealScoreId,
                     canSearchScore: _pages > 0 && _viewer.isReady,
                     browseState: _libraryBrowseState,
                     onBrowseState: _rememberLibraryBrowse,
@@ -2019,6 +2021,7 @@ class _ReaderState extends State<Reader> {
     ScoreBookmark? item,
     List<String> queue = const [],
     bool onlyIfUnchanged = false,
+    String? tabInstance,
   }) async {
     final revision = _revision;
     if (_entry?.id != entry.id || _itemBookmark?.id != item?.id) {
@@ -2029,13 +2032,15 @@ class _ReaderState extends State<Reader> {
       _load(
         entry,
         local,
+        tabInstance: tabInstance,
         bytes,
         annotations: annotations,
         startPage: startPage,
         item: item,
       );
-    } else if (startPage != null) {
-      _jumpToPage(startPage);
+    } else {
+      _selectedTabInstance = tabInstance;
+      if (startPage != null) _jumpToPage(startPage);
     }
     setState(() {
       _playing = null;
@@ -2160,7 +2165,20 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  String _tabSelection(String id) => id.split('|').first;
+
+  (ScoreEntry, ScoreBookmark?)? _lookupTab(String id) =>
+      _library.lookupSelection(_tabSelection(id));
+
   String? get _activeScoreTabId {
+    if (_selectedTabInstance case final instance?
+        when _scoreTabIds.contains(instance)) {
+      return instance;
+    }
+    return _currentScoreSelection;
+  }
+
+  String? get _currentScoreSelection {
     final score = _entry;
     return score == null
         ? null
@@ -2173,11 +2191,12 @@ class _ReaderState extends State<Reader> {
     final wasActive = id == _activeScoreTabId;
     final remaining = [..._scoreTabIds]..removeAt(index);
     await _updateScoreTabs(remaining);
-    if (mounted &&
-        wasActive &&
-        !_scoreTabIds.contains(id) &&
-        remaining.isNotEmpty) {
-      await _switchScoreTab(remaining[math.min(index, remaining.length - 1)]);
+    if (mounted && wasActive && !_scoreTabIds.contains(id)) {
+      if (remaining.isNotEmpty) {
+        await _switchScoreTab(remaining[math.min(index, remaining.length - 1)]);
+      } else {
+        setState(() => _selectedTabInstance = null);
+      }
     }
   }
 
@@ -2186,7 +2205,7 @@ class _ReaderState extends State<Reader> {
     setState(() => _picking = true);
     try {
       await _libraryReady;
-      final target = _library.lookupSelection(id);
+      final target = _lookupTab(id);
       if (target == null) {
         await _updateScoreTabs(_scoreTabIds.where((tab) => tab != id).toList());
       } else if (mounted) {
@@ -2194,7 +2213,8 @@ class _ReaderState extends State<Reader> {
         await _openLibraryScore(
           score,
           item: bookmark,
-          startPage: _scoreTabPages[id] ?? bookmark?.page,
+          startPage: _scoreTabPages[id] ?? bookmark?.page ?? score.page,
+          tabInstance: id == _tabSelection(id) ? null : id,
         );
       }
     } catch (_) {
@@ -3765,6 +3785,7 @@ class _ReaderState extends State<Reader> {
     XFile? file,
     Uint8List? bytes, {
     Map<String, dynamic> annotations = const {},
+    String? tabInstance,
     int? startPage,
     ScoreBookmark? item,
   }) {
@@ -3825,6 +3846,7 @@ class _ReaderState extends State<Reader> {
     setState(() {
       _entry = entry;
       _itemBookmark = item;
+      _selectedTabInstance = tabInstance;
       _halfPreview = false;
       _file = file;
       _stylusDrawing = false;
@@ -6385,7 +6407,7 @@ class _ReaderState extends State<Reader> {
         },
         itemBuilder: (context, index) {
           final id = _scoreTabIds[index];
-          final target = _library.lookupSelection(id);
+          final target = _lookupTab(id);
           final title = target?.$2?.title ?? target?.$1.title ?? 'Saved score';
           return ReorderableDelayedDragStartListener(
             key: ValueKey(id),
@@ -6404,9 +6426,7 @@ class _ReaderState extends State<Reader> {
                 selected: id == _activeScoreTabId,
                 onPressed: _picking ? null : () => _switchScoreTab(id),
                 deleteButtonTooltipMessage: 'Close tab',
-                onDeleted: _picking || _savingTabs
-                    ? null
-                    : () => _closeScoreTab(id),
+                onDeleted: () => _closeScoreTab(id),
               ),
             ),
           );
@@ -6446,7 +6466,7 @@ class _ReaderState extends State<Reader> {
         final utilities = [_audioToolsMenu(), _readerToolsMenu()];
         final title = _readerTitle();
         final display = _displayButton();
-        final scoreActions = _readerToolsMenu(group: _ReaderMenu.score);
+        final scoreActions = _scoreActionsMenu();
         final editing = [
           _quickAccessMenu(),
           if (!_restricted(RestrictedTool.markup))
@@ -6497,7 +6517,7 @@ class _ReaderState extends State<Reader> {
                     children: [
                       _displayButton(),
                       Flexible(child: title),
-                      _readerToolsMenu(group: _ReaderMenu.score),
+                      _scoreActionsMenu(),
                     ],
                   ),
                 ),
@@ -7200,14 +7220,227 @@ class _ReaderState extends State<Reader> {
     if (mounted && result != null) await _runReaderDisplayAction(result);
   }
 
-  Widget _readerToolsMenu({_ReaderMenu group = _ReaderMenu.tools}) {
-    final score = group == _ReaderMenu.score;
+  Widget _scoreActionsMenu() {
+    final score = _entry;
+    final bookmark = _itemBookmark;
+    final selection = _currentScoreSelection;
+    final flags = score == null
+        ? const <int>[]
+        : _library.lookup(score.id)?.flags ?? const <int>[];
+    final facingPage = _spreadStep > 0 && _page < _lastPage ? _page + 1 : null;
+    String flagLabel(int page) =>
+        flags.contains(page) ? 'Unflag page' : 'Flag page';
+    MenuItemButton flagButton(int page, {String? side}) => MenuItemButton(
+      leadingIcon: Icon(
+        flags.contains(page) ? Icons.flag : Icons.outlined_flag,
+      ),
+      onPressed: score == null
+          ? null
+          : () => _toggleScorePageFlag(score.id, page),
+      child: Text(
+        side == null ? flagLabel(page) : '${flagLabel(page)} ($side)',
+      ),
+    );
+    final canShare = const [
+      _ReaderDisplay.exportPdf,
+      _ReaderDisplay.shareScorePackage,
+      _ReaderDisplay.shareScoreLink,
+    ].any(_readerActionAllowed);
+    return MenuAnchor(
+      builder: (context, controller, child) => IconButton(
+        tooltip: 'Score actions',
+        icon: const Icon(Icons.expand_more),
+        onPressed: score == null || _pages == 0 || _picking
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+      ),
+      menuChildren: [
+        if (score != null)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.info_outline),
+            onPressed: () => _editScore(score),
+            child: const Text('Score info'),
+          ),
+        if (facingPage == null)
+          flagButton(_page)
+        else
+          SubmenuButton(
+            leadingIcon: const Icon(Icons.outlined_flag),
+            menuChildren: [
+              flagButton(_page, side: 'left'),
+              flagButton(facingPage, side: 'right'),
+            ],
+            child: const Text('Page flags'),
+          ),
+        if (canShare)
+          SubmenuButton(
+            leadingIcon: const Icon(Icons.share_outlined),
+            menuChildren: [
+              for (final (label, action) in [
+                ('Share PDF', _ReaderDisplay.exportPdf),
+                ('Share editable score', _ReaderDisplay.shareScorePackage),
+                ('Copy score link', _ReaderDisplay.shareScoreLink),
+              ])
+                if (_readerActionAllowed(action))
+                  MenuItemButton(
+                    onPressed: () => _runReaderDisplayAction(action),
+                    child: Text(label),
+                  ),
+            ],
+            child: const Text('Share'),
+          ),
+        const Divider(height: 8),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.library_music_outlined),
+          onPressed: score == null
+              ? null
+              : () => _showLibrary(revealScoreId: score.id),
+          child: const Text('Show in library'),
+        ),
+        if (_appearance.showTabs)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.tab),
+            onPressed: selection == null || _savingTabs
+                ? null
+                : () => _duplicateCurrentTab(selection),
+            child: const Text('New tab'),
+          ),
+        if (_supportsScoreWindows &&
+            _readerActionAllowed(_ReaderDisplay.scoreWindow))
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.open_in_new),
+            onPressed: _openScoreWindow,
+            child: const Text('New window'),
+          ),
+        if (_lastOpenedScoreTab case final id? when _scoreTabIds.contains(id))
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.undo),
+            onPressed: _savingTabs ? null : () => _closeScoreTab(id),
+            child: const Text('Undo open tab'),
+          ),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.playlist_add),
+          onPressed: selection == null
+              ? null
+              : () => _addToSetlist(context, _library, selection),
+          child: const Text('Add to setlist'),
+        ),
+        const Divider(height: 8),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.delete_outline),
+          onPressed: score == null
+              ? null
+              : () => _deleteCurrentScoreItem(score, bookmark),
+          child: Text(bookmark == null ? 'Delete score…' : 'Delete bookmark…'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _duplicateCurrentTab(String selection) async {
+    final current = _activeScoreTabId ?? selection;
+    final page = _page;
+    final id = '$selection|${ScoreLibrary.newRecordId()}';
+    _scoreTabPages[current] = page;
+    _scoreTabPages[id] = page;
+    await _updateScoreTabs([
+      ..._scoreTabIds,
+      if (!_scoreTabIds.contains(current)) current,
+      id,
+    ]);
+    if (!mounted || !_scoreTabIds.contains(id)) {
+      _scoreTabPages.remove(id);
+      return;
+    }
+    setState(() => _lastOpenedScoreTab = id);
+    await _switchScoreTab(id);
+  }
+
+  Future<void> _toggleScorePageFlag(String id, int page) async {
+    try {
+      await _library.togglePageFlag(id, page);
+      if (mounted && _entry?.id == id) {
+        setState(() => _entry = _library.lookup(id));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update page flags.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteCurrentScoreItem(
+    ScoreEntry score,
+    ScoreBookmark? bookmark,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Delete ${bookmark?.title ?? score.title}?'),
+        content: bookmark == null
+            ? const Text('You can recover this score from Backup & restore.')
+            : const Text('This removes the bookmark from the score.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _picking) return;
+    setState(() => _picking = true);
+    try {
+      if (bookmark == null) {
+        await _library.trashScores([score.id]);
+      } else {
+        await _library.updateScore(
+          score.id,
+          (entry) => entry.copyWith(
+            bookmarks: entry.bookmarks
+                .where((item) => item.id != bookmark.id)
+                .toList(),
+          ),
+        );
+      }
+      if (!mounted) return;
+      await _updateScoreTabs(
+        _scoreTabIds.where((id) => _lookupTab(id) != null).toList(),
+      );
+      if (!mounted || _entry?.id != score.id) return;
+      if (_library.lookup(score.id) case final remaining?) {
+        await _openLibraryScore(remaining, startPage: _page);
+      } else {
+        _playing = null;
+        _load(null, null, null);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete this item.')),
+        );
+      }
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Widget _readerToolsMenu() {
     return PopupMenuButton<_ReaderDisplay>(
-      tooltip: score ? 'Score actions' : ReaderText.tools.of(context),
+      tooltip: ReaderText.tools.of(context),
       enabled: _pages > 0 && !_picking,
-      icon: Icon(score ? Icons.more_horiz : Icons.tune),
+      icon: const Icon(Icons.tune),
       onSelected: _runReaderDisplayAction,
-      itemBuilder: (_) => _groupedReaderMenuItems(group),
+      itemBuilder: (_) => [
+        ..._groupedReaderMenuItems(_ReaderMenu.tools),
+        ..._groupedReaderMenuItems(_ReaderMenu.score),
+      ],
     );
   }
 
@@ -8518,6 +8751,76 @@ class _EdgeTapTracker {
   }
 }
 
+Future<void> _addToSetlist(
+  BuildContext context,
+  ScoreLibrary library,
+  String scoreId,
+) async {
+  final setlists = library.setlists;
+  final create = setlists.isEmpty;
+  var name = '';
+  final destination = await showDialog<String>(
+    context: context,
+    builder: (dialog) {
+      if (create) {
+        return StatefulBuilder(
+          builder: (_, update) => AlertDialog(
+            title: const Text('Create a setlist'),
+            content: TextField(
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Setlist name'),
+              onChanged: (value) => update(() => name = value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: name.isEmpty
+                    ? null
+                    : () => Navigator.pop(dialog, name),
+                child: const Text('Create and add score'),
+              ),
+            ],
+          ),
+        );
+      }
+      return SimpleDialog(
+        title: const Text('Add score to setlist'),
+        children: [
+          for (final list in setlists)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, list.id),
+              child: Text(list.name),
+            ),
+        ],
+      );
+    },
+  );
+  if (destination == null || !context.mounted) return;
+  try {
+    if (create) {
+      await library.saveSetlist(
+        Setlist(ScoreLibrary.newRecordId(), destination, [scoreId]),
+      );
+    } else {
+      await library.appendToSetlist(destination, scoreId);
+    }
+    if (context.mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Score added to setlist.')));
+  } catch (_) {
+    if (context.mounted)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not add the score to the setlist.'),
+        ),
+      );
+  }
+}
+
 class _LibraryScreen extends StatefulWidget {
   const _LibraryScreen({
     required this.library,
@@ -8534,6 +8837,7 @@ class _LibraryScreen extends StatefulWidget {
     required this.compact,
     required this.metadataIconKeys,
     required this.focusSearch,
+    this.revealScoreId,
     required this.canSearchScore,
     required this.browseState,
     required this.onBrowseState,
@@ -8553,6 +8857,7 @@ class _LibraryScreen extends StatefulWidget {
   final bool compact;
   final Map<String, String> metadataIconKeys;
   final bool focusSearch;
+  final String? revealScoreId;
   final bool canSearchScore;
   final Map<String, dynamic> browseState;
   final ValueChanged<Map<String, dynamic>> onBrowseState;
@@ -8593,7 +8898,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    final saved = widget.focusSearch
+    final saved = widget.focusSearch || widget.revealScoreId != null
         ? const <String, dynamic>{}
         : widget.browseState;
     _gridView = saved['gridView'] == true;
@@ -8656,6 +8961,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   }
 
   void _saveBrowseState() {
+    if (widget.revealScoreId != null) return;
     widget.onBrowseState({
       'sort': _browseBy,
       'gridView': _gridView,
@@ -8755,71 +9061,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         ),
       );
 
-  Future<void> _dropIntoSetlist(String scoreId) async {
-    final setlists = widget.library.setlists;
-    final create = setlists.isEmpty;
-    var name = '';
-    final destination = await showDialog<String>(
-      context: context,
-      builder: (dialog) {
-        if (create) {
-          return StatefulBuilder(
-            builder: (_, update) => AlertDialog(
-              title: const Text('Create a setlist'),
-              content: TextField(
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Setlist name'),
-                onChanged: (value) => update(() => name = value.trim()),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialog),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: name.isEmpty
-                      ? null
-                      : () => Navigator.pop(dialog, name),
-                  child: const Text('Create and add score'),
-                ),
-              ],
-            ),
-          );
-        }
-        return SimpleDialog(
-          title: const Text('Add score to setlist'),
-          children: [
-            for (final list in setlists)
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(dialog, list.id),
-                child: Text(list.name),
-              ),
-          ],
-        );
-      },
-    );
-    if (destination == null || !mounted) return;
-    try {
-      if (create) {
-        await widget.library.saveSetlist(
-          Setlist(ScoreLibrary.newRecordId(), destination, [scoreId]),
-        );
-      } else {
-        await widget.library.appendToSetlist(destination, scoreId);
-      }
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Score added to setlist.')),
-        );
-    } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not add the score to the setlist.'),
-          ),
-        );
-    }
-  }
+  Future<void> _dropIntoSetlist(String scoreId) =>
+      _addToSetlist(context, widget.library, scoreId);
 
   Future<void> _copyLibraryScore(ScoreEntry score) async {
     try {
@@ -9240,6 +9483,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       if (_collection == null) return true;
       return score.collections.contains(_collection) != _excludeCollection;
     }).toList();
+    final reveal = widget.revealScoreId;
+    if (reveal != null) {
+      final index = inCollection.indexWhere((score) => score.id == reveal);
+      if (index > 0) inCollection.insert(0, inCollection.removeAt(index));
+    }
     final categories =
         inCollection
             .expand((score) => _categories(score, _filterField))
@@ -9842,6 +10090,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                     }
                                     final score = visible[index];
                                     return ListTile(
+                                      selected:
+                                          score.id == widget.revealScoreId,
                                       leading: LongPressDraggable<String>(
                                         data: score.id,
                                         onDragStarted: () =>

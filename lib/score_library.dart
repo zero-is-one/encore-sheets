@@ -490,6 +490,12 @@ class ScoreLibrary {
     });
   }
 
+  Future<void> togglePageFlag(String id, int page) => updateScore(id, (score) {
+    final flags = score.flags.toSet();
+    if (!flags.remove(page)) flags.add(page);
+    return score.copyWith(flags: flags.toList()..sort());
+  });
+
   Future<void> updateScore(String id, ScoreEntry Function(ScoreEntry) update) =>
       _serialize(() async {
         final old = _scores[id];
@@ -634,7 +640,7 @@ class ScoreLibrary {
   Future<void> appendToSetlist(String id, String scoreId) =>
       _serialize(() async {
         final target = _setlists[id];
-        if (target == null || lookup(scoreId) == null) {
+        if (target == null || lookupSelection(scoreId) == null) {
           throw StateError('The setlist or score is no longer available.');
         }
         final amended = target.copyWith(scores: [...target.scores, scoreId]);

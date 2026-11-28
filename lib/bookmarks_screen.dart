@@ -174,11 +174,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      await widget.library.updateScore(scoreId, (score) {
-        final pages = score.flags.toSet();
-        if (!pages.remove(page)) pages.add(page);
-        return score.copyWith(flags: pages.toList()..sort());
-      });
+      await widget.library.togglePageFlag(scoreId, page);
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(

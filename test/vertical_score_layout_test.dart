@@ -88,7 +88,29 @@ void main() {
     expect(viewer().params.paging, isNotNull);
     await tester.tap(find.byTooltip('Score actions'));
     await tester.pumpAndSettle();
+    expect(find.text('Show in library'), findsOneWidget);
+    expect(find.text('Flag page'), findsOneWidget);
+    expect(find.text('Add to setlist'), findsOneWidget);
+    final scoreActionsButton = find.byWidgetPredicate(
+      (widget) => widget is IconButton && widget.tooltip == 'Score actions',
+    );
+    bool scoreActionsEnabled() =>
+        tester.widget<IconButton>(scoreActionsButton).onPressed != null;
+    await tester.tap(find.text('New tab'));
+    await waitUntil(() => find.byType(InputChip).evaluate().length == 2);
+    await waitUntil(scoreActionsEnabled);
+    await tester.tap(scoreActionsButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Undo open tab'));
+    await waitUntil(() => find.byType(InputChip).evaluate().length == 1);
+    await waitUntil(scoreActionsEnabled);
+    await tester.tap(find.byTooltip('Close tab'));
+    await waitUntil(() => find.byType(InputChip).evaluate().isEmpty);
+    await tester.tap(find.byTooltip('Reader tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Copy a measure first.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Add page note'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Add page note'));
     await tester.pumpAndSettle();
     expect(find.text('Page 1 note'), findsOneWidget);
