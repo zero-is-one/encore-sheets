@@ -280,6 +280,7 @@ class _ReaderState extends State<Reader> {
   double? _seek;
   bool _showControls = true;
   bool _markupPaletteAtTop = false;
+  Alignment? _markupPalettePosition;
   Map<String, dynamic> _libraryBrowseState = {};
   bool _inking = false;
   int? _annotationPage;
@@ -599,6 +600,13 @@ class _ReaderState extends State<Reader> {
           );
           _preferences = ReaderPreferences.fromJson(data);
           _markupPaletteAtTop = data['markupPaletteAtTop'] == true;
+          _markupPalettePosition = switch (data['markupPalettePosition']) {
+            [num x, num y] when x.isFinite && y.isFinite => Alignment(
+              x.clamp(-1, 1).toDouble(),
+              y.clamp(-1, 1).toDouble(),
+            ),
+            _ => null,
+          };
           _favoriteStamps = switch (data['favoriteStamps']) {
             final List values =>
               values
@@ -8480,25 +8488,69 @@ class _ReaderState extends State<Reader> {
   }
 
   void _moveMarkupPalette() {
-    setState(() => _markupPaletteAtTop = !_markupPaletteAtTop);
+    final atTop =
+        (_markupPalettePosition?.y ?? (_markupPaletteAtTop ? -1 : 1)) < 0;
+    setState(() {
+      _markupPaletteAtTop = !atTop;
+      _markupPalettePosition = !atTop
+          ? Alignment.topCenter
+          : Alignment.bottomCenter;
+    });
+    _saveMarkupPalettePosition();
+  }
+
+  void _dragMarkupPalette(
+    DragUpdateDetails details,
+    Size viewport,
+    Alignment start,
+  ) {
+    final previous = _markupPalettePosition ?? start;
+    final horizontal = math.max(
+      40.0,
+      viewport.width - math.min(660, viewport.width - 16),
+    );
+    final vertical = math.max(40.0, viewport.height * .75);
+    setState(
+      () => _markupPalettePosition = Alignment(
+        (previous.x + 2 * details.delta.dx / horizontal)
+            .clamp(-1, 1)
+            .toDouble(),
+        (previous.y + 2 * details.delta.dy / vertical).clamp(-1, 1).toDouble(),
+      ),
+    );
+  }
+
+  void _saveMarkupPalettePosition() {
+    final position = _markupPalettePosition;
+    if (position == null) return;
     unawaited(
       _library
-          .updatePreferences({'markupPaletteAtTop': _markupPaletteAtTop})
+          .updatePreferences({
+            'markupPaletteAtTop': position.y < 0,
+            'markupPalettePosition': [position.x, position.y],
+          })
           .catchError((Object _) {}),
     );
   }
 
-  Future<void> _clearMarkupPage() async {
+  Future<void> _clearMarkupPage({required bool allLayers}) async {
     final page = _annotationPage ?? _page;
     final layer = _activeInkLayer;
     final ink = _ink[page];
-    if (ink == null || !ink.hasActiveLayerInk) return;
+    if (ink == null || !(allLayers ? ink.hasInk : ink.hasActiveLayerInk))
+      return;
     final clear = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Clear annotations on this page?'),
-        content: const Text(
-          'This clears the active layer on this page. You can undo it from Markup.',
+        title: Text(
+          allLayers
+              ? 'Clear all markup on this page?'
+              : 'Clear the active layer on this page?',
+        ),
+        content: Text(
+          allLayers
+              ? 'This clears all ink layers on this page, including hidden layers. You can undo it from Markup.'
+              : 'This clears the active layer on this page. You can undo it from Markup.',
         ),
         actions: [
           TextButton(
@@ -8515,9 +8567,13 @@ class _ReaderState extends State<Reader> {
     if (mounted &&
         clear == true &&
         _inking &&
-        _activeInkLayer == layer &&
+        (allLayers || _activeInkLayer == layer) &&
         _ink[page] == ink) {
-      ink.clearActiveLayer();
+      if (allLayers) {
+        ink.clearAllInk();
+      } else {
+        ink.clearActiveLayer();
+      }
     }
   }
 
@@ -8530,7 +8586,11 @@ class _ReaderState extends State<Reader> {
     unawaited(_saveDrawing(_drawing.copyWith(selected: index)));
   }
 
-  Widget _markupPalette({required bool wide, bool canMove = false}) => Material(
+  Widget _markupPalette({
+    required bool wide,
+    required Size viewport,
+    required Alignment position,
+  }) => Material(
     color: _rail,
     elevation: 3,
     borderRadius: BorderRadius.circular(12),
@@ -8584,18 +8644,19 @@ class _ReaderState extends State<Reader> {
           ),
         ),
         TextButton(onPressed: _toggleInk, child: const Text('Done')),
-        if (canMove)
-          IconButton(
-            tooltip: _markupPaletteAtTop
-                ? 'Move markup tools to bottom'
-                : 'Move markup tools to top',
-            onPressed: _moveMarkupPalette,
-            icon: Icon(
-              _markupPaletteAtTop
-                  ? Icons.vertical_align_bottom
-                  : Icons.vertical_align_top,
+        Tooltip(
+          message: 'Move markup tools',
+          child: GestureDetector(
+            onPanUpdate: (details) =>
+                _dragMarkupPalette(details, viewport, position),
+            onPanEnd: (_) => _saveMarkupPalettePosition(),
+            onPanCancel: _saveMarkupPalettePosition,
+            child: IconButton(
+              onPressed: _moveMarkupPalette,
+              icon: const Icon(Icons.drag_indicator),
             ),
           ),
+        ),
         _toolButton(InkTool.pen, Icons.edit_outlined, 'Pen'),
         if (wide)
           for (final (index, preset) in _drawing.presets.take(3).indexed)
@@ -8814,10 +8875,23 @@ class _ReaderState extends State<Reader> {
           onPressed: _showInkLayers,
           icon: const Icon(Icons.layers_outlined),
         ),
-        IconButton(
-          tooltip: 'Clear active layer on this page',
-          onPressed: _activeInkLayer == null ? null : _clearMarkupPage,
+        PopupMenuButton<bool>(
+          tooltip: 'Clear markup',
           icon: const Icon(Icons.delete_sweep_outlined),
+          onSelected: (allLayers) => _clearMarkupPage(allLayers: allLayers),
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: false,
+              enabled:
+                  _ink[_annotationPage ?? _page]?.hasActiveLayerInk == true,
+              child: const Text('Clear active layer on this page'),
+            ),
+            PopupMenuItem(
+              value: true,
+              enabled: _ink[_annotationPage ?? _page]?.hasInk == true,
+              child: const Text('Clear all markup on this page'),
+            ),
+          ],
         ),
         Semantics(
           label: 'Allow finger drawing',
@@ -8886,11 +8960,14 @@ class _ReaderState extends State<Reader> {
             viewport.width - _viewer.documentToLocal(page.bottomRight).dx;
       }
       final gutter = math.max(leftGutter, rightGutter);
-      if (viewport.width >= 720 && gutter >= 152) {
+      if (_markupPalettePosition == null &&
+          viewport.width >= 720 &&
+          gutter >= 152) {
+        final position = rightGutter >= leftGutter
+            ? Alignment.centerRight
+            : Alignment.centerLeft;
         return Align(
-          alignment: rightGutter >= leftGutter
-              ? Alignment.centerRight
-              : Alignment.centerLeft,
+          alignment: position,
           child: Padding(
             padding: const EdgeInsets.all(8),
             child: ConstrainedBox(
@@ -8898,21 +8975,35 @@ class _ReaderState extends State<Reader> {
                 maxWidth: math.min(220, gutter - 16),
                 maxHeight: math.max(0, viewport.height - 16),
               ),
-              child: SingleChildScrollView(child: _markupPalette(wide: true)),
+              child: SingleChildScrollView(
+                child: _markupPalette(
+                  wide: true,
+                  viewport: viewport,
+                  position: position,
+                ),
+              ),
             ),
           ),
         );
       }
+      final position =
+          _markupPalettePosition ??
+          (_markupPaletteAtTop ? Alignment.topCenter : Alignment.bottomCenter);
       return Align(
-        alignment: _markupPaletteAtTop
-            ? Alignment.topCenter
-            : Alignment.bottomCenter,
+        alignment: position,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: viewport.height * .45),
+            constraints: BoxConstraints(
+              maxHeight: viewport.height * .45,
+              maxWidth: _markupPalettePosition == null ? viewport.width : 660,
+            ),
             child: SingleChildScrollView(
-              child: _markupPalette(wide: viewport.width >= 720, canMove: true),
+              child: _markupPalette(
+                wide: viewport.width >= 720,
+                viewport: viewport,
+                position: position,
+              ),
             ),
           ),
         ),

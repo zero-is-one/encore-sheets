@@ -233,6 +233,12 @@ class PageInk extends ChangeNotifier {
     ]);
   }
 
+  bool get hasInk => _strokes.isNotEmpty;
+
+  void clearAllInk() {
+    if (hasInk) _replaceStrokes([]);
+  }
+
   bool get hasActiveLayerInk =>
       _activeLayer != null &&
       _strokes.any((stroke) => stroke.layer == _activeLayer);
