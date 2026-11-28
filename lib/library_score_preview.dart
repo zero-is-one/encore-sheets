@@ -68,6 +68,7 @@ class LibraryScorePreview extends StatelessWidget {
     required this.preview,
     required this.onOpen,
     required this.onEdit,
+    required this.options,
   });
 
   final String title;
@@ -75,6 +76,7 @@ class LibraryScorePreview extends StatelessWidget {
   final Future<Uint8List?> preview;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
+  final Widget options;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -84,34 +86,64 @@ class LibraryScorePreview extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: InkWell(
-            onTap: onOpen,
-            child: FutureBuilder<Uint8List?>(
-              future: preview,
-              builder: (context, snapshot) {
-                final data = snapshot.data;
-                return data == null
-                    ? const Center(child: Icon(Icons.description_outlined))
-                    : Image.memory(
-                        data,
-                        fit: BoxFit.contain,
-                        excludeFromSemantics: true,
-                      );
-              },
-            ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              InkWell(
+                onTap: onOpen,
+                child: FutureBuilder<Uint8List?>(
+                  future: preview,
+                  builder: (context, snapshot) {
+                    final data = snapshot.data;
+                    return data == null
+                        ? const Center(child: Icon(Icons.description_outlined))
+                        : Image.memory(
+                            data,
+                            fit: BoxFit.contain,
+                            excludeFromSemantics: true,
+                          );
+                  },
+                ),
+              ),
+              PositionedDirectional(
+                top: 4,
+                end: 4,
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Properties for $title',
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.info_outline),
+                      ),
+                      options,
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        ListTile(
-          dense: true,
+        InkWell(
           onTap: onOpen,
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: subtitle.isEmpty
-              ? null
-              : Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: IconButton(
-            tooltip: 'Properties for $title',
-            onPressed: onEdit,
-            icon: const Icon(Icons.info_outline),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (subtitle.isNotEmpty)
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
           ),
         ),
       ],

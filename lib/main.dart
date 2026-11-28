@@ -9079,6 +9079,57 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     ),
   );
 
+  Widget _scoreOptions(ScoreEntry score) => PopupMenuButton<String>(
+    tooltip: 'Options for ${score.title}',
+    onSelected: (action) {
+      if (action == 'setlist') {
+        _dropIntoSetlist(score.id);
+      } else if (action == 'libraries') {
+        _assignCollections(score);
+      } else if (action == 'ranges') {
+        _openBookmarkRange(score);
+      } else if (action == 'tab') {
+        Navigator.pop(context, 'tab:${score.id}');
+      } else if (action == 'copy') {
+        _copyLibraryScore(score);
+      } else if (action == 'trash') {
+        _trashScore(score);
+      } else if (action == 'extract') {
+        Navigator.pop(context, 'extract:${score.id}');
+      } else if (action == 'rearrange') {
+        Navigator.pop(context, 'rearrange:${score.id}');
+      } else if (action == 'clone') {
+        Navigator.pop(context, 'clone:${score.id}');
+      } else {
+        Navigator.pop(context, 'edit:${score.id}');
+      }
+    },
+    itemBuilder: (_) => [
+      if (widget.canOpenTabs)
+        const PopupMenuItem(value: 'tab', child: Text('Open in new tab')),
+      if (score.bookmarks.any((bookmark) => bookmark.isItem))
+        const PopupMenuItem(
+          value: 'ranges',
+          child: Text('Open bookmarked range'),
+        ),
+      const PopupMenuItem(value: 'setlist', child: Text('Add to setlist')),
+      const PopupMenuItem(value: 'copy', child: Text('Copy to clipboard')),
+      const PopupMenuItem(
+        value: 'details',
+        child: Text('Rename or edit details'),
+      ),
+      const PopupMenuItem(
+        value: 'libraries',
+        child: Text('Assign to libraries'),
+      ),
+      const PopupMenuItem(value: 'trash', child: Text('Delete score')),
+      if (!widget.transferRestricted)
+        const PopupMenuItem(value: 'extract', child: Text('Extract pages')),
+      const PopupMenuItem(value: 'rearrange', child: Text('Rearrange pages')),
+      const PopupMenuItem(value: 'clone', child: Text('Duplicate score')),
+    ],
+  );
+
   void _openListedScore(ScoreEntry score, List<ScoreEntry> visible) {
     widget.onScoreQueue([for (final item in visible) item.id]);
     Navigator.pop(context, score.id);
@@ -9338,6 +9389,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 preview: _preview(score),
                 onOpen: () => _openListedScore(score, visible),
                 onEdit: () => Navigator.pop(context, 'edit:${score.id}'),
+                options: _scoreOptions(score),
               );
             },
           )
@@ -9488,7 +9540,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                             vertical: 10,
                             horizontal: 4,
                           ),
-                          child: Text('Sort by ${_browseBy.toLowerCase()} ▾'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Sort by ${_browseBy.toLowerCase()}'),
+                              const Icon(Icons.arrow_drop_down),
+                            ],
+                          ),
                         ),
                       ),
                       if (!widget.focusSearch)
@@ -9530,10 +9588,16 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               vertical: 10,
                               horizontal: 4,
                             ),
-                            child: Text(
-                              _filters.isEmpty
-                                  ? 'Filter ▾'
-                                  : 'Filter (${_filters.length}) ▾',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _filters.isEmpty
+                                      ? 'Filter'
+                                      : 'Filter (${_filters.length})',
+                                ),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
                             ),
                           ),
                         ),
@@ -9834,107 +9898,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                               Icons.info_outline,
                                             ),
                                           ),
-                                          PopupMenuButton<String>(
-                                            tooltip:
-                                                'Options for ${score.title}',
-                                            onSelected: (action) {
-                                              if (action == 'setlist') {
-                                                _dropIntoSetlist(score.id);
-                                              } else if (action ==
-                                                  'libraries') {
-                                                _assignCollections(score);
-                                              } else if (action == 'ranges') {
-                                                _openBookmarkRange(score);
-                                              } else if (action == 'tab') {
-                                                Navigator.pop(
-                                                  context,
-                                                  'tab:${score.id}',
-                                                );
-                                              } else if (action == 'copy') {
-                                                _copyLibraryScore(score);
-                                              } else if (action == 'trash') {
-                                                _trashScore(score);
-                                              } else if (action == 'extract') {
-                                                Navigator.pop(
-                                                  context,
-                                                  'extract:${score.id}',
-                                                );
-                                              } else if (action ==
-                                                  'rearrange') {
-                                                Navigator.pop(
-                                                  context,
-                                                  'rearrange:${score.id}',
-                                                );
-                                              } else if (action == 'clone') {
-                                                Navigator.pop(
-                                                  context,
-                                                  'clone:${score.id}',
-                                                );
-                                              } else {
-                                                Navigator.pop(
-                                                  context,
-                                                  'edit:${score.id}',
-                                                );
-                                              }
-                                            },
-                                            itemBuilder: (_) => [
-                                              if (widget.canOpenTabs)
-                                                const PopupMenuItem(
-                                                  value: 'tab',
-                                                  child: Text(
-                                                    'Open in new tab',
-                                                  ),
-                                                ),
-                                              if (score.bookmarks.any(
-                                                (bookmark) => bookmark.isItem,
-                                              ))
-                                                const PopupMenuItem(
-                                                  value: 'ranges',
-                                                  child: Text(
-                                                    'Open bookmarked range',
-                                                  ),
-                                                ),
-                                              const PopupMenuItem(
-                                                value: 'setlist',
-                                                child: Text('Add to setlist'),
-                                              ),
-                                              const PopupMenuItem(
-                                                value: 'copy',
-                                                child: Text(
-                                                  'Copy to clipboard',
-                                                ),
-                                              ),
-                                              const PopupMenuItem(
-                                                value: 'details',
-                                                child: Text(
-                                                  'Rename or edit details',
-                                                ),
-                                              ),
-                                              const PopupMenuItem(
-                                                value: 'libraries',
-                                                child: Text(
-                                                  'Assign to libraries',
-                                                ),
-                                              ),
-                                              const PopupMenuItem(
-                                                value: 'trash',
-                                                child: Text('Delete score'),
-                                              ),
-                                              if (!widget.transferRestricted)
-                                                const PopupMenuItem(
-                                                  value: 'extract',
-                                                  child: Text('Extract pages'),
-                                                ),
-                                              const PopupMenuItem(
-                                                value: 'rearrange',
-                                                child: Text('Rearrange pages'),
-                                              ),
-                                              const PopupMenuItem(
-                                                value: 'clone',
-                                                child: Text('Duplicate score'),
-                                              ),
-                                            ],
-                                          ),
+                                          _scoreOptions(score),
                                         ],
                                       ),
                                       onTap: () =>
