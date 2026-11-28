@@ -66,7 +66,6 @@ import 'practice_dashboard.dart';
 import 'practice_goals.dart';
 import 'face_page_turn.dart';
 import 'measure_clipboard.dart';
-import 'quick_reader_tools.dart';
 import 'settings_profiles.dart';
 import 'metadata_symbols.dart';
 import 'share_reader_link.dart';
@@ -97,6 +96,8 @@ import 'text_annotation_dialog.dart';
 enum _ReaderMenu { display, score, tools }
 
 enum _AudioUtility { metronome, pitch, tuner }
+
+enum _CornerMenu { scores, bookmarks, setlists, search, audio, tools }
 
 enum _ReaderDisplay {
   readerSettings,
@@ -311,8 +312,9 @@ class _ReaderState extends State<Reader> {
   bool _copyingMeasure = false;
   int? _pdfSelectionPage;
   List<Offset> _pdfSelection = [];
-  Set<QuickReaderTool> _quickTools = QuickReaderTool.values.toSet();
-  QuickReaderTool? _lastQuickTool;
+  final _cornerToolsMenuController = MenuController();
+  _CornerMenu _lastLeftMenu = _CornerMenu.scores;
+  _CornerMenu _lastRightMenu = _CornerMenu.tools;
   Map<String, String> _metadataSymbols = {};
   ReaderAppearanceOptions _appearance = const ReaderAppearanceOptions();
 
@@ -595,7 +597,6 @@ class _ReaderState extends State<Reader> {
             _showControls = false;
           }
           _practice.enabled = data['practiceTracking'] == true;
-          _quickTools = readQuickReaderTools(data['quickReaderTools']);
           _metadataSymbols = readMetadataSymbols(data['metadataSymbols']);
           _appearance = ReaderAppearanceOptions.fromJson(
             data['appearanceOptions'],
@@ -692,16 +693,46 @@ class _ReaderState extends State<Reader> {
       return false;
     final cornerWidth = math.min(64, viewport.width * .16);
     if (edge < 0 && position.dx <= cornerWidth) {
-      unawaited(_showLibrary());
+      final menu =
+          _lastLeftMenu == _CornerMenu.bookmarks &&
+              (_entry == null || _pages == 0)
+          ? _CornerMenu.scores
+          : _lastLeftMenu;
+      _openCornerMenu(menu);
       return true;
     }
-    if (_lastQuickTool case final tool?
-        when edge > 0 && position.dx >= viewport.width - cornerWidth) {
-      if (!_quickTools.contains(tool) || !_quickToolEnabled(tool)) return false;
-      unawaited(_runQuickTool(tool));
+    if (edge > 0 && position.dx >= viewport.width - cornerWidth) {
+      final menu =
+          _lastRightMenu == _CornerMenu.audio && !ScoreAudioSession.supported
+          ? _CornerMenu.tools
+          : _lastRightMenu;
+      _openCornerMenu(menu);
       return true;
     }
     return false;
+  }
+
+  void _openCornerMenu(_CornerMenu menu) {
+    switch (menu) {
+      case _CornerMenu.scores:
+        _lastLeftMenu = menu;
+        unawaited(_showLibrary());
+      case _CornerMenu.bookmarks:
+        _lastLeftMenu = menu;
+        unawaited(_showBookmarks());
+      case _CornerMenu.setlists:
+        _lastLeftMenu = menu;
+        unawaited(_showLibrary(setlists: true));
+      case _CornerMenu.search:
+        _lastRightMenu = menu;
+        unawaited(_showLibrary(focusSearch: true));
+      case _CornerMenu.audio:
+        _lastRightMenu = menu;
+        unawaited(_showMetronome(showUtilities: true));
+      case _CornerMenu.tools:
+        _lastRightMenu = menu;
+        _cornerToolsMenuController.open();
+    }
   }
 
   Future<void> _configureGestures() async {
@@ -759,8 +790,8 @@ class _ReaderState extends State<Reader> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Corner shortcuts'),
                   subtitle: const Text(
-                    'With controls hidden, tap the top left to open the library '
-                    'or the top right to repeat your last Quick access tool.',
+                    'With controls hidden, tap a top corner to reopen the '
+                    'last menu you used on that side.',
                   ),
                   value: cornerShortcuts,
                   onChanged: (value) => update(() => cornerShortcuts = value),
@@ -1061,49 +1092,6 @@ class _ReaderState extends State<Reader> {
       );
     },
   );
-
-  Future<void> _runQuickTool(QuickReaderTool tool) async {
-    _lastQuickTool = tool;
-    switch (tool) {
-      case QuickReaderTool.library:
-        await _showLibrary();
-      case QuickReaderTool.bookmarks:
-        await _showBookmarks();
-      case QuickReaderTool.layers:
-        await _showInkLayers();
-      case QuickReaderTool.presets:
-        await _configureDrawing();
-      case QuickReaderTool.metronome:
-        await _showMetronome();
-      case QuickReaderTool.fit:
-        _fit();
-    }
-  }
-
-  Future<void> _pinQuickTools() async {
-    final result = await chooseQuickReaderTools(context, _quickTools);
-    if (!mounted || result == null) return;
-    try {
-      await _library.updatePreferences({
-        'quickReaderTools': result.map((tool) => tool.name).toList(),
-      });
-      if (mounted) setState(() => _quickTools = result);
-    } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save quick-access tools.')),
-        );
-    }
-  }
-
-  bool _quickToolEnabled(QuickReaderTool tool) => switch (tool) {
-    QuickReaderTool.layers ||
-    QuickReaderTool.presets => !_restricted(RestrictedTool.markup),
-    QuickReaderTool.bookmarks => _entry != null && _pages > 0,
-    QuickReaderTool.fit => _pages > 0,
-    QuickReaderTool.metronome => ScoreAudioSession.supported,
-    QuickReaderTool.library => true,
-  };
 
   bool _faceSetupComplete = false;
 
@@ -6372,6 +6360,14 @@ class _ReaderState extends State<Reader> {
                         fit: StackFit.expand,
                         children: [
                           _deskewedScore(),
+                          if (!_showControls &&
+                              !_performance &&
+                              _preferences.cornerShortcuts)
+                            PositionedDirectional(
+                              top: 0,
+                              end: 0,
+                              child: _readerToolsMenu(corner: true),
+                            ),
                           if (_inking) _markupOverlay(),
                           if (_autoScrollTicker.isActive && !_performance)
                             PositionedDirectional(
@@ -6519,19 +6515,23 @@ class _ReaderState extends State<Reader> {
         final navigation = <Widget>[
           IconButton(
             tooltip: ReaderText.library.of(context),
-            onPressed: _picking ? null : _showLibrary,
+            onPressed: _picking
+                ? null
+                : () => _openCornerMenu(_CornerMenu.scores),
             icon: const Icon(Icons.library_music_outlined),
           ),
           IconButton(
             tooltip: 'Bookmarks',
             onPressed: _picking || _entry == null || _pages == 0
                 ? null
-                : _showBookmarks,
+                : () => _openCornerMenu(_CornerMenu.bookmarks),
             icon: const Icon(Icons.bookmark_outline),
           ),
           IconButton(
             tooltip: ReaderText.setlists.of(context),
-            onPressed: _picking ? null : () => _showLibrary(setlists: true),
+            onPressed: _picking
+                ? null
+                : () => _openCornerMenu(_CornerMenu.setlists),
             icon: const Icon(Icons.queue_music),
           ),
           if (!_restricted(RestrictedTool.transfers) &&
@@ -6560,7 +6560,9 @@ class _ReaderState extends State<Reader> {
             ),
           IconButton(
             tooltip: ReaderText.search.of(context),
-            onPressed: _picking ? null : () => _showLibrary(focusSearch: true),
+            onPressed: _picking
+                ? null
+                : () => _openCornerMenu(_CornerMenu.search),
             icon: const Icon(Icons.search),
           ),
         ];
@@ -6667,25 +6669,7 @@ class _ReaderState extends State<Reader> {
     icon: const Icon(Icons.timer_outlined),
     onPressed: _picking || !ScoreAudioSession.supported
         ? null
-        : () => _showMetronome(showUtilities: true),
-  );
-
-  Widget _quickAccessMenu() => SubmenuButton(
-    leadingIcon: const Icon(Icons.bolt_outlined),
-    menuChildren: [
-      for (final tool in _quickTools)
-        MenuItemButton(
-          onPressed: _quickToolEnabled(tool) ? () => _runQuickTool(tool) : null,
-          leadingIcon: Icon(tool.icon),
-          child: Text(tool.label),
-        ),
-      MenuItemButton(
-        onPressed: _pinQuickTools,
-        leadingIcon: const Icon(Icons.push_pin_outlined),
-        child: const Text('Pin tools…'),
-      ),
-    ],
-    child: const Text('Quick access'),
+        : () => _openCornerMenu(_CornerMenu.audio),
   );
 
   static const _displayActions = {
@@ -7481,7 +7465,7 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Widget _readerToolsMenu() {
+  Widget _readerToolsMenu({bool corner = false}) {
     final items = {
       for (final group in [_ReaderMenu.tools, _ReaderMenu.score])
         for (final item in _readerMenuItems(group)) item.value!: item,
@@ -7568,7 +7552,6 @@ class _ReaderState extends State<Reader> {
         SubmenuButton(
           leadingIcon: const Icon(Icons.more_horiz),
           menuChildren: [
-            _quickAccessMenu(),
             for (final entry in items.entries)
               MenuItemButton(
                 onPressed: entry.value.enabled
@@ -7582,15 +7565,22 @@ class _ReaderState extends State<Reader> {
       );
     }
     return MenuAnchor(
+      controller: corner ? _cornerToolsMenuController : null,
+      onOpen: () => _lastRightMenu = _CornerMenu.tools,
       style: const MenuStyle(visualDensity: VisualDensity.compact),
       menuChildren: menu,
-      builder: (context, controller, child) => IconButton(
-        tooltip: ReaderText.tools.of(context),
-        icon: const Icon(Icons.work_outline),
-        onPressed: _picking
-            ? null
-            : () => controller.isOpen ? controller.close() : controller.open(),
-      ),
+      child: corner ? const SizedBox(width: 1, height: 1) : null,
+      builder: (context, controller, child) =>
+          child ??
+          IconButton(
+            tooltip: ReaderText.tools.of(context),
+            icon: const Icon(Icons.work_outline),
+            onPressed: _picking
+                ? null
+                : () => controller.isOpen
+                      ? controller.close()
+                      : controller.open(),
+          ),
     );
   }
 

@@ -10,7 +10,11 @@ import 'package:encoresheets/vertical_score_layout.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart'
-    show GridView, SizedBox, SliverGridDelegateWithFixedCrossAxisCount;
+    show
+        GridView,
+        SizedBox,
+        SliverGridDelegateWithFixedCrossAxisCount,
+        ValueKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart'
     show CheckedPopupMenuItem, IconButton, Icons, IconTheme, InputChip, Slider;
@@ -61,8 +65,10 @@ void main() {
       await library.saveSetlist(Setlist('assign', 'Assignment test', []));
       await library.updatePreferences({
         'dockPanels': true,
+        'cornerShortcuts': true,
         'readerShortcuts': {
           shortcutKey(LogicalKeyboardKey.keyS): ReaderShortcut.autoScroll.name,
+          shortcutKey(LogicalKeyboardKey.keyH): ReaderShortcut.controls.name,
         },
       });
     });
@@ -430,6 +436,19 @@ void main() {
               .evaluate()
               .isEmpty,
     );
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Reader tools'), findsNothing);
+    final scoreViewport = find.byKey(const ValueKey('score-viewport'));
+    await tester.tapAt(
+      tester.getTopRight(scoreViewport) + const Offset(-16, 16),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Edit this score'), findsOneWidget);
+    expect(find.byTooltip('Reader tools'), findsNothing);
+    await tester.tapAt(tester.getCenter(scoreViewport));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit this score'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     for (var attempt = 0; attempt < 20; attempt++) {
