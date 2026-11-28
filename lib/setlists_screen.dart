@@ -31,6 +31,8 @@ String _durationText(ScoreLibrary library, Iterable<String> selections) {
   return parts.join(' · ');
 }
 
+typedef SetlistPlayback = ({Setlist setlist, int startIndex});
+
 class SetlistsScreen extends StatefulWidget {
   const SetlistsScreen({
     super.key,
@@ -164,7 +166,10 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       },
       lastPlayed: (id) => widget.library.lastSetlistPlay(list.id, id),
     );
-    Navigator.pop(context, list.copyWith(scores: items));
+    Navigator.pop(context, (
+      setlist: list.copyWith(scores: items),
+      startIndex: 0,
+    ));
   }
 
   Future<void> _move(Setlist current, Setlist other) async {
@@ -180,7 +185,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
   }
 
   Future<void> _inspect(Setlist list) async {
-    final play = await Navigator.of(context).push<Setlist>(
+    final play = await Navigator.of(context).push<SetlistPlayback>(
       MaterialPageRoute(
         builder: (context) => StatefulBuilder(
           builder: (context, refresh) {
@@ -202,7 +207,10 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
                   TextButton.icon(
                     onPressed: current.scores.isEmpty
                         ? null
-                        : () => Navigator.pop(context, current),
+                        : () => Navigator.pop(context, (
+                            setlist: current,
+                            startIndex: 0,
+                          )),
                     icon: const Icon(Icons.play_arrow),
                     label: const Text('Play'),
                   ),
@@ -221,6 +229,16 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
                   for (final (index, id) in current.scores.indexed)
                     ListTile(
                       leading: Text('${index + 1}'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.play_arrow),
+                        tooltip: 'Play from item ${index + 1}',
+                        onPressed: widget.library.lookupSelection(id) == null
+                            ? null
+                            : () => Navigator.pop(context, (
+                                setlist: current,
+                                startIndex: index,
+                              )),
+                      ),
                       title: Text(switch (widget.library.lookupSelection(id)) {
                         (final score, final bookmark) =>
                           bookmark?.title ?? score.title,
@@ -261,7 +279,8 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
         if (list.scores.isNotEmpty)
           IconButton(
             tooltip: 'Play ${list.name}',
-            onPressed: () => Navigator.pop(context, list),
+            onPressed: () =>
+                Navigator.pop(context, (setlist: list, startIndex: 0)),
             icon: const Icon(Icons.play_arrow),
           ),
         PopupMenuButton<_SetlistAction>(

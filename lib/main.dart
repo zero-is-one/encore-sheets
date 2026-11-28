@@ -415,10 +415,7 @@ class _ReaderState extends State<Reader> {
   );
 
   String? get _nextTitle {
-    if (!_preferences.showNextTitle ||
-        !_hasNextScore ||
-        _pages == 0 ||
-        _page != _lastPage)
+    if (!_preferences.showNextTitle || !_hasNextScore || _pages == 0)
       return null;
     final next = _library.lookupSelection(_playing!.scores[_setIndex + 1]);
     return next?.$2?.title ?? next?.$1.title;
@@ -1911,14 +1908,16 @@ class _ReaderState extends State<Reader> {
         return;
       }
       if (result == 'setlists') {
-        final setlist = await _openReaderPanel<Setlist>(
+        final playback = await _openReaderPanel<SetlistPlayback>(
           (_) => SetlistsScreen(
             library: _library,
             allowTransfers: !_restricted(RestrictedTool.transfers),
           ),
           dockable: true,
         );
-        if (setlist != null && mounted) await _playScore(setlist, 0);
+        if (playback != null && mounted) {
+          await _playScore(playback.setlist, playback.startIndex);
+        }
         return;
       }
       if (result == 'support') {
@@ -6438,11 +6437,16 @@ class _ReaderState extends State<Reader> {
                     ),
                     if (_metronome case final meter?)
                       MetronomeBeat(metronome: meter),
-                    if (_nextTitle case final title?)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(
-                          'Next: $title',
+                    if (_playing case final setlist?
+                        when !_performance && _showControls)
+                      TextButton.icon(
+                        onPressed: _picking ? null : _showNowPlaying,
+                        icon: const Icon(Icons.queue_music),
+                        label: Text(
+                          [
+                            setlist.name,
+                            if (_nextTitle case final title?) 'Next: $title',
+                          ].join(' · '),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
