@@ -72,6 +72,8 @@ import 'metadata_symbols.dart';
 import 'share_reader_link.dart';
 import 'reader_appearance_options.dart';
 import 'library_search_options.dart';
+import 'library_score_preview.dart';
+import 'program_duration.dart';
 import 'local_maintenance.dart';
 import 'launcher_icons.dart';
 import 'reader_restrictions.dart';
@@ -8094,6 +8096,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     final saved = widget.focusSearch
         ? const <String, dynamic>{}
         : widget.browseState;
+    _gridView = saved['gridView'] == true;
     if (saved['sort'] case final String sort
         when _sortLabels.containsKey(sort)) {
       _browseBy = sort;
@@ -8148,6 +8151,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   void _saveBrowseState() {
     widget.onBrowseState({
       'sort': _browseBy,
+      'gridView': _gridView,
       'collection': _collection,
       'exclude': _excludeCollection,
       'unassigned': _unassigned,
@@ -8194,6 +8198,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
 
   String _query = '';
   String _browseBy = 'Recent';
+  bool _gridView = false;
+  final Map<String, Future<Uint8List?>> _scorePreviews = {};
   String? _filterField;
   final Map<String, String> _filters = {};
   final Map<String, ({Map<String, String> filters, String sort})>
@@ -8516,7 +8522,35 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     'Composer': 'Composer',
     'Genre': 'Genre',
     'Rating': 'Rating (highest first)',
+    'Key': 'Key',
+    'Tempo': 'Tempo',
+    'Duration': 'Duration',
   };
+
+  Future<Uint8List?> _preview(ScoreEntry score) {
+    if (_scorePreviews.length >= 64 && !_scorePreviews.containsKey(score.id)) {
+      _scorePreviews.remove(_scorePreviews.keys.first);
+    }
+    return _scorePreviews.putIfAbsent(
+      score.id,
+      () => renderLibraryScorePreview(
+        widget.library,
+        score,
+      ).catchError((Object _) => null),
+    );
+  }
+
+  void _openListedScore(ScoreEntry score, List<ScoreEntry> visible) {
+    widget.onScoreQueue([for (final item in visible) item.id]);
+    Navigator.pop(context, score.id);
+  }
+
+  String _scoreByline(ScoreEntry score) => [
+    if (score.metadata['composer'] case final value? when value.isNotEmpty)
+      value,
+    if (score.metadata['tempo'] case final value? when value.isNotEmpty)
+      '$value BPM',
+  ].join(' · ');
 
   static Map<String, String> _readFilters(Object? source) => {
     if (source is Map)
@@ -8630,12 +8664,23 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         .toList();
     if (_browseBy != 'Recent') {
       visible.sort((a, b) {
-        final field = _fields[_browseBy];
+        final field = _fields[_browseBy] ?? _browseBy.toLowerCase();
         final av = a.metadata[field] ?? '';
         final bv = b.metadata[field] ?? '';
-        final order = _browseBy == 'Rating'
-            ? (double.tryParse(bv) ?? 0).compareTo(double.tryParse(av) ?? 0)
-            : av.toLowerCase().compareTo(bv.toLowerCase());
+        final order = switch (_browseBy) {
+          'Rating' => (double.tryParse(bv) ?? 0).compareTo(
+            double.tryParse(av) ?? 0,
+          ),
+          'Tempo' => (double.tryParse(av) ?? double.infinity).compareTo(
+            double.tryParse(bv) ?? double.infinity,
+          ),
+          'Duration' =>
+            (parseScoreDuration(av)?.inSeconds ?? double.infinity).compareTo(
+              parseScoreDuration(bv)?.inSeconds ?? double.infinity,
+            ),
+          'Title' => 0,
+          _ => av.toLowerCase().compareTo(bv.toLowerCase()),
+        };
         return order != 0
             ? order
             : _searchOptions
@@ -8697,6 +8742,36 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     final indices =
         (_query.isEmpty ? const LibrarySearchOptions() : _searchOptions)
             .orderedResults(groups);
+    final showGrid =
+        _gridView &&
+        !widget.focusSearch &&
+        (_query.isEmpty ||
+            (matchingBookmarks.isEmpty &&
+                matchingSets.isEmpty &&
+                actions.isEmpty));
+    final grid = showGrid && visible.isNotEmpty
+        ? GridView.builder(
+            controller: _libraryScroll,
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 240,
+              mainAxisExtent: 210,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: visible.length,
+            itemBuilder: (context, index) {
+              final score = visible[index];
+              return LibraryScorePreview(
+                key: ValueKey(score.id),
+                title: score.title,
+                subtitle: _scoreByline(score),
+                preview: _preview(score),
+                onOpen: () => _openListedScore(score, visible),
+                onEdit: () => Navigator.pop(context, 'edit:${score.id}'),
+              );
+            },
+          )
+        : null;
     return Scaffold(
       appBar: AppBar(
         title: _draggingScore
@@ -8780,14 +8855,35 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       PopupMenuButton<String>(
                         tooltip: 'Sort library',
                         initialValue: _browseBy,
-                        onSelected: (value) =>
-                            setState(() => _browseBy = value),
+                        onSelected: (value) => setState(() {
+                          if (value == 'list' || value == 'grid') {
+                            _gridView = value == 'grid';
+                            _browseOffset = 0;
+                            if (_libraryScroll.hasClients)
+                              _libraryScroll.jumpTo(0);
+                          } else {
+                            _browseBy = value;
+                          }
+                        }),
                         itemBuilder: (_) => [
                           for (final option in _sortLabels.entries)
                             PopupMenuItem(
                               value: option.key,
                               child: Text(option.value),
                             ),
+                          if (!widget.focusSearch) ...[
+                            const PopupMenuDivider(),
+                            CheckedPopupMenuItem(
+                              value: 'list',
+                              checked: !_gridView,
+                              child: const Text('List view'),
+                            ),
+                            CheckedPopupMenuItem(
+                              value: 'grid',
+                              checked: _gridView,
+                              child: const Text('Grid view'),
+                            ),
+                          ],
                         ],
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -9006,206 +9102,222 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               }
                               return false;
                             },
-                            child: ListView.builder(
-                              controller: _libraryScroll,
-                              itemCount: indices.length,
-                              itemBuilder: (context, selectionIndex) {
-                                var index = indices[selectionIndex];
-                                if (index >= visible.length &&
-                                    index <
-                                        visible.length +
-                                            matchingBookmarks.length) {
-                                  final (score, bookmark) =
-                                      matchingBookmarks[index - visible.length];
-                                  return ListTile(
-                                    leading: const Icon(Icons.bookmark_outline),
-                                    title: Text(bookmark.title),
-                                    subtitle: Text(
-                                      '${score.title} · Page ${bookmark.page}',
-                                    ),
-                                    onTap: () {
-                                      widget.onScoreQueue([
-                                        for (final (parent, item)
-                                            in matchingBookmarks)
-                                          if (item.isItem)
-                                            item.selectionId(parent.id),
-                                      ]);
-                                      Navigator.pop(
-                                        context,
-                                        'bookmark:${score.id}:${bookmark.id}',
+                            child:
+                                grid ??
+                                ListView.builder(
+                                  controller: _libraryScroll,
+                                  itemCount: indices.length,
+                                  itemBuilder: (context, selectionIndex) {
+                                    var index = indices[selectionIndex];
+                                    if (index >= visible.length &&
+                                        index <
+                                            visible.length +
+                                                matchingBookmarks.length) {
+                                      final (score, bookmark) =
+                                          matchingBookmarks[index -
+                                              visible.length];
+                                      return ListTile(
+                                        leading: const Icon(
+                                          Icons.bookmark_outline,
+                                        ),
+                                        title: Text(bookmark.title),
+                                        subtitle: Text(
+                                          '${score.title} · Page ${bookmark.page}',
+                                        ),
+                                        onTap: () {
+                                          widget.onScoreQueue([
+                                            for (final (parent, item)
+                                                in matchingBookmarks)
+                                              if (item.isItem)
+                                                item.selectionId(parent.id),
+                                          ]);
+                                          Navigator.pop(
+                                            context,
+                                            'bookmark:${score.id}:${bookmark.id}',
+                                          );
+                                        },
                                       );
-                                    },
-                                  );
-                                }
-                                if (index >= visible.length)
-                                  index -= matchingBookmarks.length;
-                                if (index >=
-                                    visible.length + matchingSets.length) {
-                                  final action =
-                                      actions[index -
-                                          visible.length -
-                                          matchingSets.length];
-                                  return ListTile(
-                                    leading: const Icon(Icons.arrow_outward),
-                                    title: Text(action.value),
-                                    onTap: () =>
-                                        Navigator.pop(context, action.key),
-                                  );
-                                }
-                                if (index >= visible.length) {
-                                  final setlist =
-                                      matchingSets[index - visible.length];
-                                  return ListTile(
-                                    leading: const Icon(Icons.queue_music),
-                                    title: Text(setlist.name),
-                                    subtitle: const Text('Setlist'),
-                                    onTap: () => Navigator.pop(
-                                      context,
-                                      'set:${setlist.id}',
-                                    ),
-                                  );
-                                }
-                                final score = visible[index];
-                                return ListTile(
-                                  leading: LongPressDraggable<String>(
-                                    data: score.id,
-                                    onDragStarted: () => _showDragTargets(true),
-                                    onDragEnd: (_) => _showDragTargets(false),
-                                    feedback: Material(
-                                      elevation: 5,
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(10),
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(
-                                            maxWidth: 220,
+                                    }
+                                    if (index >= visible.length)
+                                      index -= matchingBookmarks.length;
+                                    if (index >=
+                                        visible.length + matchingSets.length) {
+                                      final action =
+                                          actions[index -
+                                              visible.length -
+                                              matchingSets.length];
+                                      return ListTile(
+                                        leading: const Icon(
+                                          Icons.arrow_outward,
+                                        ),
+                                        title: Text(action.value),
+                                        onTap: () =>
+                                            Navigator.pop(context, action.key),
+                                      );
+                                    }
+                                    if (index >= visible.length) {
+                                      final setlist =
+                                          matchingSets[index - visible.length];
+                                      return ListTile(
+                                        leading: const Icon(Icons.queue_music),
+                                        title: Text(setlist.name),
+                                        subtitle: const Text('Setlist'),
+                                        onTap: () => Navigator.pop(
+                                          context,
+                                          'set:${setlist.id}',
+                                        ),
+                                      );
+                                    }
+                                    final score = visible[index];
+                                    return ListTile(
+                                      leading: LongPressDraggable<String>(
+                                        data: score.id,
+                                        onDragStarted: () =>
+                                            _showDragTargets(true),
+                                        onDragEnd: (_) =>
+                                            _showDragTargets(false),
+                                        feedback: Material(
+                                          elevation: 5,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
                                           ),
-                                          child: Text(
-                                            score.title,
-                                            overflow: TextOverflow.ellipsis,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(10),
+                                            child: ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 220,
+                                              ),
+                                              child: Text(
+                                                score.title,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                    child: IconButton(
-                                      tooltip: 'Add to setlist',
-                                      onPressed: () =>
-                                          _dropIntoSetlist(score.id),
-                                      icon: const Icon(Icons.playlist_add),
-                                    ),
-                                  ),
-                                  title: Text(score.title),
-                                  dense: widget.compact,
-                                  subtitle: widget.compact
-                                      ? (score.isSample
-                                            ? const Text('Sample score')
-                                            : null)
-                                      : Text(
-                                          [
-                                            if (score.isSample) 'Sample score',
-                                            if (score.metadata['composer']
-                                                case final composer?)
-                                              composer,
-                                            'Resume at page ${score.page}',
-                                          ].join(' · '),
+                                        child: IconButton(
+                                          tooltip: 'Add to setlist',
+                                          onPressed: () =>
+                                              _dropIntoSetlist(score.id),
+                                          icon: const Icon(Icons.playlist_add),
                                         ),
-                                  trailing: PopupMenuButton<String>(
-                                    tooltip: 'Options for ${score.title}',
-                                    onSelected: (action) {
-                                      if (action == 'setlist') {
-                                        _dropIntoSetlist(score.id);
-                                      } else if (action == 'libraries') {
-                                        _assignCollections(score);
-                                      } else if (action == 'ranges') {
-                                        _openBookmarkRange(score);
-                                      } else if (action == 'tab') {
-                                        Navigator.pop(
-                                          context,
-                                          'tab:${score.id}',
-                                        );
-                                      } else if (action == 'copy') {
-                                        _copyLibraryScore(score);
-                                      } else if (action == 'trash') {
-                                        _trashScore(score);
-                                      } else if (action == 'extract') {
-                                        Navigator.pop(
-                                          context,
-                                          'extract:${score.id}',
-                                        );
-                                      } else if (action == 'rearrange') {
-                                        Navigator.pop(
-                                          context,
-                                          'rearrange:${score.id}',
-                                        );
-                                      } else if (action == 'clone') {
-                                        Navigator.pop(
-                                          context,
-                                          'clone:${score.id}',
-                                        );
-                                      } else {
-                                        Navigator.pop(
-                                          context,
-                                          'edit:${score.id}',
-                                        );
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
-                                      if (widget.canOpenTabs)
-                                        const PopupMenuItem(
-                                          value: 'tab',
-                                          child: Text('Open in new tab'),
-                                        ),
-                                      if (score.bookmarks.any(
-                                        (bookmark) => bookmark.isItem,
-                                      ))
-                                        const PopupMenuItem(
-                                          value: 'ranges',
-                                          child: Text('Open bookmarked range'),
-                                        ),
-                                      const PopupMenuItem(
-                                        value: 'setlist',
-                                        child: Text('Add to setlist'),
                                       ),
-                                      const PopupMenuItem(
-                                        value: 'copy',
-                                        child: Text('Copy to clipboard'),
+                                      title: Text(score.title),
+                                      dense: widget.compact,
+                                      subtitle: widget.compact
+                                          ? (score.isSample
+                                                ? const Text('Sample score')
+                                                : null)
+                                          : Text(
+                                              [
+                                                if (score.isSample)
+                                                  'Sample score',
+                                                if (score.metadata['composer']
+                                                    case final composer?)
+                                                  composer,
+                                                if (score.metadata['tempo']
+                                                    case final tempo?
+                                                    when tempo.isNotEmpty)
+                                                  '$tempo BPM',
+                                                'Resume at page ${score.page}',
+                                              ].join(' · '),
+                                            ),
+                                      trailing: PopupMenuButton<String>(
+                                        tooltip: 'Options for ${score.title}',
+                                        onSelected: (action) {
+                                          if (action == 'setlist') {
+                                            _dropIntoSetlist(score.id);
+                                          } else if (action == 'libraries') {
+                                            _assignCollections(score);
+                                          } else if (action == 'ranges') {
+                                            _openBookmarkRange(score);
+                                          } else if (action == 'tab') {
+                                            Navigator.pop(
+                                              context,
+                                              'tab:${score.id}',
+                                            );
+                                          } else if (action == 'copy') {
+                                            _copyLibraryScore(score);
+                                          } else if (action == 'trash') {
+                                            _trashScore(score);
+                                          } else if (action == 'extract') {
+                                            Navigator.pop(
+                                              context,
+                                              'extract:${score.id}',
+                                            );
+                                          } else if (action == 'rearrange') {
+                                            Navigator.pop(
+                                              context,
+                                              'rearrange:${score.id}',
+                                            );
+                                          } else if (action == 'clone') {
+                                            Navigator.pop(
+                                              context,
+                                              'clone:${score.id}',
+                                            );
+                                          } else {
+                                            Navigator.pop(
+                                              context,
+                                              'edit:${score.id}',
+                                            );
+                                          }
+                                        },
+                                        itemBuilder: (_) => [
+                                          if (widget.canOpenTabs)
+                                            const PopupMenuItem(
+                                              value: 'tab',
+                                              child: Text('Open in new tab'),
+                                            ),
+                                          if (score.bookmarks.any(
+                                            (bookmark) => bookmark.isItem,
+                                          ))
+                                            const PopupMenuItem(
+                                              value: 'ranges',
+                                              child: Text(
+                                                'Open bookmarked range',
+                                              ),
+                                            ),
+                                          const PopupMenuItem(
+                                            value: 'setlist',
+                                            child: Text('Add to setlist'),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'copy',
+                                            child: Text('Copy to clipboard'),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'details',
+                                            child: Text(
+                                              'Rename or edit details',
+                                            ),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'libraries',
+                                            child: Text('Assign to libraries'),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'trash',
+                                            child: Text('Delete score'),
+                                          ),
+                                          if (!widget.transferRestricted)
+                                            const PopupMenuItem(
+                                              value: 'extract',
+                                              child: Text('Extract pages'),
+                                            ),
+                                          const PopupMenuItem(
+                                            value: 'rearrange',
+                                            child: Text('Rearrange pages'),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'clone',
+                                            child: Text('Duplicate score'),
+                                          ),
+                                        ],
                                       ),
-                                      const PopupMenuItem(
-                                        value: 'details',
-                                        child: Text('Rename or edit details'),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'libraries',
-                                        child: Text('Assign to libraries'),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'trash',
-                                        child: Text('Delete score'),
-                                      ),
-                                      if (!widget.transferRestricted)
-                                        const PopupMenuItem(
-                                          value: 'extract',
-                                          child: Text('Extract pages'),
-                                        ),
-                                      const PopupMenuItem(
-                                        value: 'rearrange',
-                                        child: Text('Rearrange pages'),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'clone',
-                                        child: Text('Duplicate score'),
-                                      ),
-                                    ],
-                                  ),
-                                  onTap: () {
-                                    widget.onScoreQueue([
-                                      for (final item in visible) item.id,
-                                    ]);
-                                    Navigator.pop(context, score.id);
+                                      onTap: () =>
+                                          _openListedScore(score, visible),
+                                    );
                                   },
-                                );
-                              },
-                            ),
+                                ),
                           ),
                   ),
                 ],
