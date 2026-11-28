@@ -98,6 +98,9 @@ enum _ReaderMenu { display, score, tools }
 
 enum _ReaderDisplay {
   readerSettings,
+  annotate,
+  rearrangeScore,
+  librarySync,
   importScore,
   scanScore,
   cloudServices,
@@ -417,6 +420,8 @@ class _ReaderState extends State<Reader> {
       _restrictions?.tools.contains(tool) ?? false;
 
   bool _readerActionAllowed(_ReaderDisplay? action) => switch (action) {
+    _ReaderDisplay.annotate ||
+    _ReaderDisplay.rearrangeScore ||
     _ReaderDisplay.pageNote ||
     _ReaderDisplay.pageActions ||
     _ReaderDisplay.jumpLinks ||
@@ -6704,6 +6709,14 @@ class _ReaderState extends State<Reader> {
   Future<void> _runReaderDisplayAction(_ReaderDisplay action) async {
     if (!_readerActionAllowed(action)) return;
     switch (action) {
+      case _ReaderDisplay.annotate:
+        _toggleInk();
+      case _ReaderDisplay.rearrangeScore:
+        if (_entry case final score?) {
+          await _showLibrary(entryAction: 'rearrange:${score.id}');
+        }
+      case _ReaderDisplay.librarySync:
+        await _showLibrary(entryAction: 'sync');
       case _ReaderDisplay.readerSettings:
         await _showReaderSettings();
       case _ReaderDisplay.importScore:
@@ -7432,107 +7445,115 @@ class _ReaderState extends State<Reader> {
   }
 
   Widget _readerToolsMenu() {
-    return PopupMenuButton<_ReaderDisplay>(
-      tooltip: ReaderText.tools.of(context),
-      enabled: _pages > 0 && !_picking,
-      icon: const Icon(Icons.tune),
-      onSelected: _runReaderDisplayAction,
-      itemBuilder: (_) => [
-        ..._groupedReaderMenuItems(_ReaderMenu.tools),
-        ..._groupedReaderMenuItems(_ReaderMenu.score),
-      ],
-    );
-  }
-
-  List<PopupMenuEntry<_ReaderDisplay>> _groupedReaderMenuItems(
-    _ReaderMenu group,
-  ) {
     final items = {
-      for (final item in _readerMenuItems(group))
-        if (item.value case final action?) action: item,
+      for (final group in [_ReaderMenu.tools, _ReaderMenu.score])
+        for (final item in _readerMenuItems(group)) item.value!: item,
     };
-    final sections = group == _ReaderMenu.score
-        ? <(String, List<_ReaderDisplay>)>[
-            (
-              'This score',
-              [
-                _ReaderDisplay.findInScore,
-                _ReaderDisplay.bookmarks,
-                _ReaderDisplay.pageNote,
-                _ReaderDisplay.jumpLinks,
-                _ReaderDisplay.pageActions,
-                _ReaderDisplay.crop,
-                _ReaderDisplay.copyMeasure,
-                _ReaderDisplay.pasteMeasure,
-              ],
-            ),
-            (
-              'Play and navigate',
-              [
-                _ReaderDisplay.nowPlaying,
-                _ReaderDisplay.scoreAudio,
-                _ReaderDisplay.practiceRecordings,
-                _ReaderDisplay.midiAutomation,
-                _ReaderDisplay.previousPage,
-                _ReaderDisplay.previousScore,
-                _ReaderDisplay.scoreTabs,
-                _ReaderDisplay.scoreWindow,
-              ],
-            ),
-            (
-              'Share',
-              [
-                _ReaderDisplay.exportPdf,
-                _ReaderDisplay.shareScorePackage,
-                _ReaderDisplay.shareScoreLink,
-              ],
-            ),
-          ]
-        : <(String, List<_ReaderDisplay>)>[
-            (
-              'Add scores',
-              [
-                _ReaderDisplay.importScore,
-                _ReaderDisplay.cloudServices,
-                _ReaderDisplay.scanScore,
-                _ReaderDisplay.scoreTemplates,
-              ],
-            ),
-            (
-              'Practice and connect',
-              [
-                _ReaderDisplay.metronome,
-                _ReaderDisplay.tuner,
-                _ReaderDisplay.piano,
-                _ReaderDisplay.practiceActivity,
-                _ReaderDisplay.ensemble,
-                _ReaderDisplay.faceTurns,
-                _ReaderDisplay.inputShortcuts,
-                _ReaderDisplay.midiDevices,
-              ],
-            ),
-            (
-              'Manage',
-              [
-                _ReaderDisplay.libraryBackup,
-                _ReaderDisplay.readerSettings,
-                _ReaderDisplay.support,
-              ],
-            ),
-          ];
-    return [
-      for (final (label, actions) in sections)
-        if (actions.any(items.containsKey)) ...[
-          PopupMenuItem<_ReaderDisplay>(
-            enabled: false,
-            height: 32,
-            child: Text(label, style: Theme.of(context).textTheme.labelMedium),
-          ),
-          for (final action in actions)
-            if (items.remove(action) case final item?) item,
+    const sections = [
+      (
+        'Edit this score',
+        [
+          (_ReaderDisplay.annotate, Icons.draw_outlined, 'Annotate'),
+          (_ReaderDisplay.jumpLinks, Icons.link, 'Links'),
+          (_ReaderDisplay.pageActions, Icons.touch_app_outlined, 'Buttons'),
+          (_ReaderDisplay.rearrangeScore, Icons.grid_view, 'Rearrange'),
+          (_ReaderDisplay.crop, Icons.crop, 'Crop'),
+          (_ReaderDisplay.exportPdf, Icons.share_outlined, 'Share'),
         ],
-      ...items.values,
+      ),
+      (
+        'Add scores',
+        [
+          (_ReaderDisplay.importScore, Icons.file_open_outlined, 'Import PDF'),
+          (_ReaderDisplay.cloudServices, Icons.cloud_outlined, 'Services'),
+          (_ReaderDisplay.scanScore, Icons.document_scanner_outlined, 'Scan'),
+          (_ReaderDisplay.scoreTemplates, Icons.note_add_outlined, 'Templates'),
+        ],
+      ),
+      (
+        'More',
+        [
+          (_ReaderDisplay.piano, Icons.piano_outlined, 'Piano'),
+          (_ReaderDisplay.practiceRecordings, Icons.mic_none, 'Record'),
+          (_ReaderDisplay.ensemble, Icons.devices_outlined, 'Ensemble'),
+          (
+            _ReaderDisplay.practiceActivity,
+            Icons.insights,
+            'Practice activity',
+          ),
+          (_ReaderDisplay.librarySync, Icons.sync, 'Device sync'),
+          (_ReaderDisplay.libraryBackup, Icons.history, 'Backup & restore'),
+          (_ReaderDisplay.support, Icons.help_outline, null),
+          (_ReaderDisplay.readerSettings, Icons.settings_outlined, 'Settings'),
+        ],
+      ),
     ];
+    final menu = <Widget>[];
+    for (final (heading, actions) in sections) {
+      final rows = <Widget>[];
+      for (final (action, icon, label) in actions) {
+        final existing = items.remove(action);
+        final available = switch (action) {
+          _ReaderDisplay.annotate => _pages > 0,
+          _ReaderDisplay.rearrangeScore => _entry != null && _viewer.isReady,
+          _ReaderDisplay.librarySync =>
+            _library.storage.persistent &&
+                !_restricted(RestrictedTool.connections),
+          _ => existing != null,
+        };
+        if (!available || !_readerActionAllowed(action)) continue;
+        final needsScore =
+            heading == 'Edit this score' &&
+            action != _ReaderDisplay.annotate &&
+            action != _ReaderDisplay.exportPdf;
+        final enabled =
+            (!needsScore || _entry != null) && (existing?.enabled ?? true);
+        rows.add(
+          MenuItemButton(
+            leadingIcon: Icon(icon, size: 20),
+            onPressed: enabled ? () => _runReaderDisplayAction(action) : null,
+            child: label == null ? existing!.child! : Text(label),
+          ),
+        );
+      }
+      if (rows.isEmpty) continue;
+      if (menu.isNotEmpty) menu.add(const Divider(height: 8));
+      menu.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Text(heading, style: Theme.of(context).textTheme.labelMedium),
+        ),
+      );
+      menu.addAll(rows);
+    }
+    if (items.isNotEmpty) {
+      menu.add(
+        SubmenuButton(
+          leadingIcon: const Icon(Icons.more_horiz),
+          menuChildren: [
+            for (final entry in items.entries)
+              MenuItemButton(
+                onPressed: entry.value.enabled
+                    ? () => _runReaderDisplayAction(entry.key)
+                    : null,
+                child: entry.value.child!,
+              ),
+          ],
+          child: const Text('Other tools'),
+        ),
+      );
+    }
+    return MenuAnchor(
+      style: const MenuStyle(visualDensity: VisualDensity.compact),
+      menuChildren: menu,
+      builder: (context, controller, child) => IconButton(
+        tooltip: ReaderText.tools.of(context),
+        icon: const Icon(Icons.work_outline),
+        onPressed: _picking
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
   }
 
   List<PopupMenuItem<_ReaderDisplay>> _readerMenuItems(_ReaderMenu group) =>

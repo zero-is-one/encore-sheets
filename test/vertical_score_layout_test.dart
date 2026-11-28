@@ -108,6 +108,12 @@ void main() {
     await waitUntil(() => find.byType(InputChip).evaluate().isEmpty);
     await tester.tap(find.byTooltip('Reader tools'));
     await tester.pumpAndSettle();
+    expect(find.text('Edit this score'), findsOneWidget);
+    expect(find.text('Links'), findsOneWidget);
+    expect(find.text('Rearrange'), findsOneWidget);
+    await tester.ensureVisible(find.text('Other tools'));
+    await tester.tap(find.text('Other tools'));
+    await tester.pumpAndSettle();
     expect(find.text('Copy a measure first.'), findsOneWidget);
     await tester.ensureVisible(find.text('Add page note'));
     await tester.pumpAndSettle();
@@ -118,7 +124,7 @@ void main() {
     await tester.pumpAndSettle();
     final enabledIcons = [
       Icons.library_music_outlined,
-      Icons.tune,
+      Icons.work_outline,
       Icons.chevron_right,
     ];
     await waitUntil(
