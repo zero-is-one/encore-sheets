@@ -726,20 +726,30 @@ class ScoreLibrary {
         _setlists[id] = amended;
       });
 
-  Future<void> duplicateSetlist(Setlist setlist) => _serialize(() async {
-    final names = _setlists.values
-        .where((list) => list.folder == setlist.folder)
-        .map((list) => list.name.toLowerCase())
-        .toSet();
-    var name = '${setlist.name} copy';
-    var suffix = 2;
-    while (names.contains(name.toLowerCase())) {
-      name = '${setlist.name} copy ${suffix++}';
+  Future<void> duplicateSetlist(Setlist setlist) =>
+      duplicateSetlists([setlist.id]);
+
+  Future<void> duplicateSetlists(Iterable<String> ids) => _serialize(() async {
+    final catalog = Map.of(_setlists);
+    for (final id in ids.toSet()) {
+      final setlist = _setlists[id];
+      if (setlist == null) throw StateError('A selected setlist is missing.');
+      final names = catalog.values
+          .where((list) => list.folder == setlist.folder)
+          .map((list) => list.name.toLowerCase())
+          .toSet();
+      var name = '${setlist.name} copy';
+      var suffix = 2;
+      while (names.contains(name.toLowerCase())) {
+        name = '${setlist.name} copy ${suffix++}';
+      }
+      final copy = setlist.copyWith(id: newRecordId(), name: name);
+      catalog[copy.id] = copy;
     }
-    final copy = setlist.copyWith(id: newRecordId(), name: name);
-    await storage.writeSetlists([..._setlists.values, copy]);
-    _setlists[copy.id] = copy;
+    await storage.writeSetlists(catalog.values.toList());
+    _setlists.addAll(catalog);
   });
+
   Future<void> flush() => _pending;
 
   Future<ScoreEntry> duplicateScore(String id) => _serialize(() async {

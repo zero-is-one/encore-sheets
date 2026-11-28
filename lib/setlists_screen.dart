@@ -51,6 +51,19 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
   SetlistOrder _sort = SetlistOrder.manual;
   bool _transferring = false;
 
+  bool _selectingSetlists = false;
+  final _selectedSetlists = <String>{};
+
+  Future<void> _duplicateSelection() => _transfer(() async {
+    await widget.library.duplicateSetlists(_selectedSetlists);
+    if (mounted) {
+      setState(() {
+        _selectedSetlists.clear();
+        _selectingSetlists = false;
+      });
+    }
+  }, 'Could not duplicate the selected setlists.');
+
   Future<void> _transfer(Future<void> Function() work, String failure) async {
     if (_transferring) return;
     setState(() => _transferring = true);
@@ -361,7 +374,25 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
     List<Widget> rowsFor(String folder) {
       final group = grouped[folder] ?? [];
       return [
-        for (final (index, list) in group.indexed) _row(list, group, index),
+        for (final (index, list) in group.indexed)
+          if (_selectingSetlists)
+            CheckboxListTile(
+              title: Text(list.name),
+              value: _selectedSetlists.contains(list.id),
+              onChanged: _transferring
+                  ? null
+                  : (selected) {
+                      setState(() {
+                        if (selected == true) {
+                          _selectedSetlists.add(list.id);
+                        } else {
+                          _selectedSetlists.remove(list.id);
+                        }
+                      });
+                    },
+            )
+          else
+            _row(list, group, index),
       ];
     }
 
@@ -373,6 +404,25 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       appBar: AppBar(
         title: Text(ReaderText.setlists.of(context)),
         actions: [
+          if (_selectingSetlists)
+            TextButton(
+              onPressed: _selectedSetlists.isEmpty || _transferring
+                  ? null
+                  : _duplicateSelection,
+              child: Text('Duplicate ${_selectedSetlists.length}'),
+            ),
+          IconButton(
+            tooltip: _selectingSetlists
+                ? 'Cancel setlist selection'
+                : 'Select setlists',
+            icon: Icon(_selectingSetlists ? Icons.close : Icons.checklist),
+            onPressed: _transferring || lists.isEmpty
+                ? null
+                : () => setState(() {
+                    _selectingSetlists = !_selectingSetlists;
+                    _selectedSetlists.clear();
+                  }),
+          ),
           if (widget.library.storage.persistent && widget.allowTransfers)
             IconButton(
               tooltip: 'Import setlist package',
