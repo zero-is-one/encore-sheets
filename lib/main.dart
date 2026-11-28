@@ -6910,13 +6910,18 @@ class _ReaderState extends State<Reader> {
                   onLongPress: settings == null
                       ? null
                       : () => Navigator.pop(dialog, settings),
-                  style: active
-                      ? OutlinedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.secondaryContainer,
-                          foregroundColor:
-                              theme.colorScheme.onSecondaryContainer,
-                        )
-                      : null,
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    backgroundColor: active
+                        ? theme.colorScheme.primary.withValues(alpha: .18)
+                        : null,
+                    foregroundColor: theme.colorScheme.primary,
+                    side: active
+                        ? BorderSide(color: theme.colorScheme.primary)
+                        : null,
+                  ),
                   icon: Icon(icon, size: 19),
                   label: Text(label),
                 ),
