@@ -4666,6 +4666,7 @@ class _ReaderState extends State<Reader> {
     _ink[_annotationPage ?? _page]?.finish(commit: false);
     final wasCropped = _cropFor(_page) != null;
     _previousPage = _page;
+    _pedalButton = null;
     setState(() {
       _page = target;
       _annotationPage = null;
@@ -5082,6 +5083,42 @@ class _ReaderState extends State<Reader> {
     if (action != null) _runShortcut(action);
   }
 
+  ({String score, int page, int index})? _pedalButton;
+
+  void _runOnPageShortcut({required bool selectNext}) {
+    final score = _entry;
+    if (score == null || _picking || _inking || !_viewer.isReady) return;
+    final actions = score.actions
+        .where(
+          (action) =>
+              action.page == _page &&
+              (!_halfPreview || action.y >= _splitFor(_page)),
+        )
+        .toList();
+    if (actions.isEmpty) return;
+    final previous = _pedalButton;
+    var index = previous?.score == score.id && previous?.page == _page
+        ? previous!.index.clamp(0, actions.length - 1)
+        : 0;
+    if (selectNext) {
+      if (previous?.score == score.id && previous?.page == _page) {
+        index = (index + 1) % actions.length;
+      }
+      _pedalButton = (score: score.id, page: _page, index: index);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Selected button: ${actions[index].title}'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      return;
+    }
+    _pedalButton = (score: score.id, page: _page, index: index);
+    unawaited(_runScoreAction(actions[index]));
+  }
+
   void _runShortcut(ReaderShortcut shortcut) {
     switch (shortcut) {
       case ReaderShortcut.next:
@@ -5106,6 +5143,10 @@ class _ReaderState extends State<Reader> {
         }
       case ReaderShortcut.autoScroll:
         _toggleAutoScroll();
+      case ReaderShortcut.selectOnPageAction:
+        _runOnPageShortcut(selectNext: true);
+      case ReaderShortcut.activateOnPageAction:
+        _runOnPageShortcut(selectNext: false);
     }
   }
 

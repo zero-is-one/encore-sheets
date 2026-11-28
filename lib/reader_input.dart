@@ -6,7 +6,9 @@ enum ReaderShortcut {
   controls('Toggle controls'),
   markup('Toggle markup'),
   audio('Play or pause audio'),
-  autoScroll('Start or stop automatic scrolling');
+  autoScroll('Start or stop automatic scrolling'),
+  selectOnPageAction('Select next on-page button'),
+  activateOnPageAction('Activate selected on-page button');
 
   const ReaderShortcut(this.label);
   final String label;
