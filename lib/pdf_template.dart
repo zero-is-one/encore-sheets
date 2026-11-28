@@ -188,7 +188,10 @@ class _ScoreTemplateDialogState extends State<ScoreTemplateDialog> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: _create, child: const Text('Create')),
+      FilledButton(
+        onPressed: _create,
+        child: Text(widget.inserting ? 'Insert pages' : 'Create'),
+      ),
     ],
   );
 }

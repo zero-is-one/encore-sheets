@@ -1263,7 +1263,7 @@ class _ReaderState extends State<Reader> {
       await _importScores([
         for (final file in files)
           if (file.name.toLowerCase().endsWith('.pdf')) file,
-      ]);
+      ], showCount: true);
       final audio = files
           .where(
             (file) => const {
@@ -1514,6 +1514,7 @@ class _ReaderState extends State<Reader> {
   Future<void> _importScores(
     List<XFile> files, {
     bool migration = false,
+    bool showCount = false,
   }) async {
     (ScoreEntry, XFile)? first;
     final failed = <String>[];
@@ -1547,6 +1548,16 @@ class _ReaderState extends State<Reader> {
               child: const Text('Done'),
             ),
           ],
+        ),
+      );
+    } else if (showCount && files.isNotEmpty && mounted) {
+      final imported = files.length - failed.length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Imported $imported PDF${imported == 1 ? '' : 's'}.'
+            '${failed.isEmpty ? '' : ' ${failed.length} could not be imported.'}',
+          ),
         ),
       );
     } else if (failed.isNotEmpty && mounted) {

@@ -54,6 +54,11 @@ void main() {
       );
       await palm.cancel();
       expect(ink.snapshot(), hasLength(3));
+      final beforeClear = ink.snapshot();
+      ink.clearAllInk();
+      expect(ink.hasInk, isFalse);
+      ink.undo();
+      expect(ink.snapshot(), beforeClear);
 
       await tester.pumpWidget(const SizedBox.shrink());
       ink.dispose();
