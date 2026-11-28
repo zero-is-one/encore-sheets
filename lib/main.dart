@@ -2059,6 +2059,11 @@ class _ReaderState extends State<Reader> {
         }
         return;
       }
+      if (result.startsWith('tab-copy:')) {
+        final score = _library.lookup(result.substring('tab-copy:'.length));
+        if (score != null) await _openScoreInAnotherTab(score);
+        return;
+      }
       if (result.startsWith('tab:')) {
         final score = _library.lookup(result.substring(4));
         if (score == null) return;
@@ -2111,6 +2116,14 @@ class _ReaderState extends State<Reader> {
     bool onlyIfUnchanged = false,
     String? tabInstance,
   }) async {
+    final selection = item?.selectionId(entry.id) ?? entry.id;
+    final reuse = !_scoreTabIds.contains(selection)
+        ? _scoreTabIds.where((id) => _tabSelection(id) == selection).firstOrNull
+        : null;
+    tabInstance ??= reuse;
+    if (reuse != null || _scoreTabIds.contains(selection)) {
+      startPage ??= _scoreTabPages[tabInstance ?? selection];
+    }
     final revision = _revision;
     if (_entry?.id != entry.id || _itemBookmark?.id != item?.id) {
       final local = await _library.storage.openScore(entry.id);
@@ -7621,6 +7634,27 @@ class _ReaderState extends State<Reader> {
     );
   }
 
+  Future<void> _openScoreInAnotherTab(ScoreEntry score) async {
+    final current = _currentScoreSelection == score.id
+        ? _activeScoreTabId
+        : null;
+    final page = current == null ? score.page : _page;
+    final id = '${score.id}|${ScoreLibrary.newRecordId()}';
+    if (current != null) _scoreTabPages[current] = page;
+    _scoreTabPages[id] = page;
+    await _updateScoreTabs([
+      ..._scoreTabIds,
+      if (current != null && !_scoreTabIds.contains(current)) current,
+      id,
+    ]);
+    if (!mounted || !_scoreTabIds.contains(id)) {
+      _scoreTabPages.remove(id);
+      return;
+    }
+    await _openLibraryScore(score, startPage: page, tabInstance: id);
+    if (mounted) setState(() => _lastOpenedScoreTab = id);
+  }
+
   Future<void> _duplicateCurrentTab(String selection) async {
     final current = _activeScoreTabId ?? selection;
     final page = _page;
@@ -9324,6 +9358,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   }
 
   String _query = '';
+  String? _browseLetter;
   String _browseBy = 'Recent';
   bool _gridView = false;
   String? _browseCategory;
@@ -9652,6 +9687,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         _assignCollections(score);
       } else if (action == 'ranges') {
         _openBookmarkRange(score);
+      } else if (action == 'tab-copy') {
+        Navigator.pop(context, 'tab-copy:${score.id}');
       } else if (action == 'tab') {
         Navigator.pop(context, 'tab:${score.id}');
       } else if (action == 'copy') {
@@ -9671,6 +9708,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     itemBuilder: (_) => [
       if (widget.canOpenTabs)
         const PopupMenuItem(value: 'tab', child: Text('Open in new tab')),
+      if (widget.canOpenTabs)
+        const PopupMenuItem(
+          value: 'tab-copy',
+          child: Text('Open in another tab'),
+        ),
       if (score.bookmarks.any((bookmark) => bookmark.isItem))
         const PopupMenuItem(
           value: 'ranges',
@@ -9828,7 +9870,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     ]..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     final selected = _filters[_filterField];
     final selectedCategory = categories.contains(selected) ? selected : null;
-    final visible = inCollection
+    var visible = inCollection
         .where(
           (score) => [
             score.title,
@@ -9912,6 +9954,25 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   entry.value.toLowerCase().contains(_query),
             )
             .toList();
+    String initial(ScoreEntry score) {
+      final title = score.title.trimLeft();
+      if (title.isEmpty) return '#';
+      final letter = String.fromCharCode(title.runes.first).toUpperCase();
+      return RegExp(r'^\p{L}$', unicode: true).hasMatch(letter) ? letter : '#';
+    }
+
+    final letters =
+        _browseBy == 'Title' &&
+            _query.isEmpty &&
+            !browsingCategories &&
+            visible.length >= 40
+        ? (visible.map(initial).toSet().toList()..sort())
+        : const <String>[];
+    if (letters.contains(_browseLetter)) {
+      visible = visible
+          .where((score) => initial(score) == _browseLetter)
+          .toList();
+    }
     final matchingBookmarks = [
       if (_query.isNotEmpty ||
           !_searchOptions.hidden.contains(LibraryResultGroup.bookmarks))
@@ -10313,6 +10374,29 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  if (letters.isNotEmpty)
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final letter in <String?>[null, ...letters])
+                            Padding(
+                              padding: const EdgeInsetsDirectional.only(end: 6),
+                              child: ChoiceChip(
+                                label: Text(letter ?? 'All'),
+                                selected: letter == null
+                                    ? !letters.contains(_browseLetter)
+                                    : _browseLetter == letter,
+                                onSelected: (_) {
+                                  setState(() => _browseLetter = letter);
+                                  if (_libraryScroll.hasClients)
+                                    _libraryScroll.jumpTo(0);
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   if (!widget.persistent)
                     const Text(
                       'Browser preview keeps scores for this session.',
