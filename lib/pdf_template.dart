@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pdf;
 enum ScoreTemplate {
   staff('Staff paper'),
   grandStaff('Grand staff paper'),
+  trio('Trio staff paper'),
   tab('Guitar tablature'),
   lined('Lined paper'),
   blank('Blank paper');
@@ -30,23 +31,29 @@ Iterable<({double top, double bottom, bool vertical})> _templateLines(
   final lines = switch (style) {
     ScoreTemplate.staff => 5,
     ScoreTemplate.grandStaff => 10,
+    ScoreTemplate.trio => 15,
     ScoreTemplate.tab => 6,
     _ => 1,
   };
   final gap = style == ScoreTemplate.lined ? 20 : 7;
   final groupGap = switch (style) {
     ScoreTemplate.grandStaff => 112,
+    ScoreTemplate.trio => 156,
     ScoreTemplate.lined => 20,
     _ => 66,
   };
   for (var top = 14.0; height - top >= 12 + lines * gap; top += groupGap) {
+    final grouped =
+        style == ScoreTemplate.grandStaff || style == ScoreTemplate.trio;
+    final last = (lines - 1) * gap + (grouped ? ((lines - 1) ~/ 5) * 15 : 0);
+    if (top + last > height - 12) break;
     for (var line = 0; line < lines; line++) {
-      final staffGap = style == ScoreTemplate.grandStaff && line >= 5 ? 15 : 0;
+      final staffGap = grouped ? (line ~/ 5) * 15 : 0;
       final position = top + line * gap + staffGap;
       yield (top: position, bottom: position, vertical: false);
     }
-    if (style == ScoreTemplate.grandStaff) {
-      yield (top: top, bottom: top + 9 * gap + 15, vertical: true);
+    if (grouped) {
+      yield (top: top, bottom: top + last, vertical: true);
     }
   }
 }
@@ -85,7 +92,9 @@ Future<Uint8List> createTemplatePdf(ScoreTemplateConfig layout) {
 }
 
 class ScoreTemplateDialog extends StatefulWidget {
-  const ScoreTemplateDialog({super.key});
+  const ScoreTemplateDialog({super.key, this.inserting = false});
+
+  final bool inserting;
 
   @override
   State<ScoreTemplateDialog> createState() => _ScoreTemplateDialogState();
@@ -122,7 +131,9 @@ class _ScoreTemplateDialogState extends State<ScoreTemplateDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Create score from template'),
+    title: Text(
+      widget.inserting ? 'Insert template pages' : 'Create score from template',
+    ),
     scrollable: true,
     content: Column(
       mainAxisSize: MainAxisSize.min,

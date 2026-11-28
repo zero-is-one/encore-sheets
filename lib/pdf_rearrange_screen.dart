@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import 'pdf_rearrange.dart';
+import 'pdf_template.dart';
 import 'score_library.dart';
 
 class PdfRearrangeScreen extends StatefulWidget {
@@ -63,7 +64,7 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
     super.dispose();
   }
 
-  Future<void> _append(XFile file, {required bool original}) async {
+  Future<void> _append(XFile file, {required bool original, int? at}) async {
     final document = await openRearrangeDocument(file);
     if (!mounted) {
       await document.dispose();
@@ -71,8 +72,9 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
     }
     setState(() {
       _documents.add(document);
+      var index = at ?? _pages.length;
       for (final page in document.pages) {
-        _pages.add((
+        _pages.insert(index++, (
           key: Object(),
           page: EditedPdfPage(
             page,
@@ -106,6 +108,53 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
     } catch (_) {
       if (mounted)
         setState(() => _message = 'Could not insert pages from this PDF.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _insertTemplate() async {
+    final index = await showDialog<int>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Insert template pages'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialog, 0),
+            child: const Text('At the beginning'),
+          ),
+          for (var page = 1; page <= _pages.length; page++)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, page),
+              child: Text(
+                page == _pages.length ? 'At the end' : 'After page $page',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || index == null) return;
+    final layout = await showDialog<ScoreTemplateConfig>(
+      context: context,
+      builder: (_) => const ScoreTemplateDialog(inserting: true),
+    );
+    if (!mounted || layout == null) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final bytes = await createTemplatePdf(layout);
+      if (mounted) {
+        await _append(
+          XFile.fromData(bytes, name: '${layout.title}.pdf'),
+          original: false,
+          at: index,
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        setState(() => _message = 'Could not insert the template pages.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -315,6 +364,11 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
                   onPressed: _busy ? null : _insert,
                   child: const Text('Insert PDF'),
                 ),
+                if (widget.score != null)
+                  TextButton(
+                    onPressed: _busy ? null : _insertTemplate,
+                    child: const Text('Insert template pages'),
+                  ),
                 TextButton(
                   onPressed: _busy || _pages.isEmpty
                       ? null
