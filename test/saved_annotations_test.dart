@@ -6,6 +6,27 @@ import 'package:encoresheets/score_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('clears only the active layer and can undo the edit', () {
+    final ink = PageInk();
+    addTearDown(ink.dispose);
+    ink.begin(const Offset(.1, .2));
+    ink.finish(commit: true);
+    ink.configureLayers(
+      active: 'practice',
+      visible: ['base', 'practice'],
+      changes: [],
+    );
+    ink.begin(const Offset(.4, .5));
+    ink.finish(commit: true);
+    final original = ink.snapshot();
+    ink.clearActiveLayer();
+    expect(ink.snapshot(), hasLength(1));
+    expect(ink.snapshot().single['layer'], isNull);
+    expect(ink.hasActiveLayerInk, isFalse);
+    ink.undo();
+    expect(ink.snapshot(), original);
+  });
+
   test('persists the sampled stylus brush widths with a stroke', () {
     final ink = PageInk();
     addTearDown(ink.dispose);

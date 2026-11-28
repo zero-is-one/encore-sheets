@@ -233,6 +233,18 @@ class PageInk extends ChangeNotifier {
     ]);
   }
 
+  bool get hasActiveLayerInk =>
+      _activeLayer != null &&
+      _strokes.any((stroke) => stroke.layer == _activeLayer);
+
+  void clearActiveLayer() {
+    if (!hasActiveLayerInk) return;
+    _replaceStrokes([
+      for (final stroke in _strokes)
+        if (stroke.layer != _activeLayer) stroke,
+    ]);
+  }
+
   void pasteSelection(List<Map<String, dynamic>> clipboard) {
     final layer = _activeLayer;
     if (clipboard.isEmpty || layer == null) return;

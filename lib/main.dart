@@ -7789,6 +7789,39 @@ class _ReaderState extends State<Reader> {
     );
   }
 
+  Future<void> _clearMarkupPage() async {
+    final page = _annotationPage ?? _page;
+    final layer = _activeInkLayer;
+    final ink = _ink[page];
+    if (ink == null || !ink.hasActiveLayerInk) return;
+    final clear = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Clear annotations on this page?'),
+        content: const Text(
+          'This clears the active layer on this page. You can undo it from Markup.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (mounted &&
+        clear == true &&
+        _inking &&
+        _activeInkLayer == layer &&
+        _ink[page] == ink) {
+      ink.clearActiveLayer();
+    }
+  }
+
   void _selectMarkupPreset(int index) {
     setState(() {
       _tool = InkTool.pen;
@@ -7806,6 +7839,35 @@ class _ReaderState extends State<Reader> {
       alignment: WrapAlignment.end,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        Tooltip(
+          message:
+              _inkLayers
+                  .where((layer) => layer.id == _activeInkLayer)
+                  .firstOrNull
+                  ?.name ??
+              'No active layer',
+          child: Padding(
+            padding: const EdgeInsetsDirectional.only(start: 8),
+            child: Text(
+              'Page ${_annotationPage ?? _page}',
+              style: TextStyle(color: _paper),
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Previous markup page',
+          onPressed: (_annotationPage ?? _page) > _firstPage
+              ? () => _jumpToPage((_annotationPage ?? _page) - 1)
+              : null,
+          icon: const Icon(Icons.chevron_left),
+        ),
+        IconButton(
+          tooltip: 'Next markup page',
+          onPressed: (_annotationPage ?? _page) < _lastPage
+              ? () => _jumpToPage((_annotationPage ?? _page) + 1)
+              : null,
+          icon: const Icon(Icons.chevron_right),
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
@@ -8052,6 +8114,11 @@ class _ReaderState extends State<Reader> {
           tooltip: 'Annotation layers',
           onPressed: _showInkLayers,
           icon: const Icon(Icons.layers_outlined),
+        ),
+        IconButton(
+          tooltip: 'Clear active layer on this page',
+          onPressed: _activeInkLayer == null ? null : _clearMarkupPage,
+          icon: const Icon(Icons.delete_sweep_outlined),
         ),
         Semantics(
           label: 'Allow finger drawing',
