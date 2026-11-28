@@ -92,6 +92,20 @@ void main() {
           find.text('1 / 3').evaluate().isNotEmpty,
     );
     expect(viewer().params.paging, isNotNull);
+    await tester.longPress(find.byTooltip('Annotations'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annotations'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Page note').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await waitUntil(() => find.byTooltip('Page note').evaluate().isNotEmpty);
+    await tester.longPress(find.byTooltip('Page note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset defaults'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await waitUntil(() => find.byTooltip('Annotations').evaluate().isNotEmpty);
     await tester.tap(find.byTooltip('Score actions'));
     await tester.pumpAndSettle();
     expect(find.text('Show in library'), findsOneWidget);

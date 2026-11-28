@@ -1,5 +1,3 @@
-import 'dart:ui' show Size;
-
 import 'package:encoresheets/main.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -108,6 +106,17 @@ void main() {
         }
         expect(tester.takeException(), isNull);
       }
+      await tester.longPress(find.byTooltip('Services'));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Toolbar shortcuts'), findsOneWidget);
+      await tester.tap(find.text('Services'));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(find.text('Page note').last);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Page note'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.byTooltip('Services'), findsOneWidget);
     },
     variant: TargetPlatformVariant({
       TargetPlatform.windows,

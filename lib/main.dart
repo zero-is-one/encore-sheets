@@ -99,8 +99,28 @@ enum _AudioUtility { metronome, pitch, tuner }
 
 enum _CornerMenu { scores, bookmarks, setlists, search, audio, tools }
 
+enum _ToolbarShortcut {
+  services('Services', Icons.cloud_outlined),
+  annotations('Annotations', Icons.draw_outlined),
+  display('Display options', Icons.dashboard_outlined),
+  find('Find in score', Icons.find_in_page_outlined),
+  metronome('Metronome', Icons.timer_outlined),
+  piano('Piano', Icons.piano_outlined),
+  note('Page note', Icons.sticky_note_2_outlined),
+  hidden('Hidden', Icons.visibility_off_outlined);
+
+  const _ToolbarShortcut(this.label, this.icon);
+  final String label;
+  final IconData icon;
+
+  static _ToolbarShortcut read(Object? value, _ToolbarShortcut fallback) =>
+      values.where((shortcut) => shortcut.name == value).firstOrNull ??
+      fallback;
+}
+
 enum _ReaderDisplay {
   readerSettings,
+  toolbarShortcuts,
   annotate,
   rearrangeScore,
   librarySync,
@@ -312,6 +332,8 @@ class _ReaderState extends State<Reader> {
   bool _copyingMeasure = false;
   int? _pdfSelectionPage;
   List<Offset> _pdfSelection = [];
+  _ToolbarShortcut _leftToolbarShortcut = _ToolbarShortcut.services;
+  _ToolbarShortcut _rightToolbarShortcut = _ToolbarShortcut.annotations;
   final _cornerToolsMenuController = MenuController();
   _CornerMenu _lastLeftMenu = _CornerMenu.scores;
   _CornerMenu _lastRightMenu = _CornerMenu.tools;
@@ -568,6 +590,14 @@ class _ReaderState extends State<Reader> {
         if (ids.isNotEmpty) await _libraryReady;
         if (!mounted) return;
         setState(() {
+          _leftToolbarShortcut = _ToolbarShortcut.read(
+            data['leftToolbarShortcut'],
+            _ToolbarShortcut.services,
+          );
+          _rightToolbarShortcut = _ToolbarShortcut.read(
+            data['rightToolbarShortcut'],
+            _ToolbarShortcut.annotations,
+          );
           _preferences = ReaderPreferences.fromJson(data);
           _markupPaletteAtTop = data['markupPaletteAtTop'] == true;
           _favoriteStamps = switch (data['favoriteStamps']) {
@@ -6534,30 +6564,15 @@ class _ReaderState extends State<Reader> {
                 : () => _openCornerMenu(_CornerMenu.setlists),
             icon: const Icon(Icons.queue_music),
           ),
-          if (!_restricted(RestrictedTool.transfers) &&
-              !_restricted(RestrictedTool.connections))
-            IconButton(
-              tooltip: 'Services',
-              icon: const Icon(Icons.cloud_outlined),
-              onPressed: _picking
-                  ? null
-                  : () => _runReaderDisplayAction(_ReaderDisplay.cloudServices),
-            ),
+          if (_toolbarShortcutButton(left: true) case final shortcut?) shortcut,
         ];
         final utilities = [_audioUtilitiesButton(), _readerToolsMenu()];
         final title = _readerTitle();
         final display = _displayButton();
         final scoreActions = _scoreActionsMenu();
         final editing = [
-          if (!_restricted(RestrictedTool.markup))
-            IconButton(
-              tooltip: _inking
-                  ? 'Done marking up'
-                  : ReaderText.markup.of(context),
-              onPressed: _pages == 0 || _picking ? null : _toggleInk,
-              color: _inking ? _brass : null,
-              icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
-            ),
+          if (_toolbarShortcutButton(left: false) case final shortcut?)
+            shortcut,
           IconButton(
             tooltip: ReaderText.search.of(context),
             onPressed: _picking
@@ -6622,6 +6637,159 @@ class _ReaderState extends State<Reader> {
     ),
   );
 
+  _ReaderDisplay? _toolbarDisplayAction(_ToolbarShortcut shortcut) =>
+      switch (shortcut) {
+        _ToolbarShortcut.services => _ReaderDisplay.cloudServices,
+        _ToolbarShortcut.annotations => _ReaderDisplay.annotate,
+        _ToolbarShortcut.find => _ReaderDisplay.findInScore,
+        _ToolbarShortcut.metronome => _ReaderDisplay.metronome,
+        _ToolbarShortcut.piano => _ReaderDisplay.piano,
+        _ToolbarShortcut.note => _ReaderDisplay.pageNote,
+        _ => null,
+      };
+
+  bool _toolbarShortcutAllowed(_ToolbarShortcut shortcut) =>
+      _readerActionAllowed(_toolbarDisplayAction(shortcut)) &&
+      (shortcut != _ToolbarShortcut.services ||
+          (!_restricted(RestrictedTool.transfers) &&
+              !_restricted(RestrictedTool.connections)));
+
+  Widget? _toolbarShortcutButton({required bool left}) {
+    final shortcut = left ? _leftToolbarShortcut : _rightToolbarShortcut;
+    if (shortcut == _ToolbarShortcut.hidden ||
+        !_toolbarShortcutAllowed(shortcut)) {
+      return null;
+    }
+    final markingUp = shortcut == _ToolbarShortcut.annotations && _inking;
+    final available = switch (shortcut) {
+      _ToolbarShortcut.annotations || _ToolbarShortcut.find => _pages > 0,
+      _ToolbarShortcut.note => _entry != null,
+      _ToolbarShortcut.metronome ||
+      _ToolbarShortcut.piano => ScoreAudioSession.supported,
+      _ => true,
+    };
+    return Tooltip(
+      message: markingUp
+          ? 'Done marking up'
+          : shortcut == _ToolbarShortcut.annotations
+          ? ReaderText.markup.of(context)
+          : shortcut.label,
+      triggerMode: TooltipTriggerMode.manual,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: _picking
+            ? null
+            : () => _configureToolbarShortcuts(onlyLeft: left),
+        child: IconButton(
+          icon: Icon(markingUp ? Icons.check : shortcut.icon),
+          color: markingUp ? _brass : null,
+          onPressed: _picking || !available
+              ? null
+              : () {
+                  if (_toolbarDisplayAction(shortcut) case final action?) {
+                    unawaited(_runReaderDisplayAction(action));
+                  } else if (shortcut == _ToolbarShortcut.display) {
+                    unawaited(_showDisplayPanel());
+                  }
+                },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _configureToolbarShortcuts({bool? onlyLeft}) async {
+    var left = _leftToolbarShortcut;
+    var right = _rightToolbarShortcut;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, update) {
+          Widget picker({
+            required String label,
+            required _ToolbarShortcut value,
+            required ValueChanged<_ToolbarShortcut> set,
+          }) => DropdownButtonFormField<_ToolbarShortcut>(
+            key: ValueKey((label, value)),
+            initialValue: value,
+            isExpanded: true,
+            decoration: InputDecoration(labelText: label),
+            onChanged: (shortcut) {
+              if (shortcut != null) update(() => set(shortcut));
+            },
+            items: [
+              for (final shortcut in _ToolbarShortcut.values)
+                DropdownMenuItem(
+                  value: shortcut,
+                  enabled: _toolbarShortcutAllowed(shortcut),
+                  child: Text(shortcut.label),
+                ),
+            ],
+          );
+          return AlertDialog(
+            title: const Text('Toolbar shortcuts'),
+            scrollable: true,
+            content: SizedBox(
+              width: 320,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (onlyLeft != false)
+                    picker(
+                      label: 'Left shortcut',
+                      value: left,
+                      set: (value) => left = value,
+                    ),
+                  if (onlyLeft != true)
+                    picker(
+                      label: 'Right shortcut',
+                      value: right,
+                      set: (value) => right = value,
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => update(() {
+                  if (onlyLeft != false) left = _ToolbarShortcut.services;
+                  if (onlyLeft != true) right = _ToolbarShortcut.annotations;
+                }),
+                child: const Text('Reset defaults'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (saved != true || !mounted) return;
+    try {
+      await _library.updatePreferences({
+        'leftToolbarShortcut': left.name,
+        'rightToolbarShortcut': right.name,
+      });
+      if (mounted) {
+        setState(() {
+          _leftToolbarShortcut = left;
+          _rightToolbarShortcut = right;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save toolbar shortcuts.')),
+        );
+      }
+    }
+  }
+
   Widget _readerTitle() {
     final composer = _entry?.metadata['composer'];
     return InkWell(
@@ -6674,6 +6842,7 @@ class _ReaderState extends State<Reader> {
 
   static const _displayActions = {
     _ReaderDisplay.appearance,
+    _ReaderDisplay.toolbarShortcuts,
     _ReaderDisplay.accessibility,
     _ReaderDisplay.reflow,
     _ReaderDisplay.panelOptions,
@@ -6738,6 +6907,8 @@ class _ReaderState extends State<Reader> {
         }
       case _ReaderDisplay.librarySync:
         await _showLibrary(entryAction: 'sync');
+      case _ReaderDisplay.toolbarShortcuts:
+        await _configureToolbarShortcuts();
       case _ReaderDisplay.readerSettings:
         await _showReaderSettings();
       case _ReaderDisplay.importScore:
@@ -7586,6 +7757,10 @@ class _ReaderState extends State<Reader> {
 
   List<PopupMenuItem<_ReaderDisplay>> _readerMenuItems(_ReaderMenu group) =>
       <PopupMenuItem<_ReaderDisplay>>[
+            const PopupMenuItem(
+              value: _ReaderDisplay.toolbarShortcuts,
+              child: Text('Toolbar shortcuts'),
+            ),
             const PopupMenuItem(
               value: _ReaderDisplay.readerSettings,
               child: Text('Reader settings'),
