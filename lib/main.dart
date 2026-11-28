@@ -5733,15 +5733,16 @@ class _ReaderState extends State<Reader> {
     final document = _viewer.document;
     setState(() => _picking = true);
     try {
-      final result = await showDialog<(PageCropScope, PageCrop)>(
+      final result = await showDialog<PageCropResult>(
         context: context,
         builder: (_) => PageCropDialog(
-          page: document.pages[current - 1],
-          initial: score.crops[current],
+          pages: document.pages,
+          startPage: current,
+          initial: score.crops,
         ),
       );
       if (result == null || !mounted) return;
-      final (scope, crop) = result;
+      final (:scope, :crop, :drafts) = result;
       final next = Map.of(score.crops);
       void save(int page, PageCrop value) {
         if (value.isIdentity) {
@@ -5753,7 +5754,7 @@ class _ReaderState extends State<Reader> {
 
       switch (scope) {
         case PageCropScope.current:
-          save(current, crop);
+          drafts.forEach(save);
         case PageCropScope.allLikeCurrent:
           for (var page = 1; page <= document.pages.length; page++) {
             save(page, crop);

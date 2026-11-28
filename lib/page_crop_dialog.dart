@@ -7,31 +7,64 @@ import 'page_crop.dart';
 
 enum PageCropScope { current, allLikeCurrent, autoAll, resetAll }
 
-class PageCropDialog extends StatefulWidget {
-  const PageCropDialog({super.key, required this.page, this.initial});
+typedef PageCropResult = ({
+  PageCropScope scope,
+  PageCrop crop,
+  Map<int, PageCrop> drafts,
+});
 
-  final PdfPage page;
-  final PageCrop? initial;
+class PageCropDialog extends StatefulWidget {
+  const PageCropDialog({
+    super.key,
+    required this.pages,
+    required this.startPage,
+    required this.initial,
+  });
+
+  final List<PdfPage> pages;
+  final int startPage;
+  final Map<int, PageCrop> initial;
 
   @override
   State<PageCropDialog> createState() => _PageCropDialogState();
 }
 
 class _PageCropDialogState extends State<PageCropDialog> {
-  late PageCrop _crop = widget.initial ?? const PageCrop();
+  late int _current = widget.startPage;
+  late PageCrop _crop = widget.initial[_current] ?? const PageCrop();
+  final _drafts = <int, PageCrop>{};
+
+  PdfPage get _page => widget.pages[_current - 1];
+
+  void _move(int step) {
+    setState(() {
+      _drafts[_current] = _crop;
+      _current += step;
+      _crop = _drafts[_current] ?? widget.initial[_current] ?? const PageCrop();
+    });
+  }
+
+  void _finish(PageCropScope scope) {
+    Navigator.pop(context, (
+      scope: scope,
+      crop: _crop,
+      drafts: {..._drafts, _current: _crop},
+    ));
+  }
+
   bool _working = false;
   bool _grid = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.initial == null) _autoFit();
+    if (widget.initial[_current] == null) _autoFit();
   }
 
   Future<void> _autoFit() async {
     setState(() => _working = true);
     try {
-      final suggested = await detectPageMargins(widget.page);
+      final suggested = await detectPageMargins(_page);
       if (mounted)
         setState(() => _crop = suggested.copyWith(angle: _crop.angle));
     } catch (_) {
@@ -77,9 +110,25 @@ class _PageCropDialogState extends State<PageCropDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final page = widget.page;
+    final page = _page;
     return AlertDialog(
-      title: Text('Crop page ${page.pageNumber}'),
+      title: Row(
+        children: [
+          Expanded(child: Text('Crop page ${page.pageNumber}')),
+          IconButton(
+            tooltip: 'Previous crop page',
+            icon: const Icon(Icons.chevron_left),
+            onPressed: _working || _current == 1 ? null : () => _move(-1),
+          ),
+          IconButton(
+            tooltip: 'Next crop page',
+            icon: const Icon(Icons.chevron_right),
+            onPressed: _working || _current == widget.pages.length
+                ? null
+                : () => _move(1),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -155,8 +204,7 @@ class _PageCropDialogState extends State<PageCropDialog> {
                   PopupMenuButton<PageCropScope>(
                     tooltip: 'Batch crop',
                     enabled: !_working,
-                    onSelected: (scope) =>
-                        Navigator.pop(context, (scope, _crop)),
+                    onSelected: _finish,
                     itemBuilder: (_) => const [
                       PopupMenuItem(
                         value: PageCropScope.allLikeCurrent,
@@ -184,9 +232,7 @@ class _PageCropDialogState extends State<PageCropDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _working
-              ? null
-              : () => Navigator.pop(context, (PageCropScope.current, _crop)),
+          onPressed: _working ? null : () => _finish(PageCropScope.current),
           child: const Text('Save crop'),
         ),
       ],
