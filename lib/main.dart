@@ -1609,21 +1609,28 @@ class _ReaderState extends State<Reader> {
       context: context,
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black38,
+      barrierColor: dockable ? Colors.black26 : Colors.black38,
       pageBuilder: (context, _, _) => SafeArea(
-        child: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: SizedBox(
-            width: _dockWidth,
-            height: double.infinity,
-            child: Material(
-              elevation: 12,
-              clipBehavior: Clip.antiAlias,
-              borderRadius: const BorderRadiusDirectional.only(
-                topEnd: Radius.circular(16),
-                bottomEnd: Radius.circular(16),
+        child: Padding(
+          padding: dockable
+              ? const EdgeInsetsDirectional.fromSTEB(12, 54, 12, 12)
+              : EdgeInsets.zero,
+          child: Align(
+            alignment: AlignmentDirectional.topStart,
+            child: SizedBox(
+              width: _dockWidth,
+              height: double.infinity,
+              child: Material(
+                elevation: 12,
+                clipBehavior: Clip.antiAlias,
+                borderRadius: dockable
+                    ? BorderRadius.circular(12)
+                    : const BorderRadiusDirectional.only(
+                        topEnd: Radius.circular(16),
+                        bottomEnd: Radius.circular(16),
+                      ),
+                child: Builder(builder: builder),
               ),
-              child: Builder(builder: builder),
             ),
           ),
         ),
