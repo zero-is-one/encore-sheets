@@ -60,6 +60,10 @@
 	<string>Link music from your library to a score or bookmark.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connect to Bluetooth MIDI pedals and controllers.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_encore-score._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sync your library with another device on Wi-Fi or share page turns with musicians on your local network.</string>
 	<key>UIApplicationSceneManifest</key>

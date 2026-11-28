@@ -141,9 +141,73 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
   }
 }
 
+private final class EnsembleBonjour: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
+  private static let type = "_encore-score._tcp."
+  private var published: NetService?
+  private var browser: NetServiceBrowser?
+  private var resolving: [NetService] = []
+  private var found: [String: [String: String]] = [:]
+  private var pending: FlutterResult?
+
+  func publish(port: Int32, address: String, name: String) {
+    stopPublishing()
+    let service = NetService(domain: "local.", type: Self.type, name: name, port: port)
+    service.setTXTRecord(NetService.data(fromTXTRecord: ["address": Data(address.utf8)]))
+    published = service
+    service.publish()
+  }
+
+  func stopPublishing() {
+    published?.stop()
+    published = nil
+  }
+
+  func discover(_ result: @escaping FlutterResult) {
+    guard pending == nil else {
+      result([])
+      return
+    }
+    pending = result
+    found = [:]
+    let search = NetServiceBrowser()
+    browser = search
+    search.delegate = self
+    search.searchForServices(ofType: Self.type, inDomain: "local.")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+      self?.finish()
+    }
+  }
+
+  func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
+    guard service.name != published?.name else { return }
+    resolving.append(service)
+    service.delegate = self
+    service.resolve(withTimeout: 2)
+  }
+
+  func netServiceDidResolveAddress(_ sender: NetService) {
+    guard let record = sender.txtRecordData(),
+          let raw = NetService.dictionary(fromTXTRecord: record)["address"],
+          let address = String(data: raw, encoding: .utf8) else { return }
+    found[address] = ["name": sender.name, "address": address]
+  }
+
+  private func finish() {
+    browser?.stop()
+    browser = nil
+    for service in resolving { service.stop() }
+    resolving.removeAll()
+    let result = pending
+    pending = nil
+    result?(Array(found.values))
+    found.removeAll()
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
   VNDocumentCameraViewControllerDelegate, UIDocumentPickerDelegate, MPMediaPickerControllerDelegate {
+  private let ensembleBonjour = EnsembleBonjour()
   private var importChannel: FlutterMethodChannel?
   private var scoreActionDocument: UIDocumentInteractionController?
   private var stylusChannel: FlutterMethodChannel?
@@ -175,6 +239,34 @@ struct EncoreAppShortcuts: AppShortcutsProvider {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let ensemble = FlutterMethodChannel(
+      name: "encoresheets/ensemble-discovery",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    ensemble.setMethodCallHandler { [weak self] call, result in
+      guard let self else { result(nil); return }
+      switch call.method {
+      case "publish":
+        guard let args = call.arguments as? [String: Any],
+              let host = args["address"] as? String,
+              let port = args["port"] as? Int,
+              (1...65535).contains(port) else {
+          result(FlutterError(code: "invalid-endpoint", message: nil, details: nil))
+          return
+        }
+        self.ensembleBonjour.publish(
+          port: Int32(port), address: host, name: args["name"] as? String ?? "EncoreSheets"
+        )
+        result(nil)
+      case "stop":
+        self.ensembleBonjour.stopPublishing()
+        result(nil)
+      case "discover":
+        self.ensembleBonjour.discover(result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
     let scoreFile = FlutterMethodChannel(
       name: "encoresheets/score-action-file",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

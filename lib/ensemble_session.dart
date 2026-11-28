@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
+
 typedef EnsemblePosition = ({
   String? id,
   String title,
@@ -24,11 +26,34 @@ bool isEnsembleAddress(InternetAddress address) {
 typedef NearbyEnsemble = ({String address, String name});
 typedef EnsembleFollower = ({String name, bool hasScore});
 
+const _bonjour = MethodChannel('encoresheets/ensemble-discovery');
 const _discoveryPort = 43862;
 const _discoveryQuery = 'encoresheets:ensemble:discover:1';
 final _broadcast = InternetAddress('255.255.255.255');
 
+bool _isDiscoveredAddress(String address) {
+  final parts = address.split(':');
+  if (parts.length != 2) return false;
+  final host = InternetAddress.tryParse(parts.first);
+  final port = int.tryParse(parts.last);
+  return host != null &&
+      isEnsembleAddress(host) &&
+      port != null &&
+      port > 0 &&
+      port <= 65535;
+}
+
 Future<List<NearbyEnsemble>> discoverEnsembles() async {
+  if (Platform.isIOS) {
+    final rows = await _bonjour.invokeListMethod<Map>('discover') ?? [];
+    return [
+      for (final row in rows)
+        if (row
+            case {'name': final String name, 'address': final String address}
+            when _isDiscoveredAddress(address))
+          (name: name, address: address),
+    ];
+  }
   final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
   final nearby = <String, NearbyEnsemble>{};
   final listener = socket.listen((event) {
@@ -131,37 +156,49 @@ class EnsembleSession {
     code = secret;
     leaderName = _deviceName;
     try {
-      final discovery = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        _discoveryPort,
-      );
-      if (_server != server) {
-        discovery.close();
-      } else {
-        _discovery = discovery;
-        final announcement = utf8.encode(
-          jsonEncode({
-            'kind': _discoveryQuery,
-            'port': server.port,
-            'name': _deviceName,
-          }),
-        );
-        discovery.listen((event) {
-          if (event != RawSocketEvent.read) return;
-          for (
-            var packet = discovery.receive();
-            packet != null;
-            packet = discovery.receive()
-          ) {
-            if (packet.data.length == _discoveryQuery.length &&
-                isEnsembleAddress(packet.address) &&
-                utf8.decode(packet.data, allowMalformed: true) ==
-                    _discoveryQuery) {
-              discovery.send(announcement, packet.address, packet.port);
-            }
-          }
+      if (Platform.isIOS) {
+        await _bonjour.invokeMethod<void>('publish', {
+          'address': address,
+          'port': server.port,
+          'name': _deviceName,
         });
+      } else {
+        final discovery = await RawDatagramSocket.bind(
+          InternetAddress.anyIPv4,
+          _discoveryPort,
+        );
+        if (_server != server) {
+          discovery.close();
+        } else {
+          _discovery = discovery;
+          final announcement = utf8.encode(
+            jsonEncode({
+              'kind': _discoveryQuery,
+              'port': server.port,
+              'name': _deviceName,
+            }),
+          );
+          discovery.listen((event) {
+            if (event != RawSocketEvent.read) return;
+            for (
+              var packet = discovery.receive();
+              packet != null;
+              packet = discovery.receive()
+            ) {
+              if (packet.data.length == _discoveryQuery.length &&
+                  isEnsembleAddress(packet.address) &&
+                  utf8.decode(packet.data, allowMalformed: true) ==
+                      _discoveryQuery) {
+                discovery.send(announcement, packet.address, packet.port);
+              }
+            }
+          });
+        }
       }
+    } on PlatformException {
+      // The address and group code remain available.
+    } on MissingPluginException {
+      // The address and group code remain available.
     } on SocketException {
       // The address and group code remain available when discovery is blocked.
     }
@@ -328,6 +365,13 @@ class EnsembleSession {
     _followers.clear();
     _leadingScore = null;
     address = code = leaderName = null;
+    if (server != null && Platform.isIOS) {
+      try {
+        await _bonjour.invokeMethod<void>('stop');
+      } catch (_) {
+        // Closing the session still stops the leader server.
+      }
+    }
     await server?.close(force: true);
   }
 }
