@@ -856,8 +856,9 @@ private final class EnsembleBonjour: NSObject, NetServiceBrowserDelegate, NetSer
     }
   }
 
-  func receiveStagedDrop(_ path: String) {
-    pendingPdfs.append(path)
+  func receiveStagedDrops(_ paths: [String]) {
+    guard !paths.isEmpty else { return }
+    pendingPdfs.append(contentsOf: paths)
     importChannel?.invokeMethod("available", arguments: nil)
   }
 }

@@ -37,7 +37,9 @@ class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate, UIDropIn
 
   func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
     guard let delegate = UIApplication.shared.delegate as? AppDelegate else { return }
-    for item in session.items.prefix(20) {
+    let staging = DispatchGroup()
+    var staged = [Int: String]()
+    for (index, item) in session.items.prefix(20).enumerated() {
       let provider = item.itemProvider
       let type = provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
         ? UTType.pdf
@@ -45,17 +47,25 @@ class SceneDelegate: FlutterSceneDelegate, UIPencilInteractionDelegate, UIDropIn
           .first { $0.conforms(to: .audio) && $0.preferredFilenameExtension != nil }
       guard let type, let fileExtension = type.preferredFilenameExtension else { continue }
       let label = provider.suggestedName
+      staging.enter()
       provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
-        guard let url else { return }
+        guard let url else { staging.leave(); return }
         let path: String
         do {
           path = try AppDelegate.stageDroppedFile(url, name: label, fileExtension: fileExtension)
         } catch {
           NSLog("Could not stage dropped score file: %@", error.localizedDescription)
+          staging.leave()
           return
         }
-        DispatchQueue.main.async { delegate.receiveStagedDrop(path) }
+        DispatchQueue.main.async {
+          staged[index] = path
+          staging.leave()
+        }
       }
+    }
+    staging.notify(queue: .main) {
+      delegate.receiveStagedDrops(staged.keys.sorted().compactMap { staged[$0] })
     }
   }
 
