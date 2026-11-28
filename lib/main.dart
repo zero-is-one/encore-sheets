@@ -6294,6 +6294,20 @@ class _ReaderState extends State<Reader> {
                                 ),
                               ),
                             ),
+                          if (_performance)
+                            PositionedDirectional(
+                              top: 8,
+                              end: 8,
+                              child: IconButton(
+                                tooltip: 'Exit performance mode',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: _rail,
+                                  foregroundColor: _paper,
+                                ),
+                                onPressed: _togglePerformance,
+                                icon: const Icon(Icons.close),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -7720,11 +7734,6 @@ class _ReaderState extends State<Reader> {
             onPressed: _picking ? null : _showNowPlaying,
             icon: const Icon(Icons.queue_music),
           ),
-        IconButton(
-          tooltip: 'Exit performance mode',
-          onPressed: _togglePerformance,
-          icon: const Icon(Icons.fullscreen_exit),
-        ),
       ],
     ),
   );
