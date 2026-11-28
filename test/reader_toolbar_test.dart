@@ -45,10 +45,17 @@ void main() {
         final title = tester.getRect(readerTitle);
         final scoreActions = tester.getRect(find.byTooltip('Score actions'));
         expect(positions[3].dx, lessThan(display.left));
-        expect(
-          tester.getCenter(find.byTooltip('Quick access')).dx,
-          greaterThan(scoreActions.right),
-        );
+        final rightButtons = [
+          for (final label in [
+            'Annotations',
+            'Quick access',
+            'Audio tools',
+            'Reader tools',
+          ])
+            tester.getCenter(find.byTooltip(label)).dx,
+        ];
+        expect(rightButtons.first, greaterThan(scoreActions.right));
+        expect(rightButtons, orderedEquals([...rightButtons]..sort()));
         expect(title.center.dx, closeTo(size.width / 2, 1));
         expect(title.left, closeTo(display.right, 1));
         expect(title.right, closeTo(scoreActions.left, 1));

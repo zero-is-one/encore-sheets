@@ -6473,7 +6473,6 @@ class _ReaderState extends State<Reader> {
         final display = _displayButton();
         final scoreActions = _scoreActionsMenu();
         final editing = [
-          _quickAccessMenu(),
           if (!_restricted(RestrictedTool.markup))
             IconButton(
               tooltip: _inking
@@ -6483,6 +6482,7 @@ class _ReaderState extends State<Reader> {
               color: _inking ? _brass : null,
               icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
             ),
+          _quickAccessMenu(),
         ];
         if (constraints.maxWidth < 720) {
           return Column(
