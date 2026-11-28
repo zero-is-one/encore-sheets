@@ -3305,6 +3305,9 @@ class _ReaderState extends State<Reader> {
       ).catchError((Object _) => null),
       setlists: setlists,
       libraries: _library.collections,
+      onMidi: _restricted(RestrictedTool.connections)
+          ? null
+          : () => _editMidiAutomation(_library.lookup(score.id) ?? score),
     );
     if (updated == null || !mounted) return;
     try {
@@ -4524,6 +4527,14 @@ class _ReaderState extends State<Reader> {
     if (score == null || _picking) return;
     setState(() => _picking = true);
     try {
+      await _editMidiAutomation(score);
+    } finally {
+      _finishPicking();
+    }
+  }
+
+  Future<void> _editMidiAutomation(ScoreEntry score) async {
+    try {
       final prefs = await _library.storage.readPreferences();
       if (!mounted) return;
       final presets = <String, String>{
@@ -4582,8 +4593,6 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save MIDI automation.')),
         );
-    } finally {
-      _finishPicking();
     }
   }
 

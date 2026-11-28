@@ -32,6 +32,7 @@ Future<ScoreMetadataEdit?> editScoreMetadata(
   Future<Uint8List?>? preview,
   required List<Setlist> setlists,
   required List<String> libraries,
+  VoidCallback? onMidi,
 }) => showDialog(
   context: context,
   builder: (_) => _ScoreMetadataDialog(
@@ -40,12 +41,14 @@ Future<ScoreMetadataEdit?> editScoreMetadata(
     preview: preview,
     setlists: setlists,
     libraries: libraries,
+    onMidi: onMidi,
   ),
 );
 
 enum _MetadataSection {
   properties('Properties', Icons.info_outline),
   setlists('Setlists', Icons.queue_music),
+  midi('MIDI', Icons.settings_input_component),
   libraries('Libraries', Icons.library_books_outlined);
 
   const _MetadataSection(this.label, this.icon);
@@ -60,6 +63,7 @@ class _ScoreMetadataDialog extends StatefulWidget {
     this.preview,
     required this.setlists,
     required this.libraries,
+    this.onMidi,
   });
 
   final ScoreEntry score;
@@ -67,6 +71,7 @@ class _ScoreMetadataDialog extends StatefulWidget {
   final Future<Uint8List?>? preview;
   final List<Setlist> setlists;
   final List<String> libraries;
+  final VoidCallback? onMidi;
 
   @override
   State<_ScoreMetadataDialog> createState() => _ScoreMetadataDialogState();
@@ -129,6 +134,10 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final wide = size.width >= 720;
+    final sections = [
+      for (final section in _MetadataSection.values)
+        if (section != _MetadataSection.midi || widget.onMidi != null) section,
+    ];
     return AlertDialog(
       title: const Text('Score details'),
       content: SizedBox(
@@ -141,7 +150,7 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
                     width: 164,
                     child: ListView(
                       children: [
-                        for (final section in _MetadataSection.values)
+                        for (final section in sections)
                           ListTile(
                             leading: Icon(section.icon),
                             title: Text(section.label),
@@ -161,7 +170,7 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
                     isExpanded: true,
                     value: _section,
                     items: [
-                      for (final section in _MetadataSection.values)
+                      for (final section in sections)
                         DropdownMenuItem(
                           value: section,
                           child: Text(section.label),
@@ -221,6 +230,19 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
   );
 
   Widget _sectionContent() => switch (_section) {
+    _MetadataSection.midi => ListView(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.settings_input_component),
+          title: const Text('MIDI automation'),
+          subtitle: const Text(
+            'Configure open triggers, commands to send, and presets.',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: widget.onMidi,
+        ),
+      ],
+    ),
     _MetadataSection.setlists => _membership(
       options: widget.setlists.map((list) => (id: list.id, name: list.name)),
       selected: _setlists,
