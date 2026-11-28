@@ -125,6 +125,7 @@ enum _ReaderDisplay {
   rearrangeScore,
   librarySync,
   importScore,
+  migrateLibrary,
   scanScore,
   cloudServices,
   scoreTemplates,
@@ -1430,7 +1431,7 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _open() async {
+  Future<void> _open({bool migration = false}) async {
     if (_picking || _restricted(RestrictedTool.transfers)) return;
     setState(() => _picking = true);
     try {
@@ -1445,8 +1446,9 @@ class _ReaderState extends State<Reader> {
         ],
       );
       if (files.isEmpty || !mounted) return;
+      if (migration && !await _confirmMigration(files)) return;
       await _libraryReady;
-      await _importScores(files);
+      if (mounted) await _importScores(files, migration: migration);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1458,15 +1460,60 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _importScores(List<XFile> files) async {
+  Future<bool> _confirmMigration(List<XFile> files) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text(
+            'Import ${files.length} PDF${files.length == 1 ? '' : 's'}',
+          ),
+          scrollable: true,
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'EncoreSheets copies your PDFs. Flattened markings stay visible on the page. '
+                  'Editable ink layers, score-reader bookmarks, and setlist order must be recreated. '
+                  'Keep any editable exports from your original app.',
+                ),
+                const SizedBox(height: 12),
+                for (final file in files)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Text(file.name),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Import PDFs'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _importScores(
+    List<XFile> files, {
+    bool migration = false,
+  }) async {
     (ScoreEntry, XFile)? first;
-    var failed = 0;
+    final failed = <String>[];
     for (final file in files) {
       try {
         final imported = await _library.import(file);
         first ??= imported;
       } catch (_) {
-        failed++;
+        failed.add(file.name);
       }
     }
     if (first case (final entry, final local)) {
@@ -1476,11 +1523,28 @@ class _ReaderState extends State<Reader> {
       _load(entry, local, bytes);
       _remember(entry.id, _page, opened: true);
     }
-    if (failed > 0 && mounted) {
+    if (migration && failed.isNotEmpty && mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text(
+            'Imported ${files.length - failed.length} of ${files.length} PDFs',
+          ),
+          scrollable: true,
+          content: Text('Could not import:\n${failed.join('\n')}'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } else if (failed.isNotEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Could not import $failed of ${files.length} selected PDFs.',
+            'Could not import ${failed.length} of ${files.length} selected PDFs.',
           ),
         ),
       );
@@ -6915,6 +6979,8 @@ class _ReaderState extends State<Reader> {
         await _configureToolbarShortcuts();
       case _ReaderDisplay.readerSettings:
         await _showReaderSettings();
+      case _ReaderDisplay.migrateLibrary:
+        await _open(migration: true);
       case _ReaderDisplay.importScore:
         await _showLibrary(entryAction: 'import');
       case _ReaderDisplay.scanScore:
@@ -7661,6 +7727,11 @@ class _ReaderState extends State<Reader> {
         'Add scores',
         [
           (_ReaderDisplay.importScore, Icons.file_open_outlined, 'Import PDF'),
+          (
+            _ReaderDisplay.migrateLibrary,
+            Icons.drive_folder_upload_outlined,
+            'Import from another app',
+          ),
           (_ReaderDisplay.cloudServices, Icons.cloud_outlined, 'Services'),
           (_ReaderDisplay.scanScore, Icons.document_scanner_outlined, 'Scan'),
           (_ReaderDisplay.scoreTemplates, Icons.note_add_outlined, 'Templates'),
@@ -7770,6 +7841,10 @@ class _ReaderState extends State<Reader> {
               child: Text('Reader settings'),
             ),
             if (!_restricted(RestrictedTool.transfers)) ...[
+              const PopupMenuItem(
+                value: _ReaderDisplay.migrateLibrary,
+                child: Text('Import from another app'),
+              ),
               const PopupMenuItem(
                 value: _ReaderDisplay.importScore,
                 child: Text('Import PDF'),
