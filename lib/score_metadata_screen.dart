@@ -1,7 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:material_ui/material_ui.dart';
 
+import 'library_score_preview.dart';
 import 'score_library.dart';
 
 const scoreMetadataFields = {
@@ -23,13 +22,14 @@ typedef ScoreMetadataEdit = ({
   Map<String, String> fields,
   Set<String> setlists,
   Set<String> libraries,
+  int? openPage,
 });
 
 Future<ScoreMetadataEdit?> editScoreMetadata(
   BuildContext context,
   ScoreEntry score, {
   Future<Map<String, String>> Function()? loadPdfInfo,
-  Future<Uint8List?>? preview,
+  Future<ScorePreviewPage?> Function(int page)? preview,
   required List<Setlist> setlists,
   required List<String> libraries,
   VoidCallback? onMidi,
@@ -68,7 +68,7 @@ class _ScoreMetadataDialog extends StatefulWidget {
 
   final ScoreEntry score;
   final Future<Map<String, String>> Function()? loadPdfInfo;
-  final Future<Uint8List?>? preview;
+  final Future<ScorePreviewPage?> Function(int page)? preview;
   final List<Setlist> setlists;
   final List<String> libraries;
   final VoidCallback? onMidi;
@@ -91,6 +91,86 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
       if (list.scores.contains(widget.score.id)) list.id,
   };
   late final _libraries = widget.score.collections.toSet();
+  late var _preview = widget.preview?.call(widget.score.page);
+
+  void _loadPreview(int page) => setState(() {
+    _preview = widget.preview?.call(page);
+  });
+
+  void _save({int? openPage}) => Navigator.pop<ScoreMetadataEdit>(context, (
+    title: _title.text.trim(),
+    fields: {
+      for (final field in _fields.entries) field.key: field.value.text.trim(),
+    },
+    setlists: _setlists,
+    libraries: _libraries,
+    openPage: openPage,
+  ));
+
+  Widget _pagePreview() => FutureBuilder<ScorePreviewPage?>(
+    future: _preview,
+    builder: (_, snapshot) {
+      final result = snapshot.data;
+      final ready = snapshot.connectionState == ConnectionState.done;
+      return Row(
+        children: [
+          SizedBox(
+            width: 86,
+            height: 112,
+            child: switch (result?.image) {
+              final bytes? => Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                excludeFromSemantics: true,
+              ),
+              null => const Icon(Icons.description_outlined),
+            },
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.score.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (result != null) ...[
+                  Text('Page ${result.page} of ${result.total}'),
+                  Wrap(
+                    children: [
+                      IconButton(
+                        tooltip: 'Previous preview page',
+                        onPressed: ready && result.page > 1
+                            ? () => _loadPreview(result.page - 1)
+                            : null,
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      IconButton(
+                        tooltip: 'Next preview page',
+                        onPressed: ready && result.page < result.total
+                            ? () => _loadPreview(result.page + 1)
+                            : null,
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+                  TextButton(
+                    onPressed:
+                        ready && !_loading && _title.text.trim().isNotEmpty
+                        ? () => _save(openPage: result.page)
+                        : null,
+                    child: const Text('Save and open page'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      );
+    },
+  );
 
   Future<void> _usePdfInfo() async {
     setState(() {
@@ -190,17 +270,7 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _loading || _title.text.trim().isEmpty
-              ? null
-              : () => Navigator.pop<ScoreMetadataEdit>(context, (
-                  title: _title.text.trim(),
-                  fields: {
-                    for (final field in _fields.entries)
-                      field.key: field.value.text.trim(),
-                  },
-                  setlists: _setlists,
-                  libraries: _libraries,
-                )),
+          onPressed: _loading || _title.text.trim().isEmpty ? null : _save,
           child: const Text('Save'),
         ),
       ],
@@ -256,30 +326,10 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
     _MetadataSection.properties => ListView(
       key: const PageStorageKey('score-properties'),
       children: [
-        if (widget.preview != null)
+        if (_preview != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 86,
-                  height: 112,
-                  child: FutureBuilder<Uint8List?>(
-                    future: widget.preview,
-                    builder: (_, snapshot) => switch (snapshot.data) {
-                      final bytes? => Image.memory(
-                        bytes,
-                        fit: BoxFit.contain,
-                        excludeFromSemantics: true,
-                      ),
-                      null => const Icon(Icons.description_outlined),
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(widget.score.title)),
-              ],
-            ),
+            child: _pagePreview(),
           ),
         if (widget.loadPdfInfo != null)
           TextButton(

@@ -7,10 +7,13 @@ import 'package:pdfrx/pdfrx.dart';
 
 import 'score_library.dart';
 
-Future<Uint8List?> renderLibraryScorePreview(
+typedef ScorePreviewPage = ({Uint8List? image, int page, int total});
+
+Future<ScorePreviewPage?> renderLibraryScorePreview(
   ScoreLibrary library,
-  ScoreEntry score,
-) async {
+  ScoreEntry score, {
+  int pageNumber = 1,
+}) async {
   await pdfrxFlutterInitialize();
   final file = await library.storage.openScore(score.id);
   final document = kIsWeb
@@ -20,7 +23,10 @@ Future<Uint8List?> renderLibraryScorePreview(
         )
       : await PdfDocument.openFile(file.path);
   try {
-    final page = document.pages.first;
+    final total = document.pages.length;
+    if (total == 0) return null;
+    final index = pageNumber.clamp(1, total);
+    final page = document.pages[index - 1];
     final scale = 360 / math.max(page.width, page.height);
     final width = math.max(1, (page.width * scale).round());
     final height = math.max(1, (page.height * scale).round());
@@ -30,14 +36,18 @@ Future<Uint8List?> renderLibraryScorePreview(
       fullWidth: width.toDouble(),
       fullHeight: height.toDouble(),
     );
-    if (pixels == null) return null;
+    if (pixels == null) return (image: null, page: index, total: total);
     try {
       final image = await pixels.createImage();
       try {
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        return bytes?.buffer.asUint8List(
-          bytes.offsetInBytes,
-          bytes.lengthInBytes,
+        return (
+          image: bytes?.buffer.asUint8List(
+            bytes.offsetInBytes,
+            bytes.lengthInBytes,
+          ),
+          page: index,
+          total: total,
         );
       } finally {
         image.dispose();

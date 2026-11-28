@@ -3299,9 +3299,10 @@ class _ReaderState extends State<Reader> {
       score,
       loadPdfInfo: () async =>
           readEmbeddedPdfInfo(await _library.storage.openScore(score.id)),
-      preview: renderLibraryScorePreview(
+      preview: (page) => renderLibraryScorePreview(
         _library,
         score,
+        pageNumber: page,
       ).catchError((Object _) => null),
       setlists: setlists,
       libraries: _library.collections,
@@ -3332,6 +3333,16 @@ class _ReaderState extends State<Reader> {
       }
       if (mounted && _entry?.id == score.id) {
         setState(() => _entry = _library.lookup(score.id));
+      }
+      if (updated.openPage case final page? when mounted) {
+        if (_entry?.id == score.id &&
+            _viewer.isReady &&
+            page >= _firstPage &&
+            page <= _lastPage) {
+          _jumpToPage(page);
+        } else if (_library.lookup(score.id) case final target?) {
+          await _openLibraryScore(target, startPage: page);
+        }
       }
     } catch (_) {
       if (mounted)
@@ -8593,7 +8604,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       () => renderLibraryScorePreview(
         widget.library,
         score,
-      ).catchError((Object _) => null),
+      ).then((preview) => preview?.image).catchError((Object _) => null),
     );
   }
 
