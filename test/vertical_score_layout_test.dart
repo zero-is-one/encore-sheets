@@ -186,11 +186,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Display'));
     await tester.pumpAndSettle();
-    final option = find.text('Scrolling display · Paged');
+    expect(find.text('More display settings'), findsNothing);
+    expect(find.text('Perform'), findsOneWidget);
+    expect(find.text('Reflow'), findsOneWidget);
+    final option = find.text('Continuous scrolling');
     await tester.ensureVisible(option);
     await tester.tap(option);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Vertical scrolling · Fit width').first);
     await waitUntil(
       () =>
           viewer().params.paging == null &&
@@ -254,13 +255,9 @@ void main() {
     await waitUntil(() => find.text('2 / 3').evaluate().isNotEmpty);
     await tester.tap(find.byTooltip('Display'));
     await tester.pumpAndSettle();
-    final scrolling = find.text(
-      'Scrolling display · Vertical scrolling · Fit width',
-    );
+    final scrolling = find.text('Continuous scrolling');
     await tester.ensureVisible(scrolling);
     await tester.tap(scrolling);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Paged').first);
     await waitUntil(
       () =>
           viewer().params.paging != null &&
