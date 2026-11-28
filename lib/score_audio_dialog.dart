@@ -15,12 +15,14 @@ class ScoreAudioDialog extends StatefulWidget {
     required this.selection,
     required this.title,
     required this.cueMode,
+    this.linkOnly = false,
   });
 
   final ScoreAudioSession audio;
   final String selection;
   final String title;
   final AudioPageCueMode cueMode;
+  final bool linkOnly;
 
   @override
   State<ScoreAudioDialog> createState() => _ScoreAudioDialogState();
@@ -35,7 +37,9 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
   List<AudioPageCue> _cues = [];
   late double _speed = widget.audio.player.speed;
   late double _pitch = 12 * math.log(widget.audio.player.pitch) / math.ln2;
-  String get _selection => widget.audio.pinnedSelection ?? widget.selection;
+  String get _selection => widget.linkOnly
+      ? widget.selection
+      : widget.audio.pinnedSelection ?? widget.selection;
 
   @override
   void initState() {
@@ -47,6 +51,7 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
     final track = await widget.audio.track(_selection);
     _track = track?.name;
     _musicId = track?.musicId;
+    if (widget.linkOnly) return;
     await widget.audio.open(_selection);
     final file = track?.file;
     _cues = file == null ? [] : await widget.audio.pageCues(file);
@@ -95,12 +100,17 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
       ],
     );
     if (file == null || !mounted) return;
-    await widget.audio.attach(_selection, file);
+    await widget.audio.attach(_selection, file, activate: !widget.linkOnly);
     await _loadTrack();
   });
 
   Future<void> _attachMusic() => _run(() async {
-    if (await widget.audio.attachMusic(_selection)) await _loadTrack();
+    if (await widget.audio.attachMusic(
+      _selection,
+      activate: !widget.linkOnly,
+    )) {
+      await _loadTrack();
+    }
   });
 
   Future<void> _editCue(AudioPageCue cue) => _run(() async {
@@ -157,7 +167,7 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_error case final error?) Text(error),
-            if (_musicId != null)
+            if (!widget.linkOnly && _musicId != null)
               TextButton.icon(
                 onPressed: _busy
                     ? null
@@ -170,7 +180,7 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
                 icon: Icon(_musicPlaying ? Icons.pause : Icons.play_arrow),
                 label: Text(_musicPlaying ? 'Pause' : 'Play'),
               ),
-            if (_track != null && _musicId == null) ...[
+            if (!widget.linkOnly && _track != null && _musicId == null) ...[
               StreamBuilder<Duration?>(
                 stream: player.durationStream,
                 initialData: player.duration,
@@ -332,7 +342,7 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
                   ),
               ],
             ],
-            if (_track != null)
+            if (!widget.linkOnly && _track != null)
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Keep playing across scores'),
@@ -370,7 +380,10 @@ class _ScoreAudioDialogState extends State<ScoreAudioDialog> {
             onPressed: _busy
                 ? null
                 : () => _run(() async {
-                    await widget.audio.unlink(_selection);
+                    await widget.audio.unlink(
+                      _selection,
+                      activate: !widget.linkOnly,
+                    );
                     await _loadTrack();
                   }),
             child: const Text('Unlink'),

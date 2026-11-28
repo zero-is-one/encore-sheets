@@ -79,13 +79,13 @@ class ScoreAudioSession {
     return null;
   }
 
-  Future<bool> attachMusic(String selection) async {
+  Future<bool> attachMusic(String selection, {bool activate = true}) async {
     if (!supportsMusic) return false;
     final picked = await _music.invokeMapMethod<String, String>('pick');
     if (picked == null) return false;
     final previous = await track(selection);
     final attachments = await _attachments();
-    await stop();
+    await _stopBeforeEditing(previous, activate: activate);
     await library.updatePreferences({
       'localScoreAudio': {
         ...attachments,
@@ -100,7 +100,11 @@ class ScoreAudioSession {
   Future<bool> musicPlaying(String id) async =>
       await _music.invokeMethod<bool>('isPlaying', id) ?? false;
 
-  Future<void> attach(String selection, XFile source) async {
+  Future<void> attach(
+    String selection,
+    XFile source, {
+    bool activate = true,
+  }) async {
     final extension = source.name.split('.').last.toLowerCase();
     if (!RegExp(r'^[a-z0-9]{1,6}$').hasMatch(extension)) {
       throw const FormatException('Unsupported track filename');
@@ -113,33 +117,50 @@ class ScoreAudioSession {
     final path = '$folder/$file';
     try {
       await source.saveTo(path);
-      await _stopMusic();
-      await player.setLoopMode(LoopMode.off);
-      await player.setFilePath(path);
-      loopStart = loopEnd = null;
+      if (activate) {
+        await _stopMusic();
+        await player.setLoopMode(LoopMode.off);
+        await player.setFilePath(path);
+        loopStart = loopEnd = null;
+      } else {
+        await _stopBeforeEditing(previous, activate: false);
+      }
       await library.updatePreferences({
         'localScoreAudio': {
           ...attachments,
           selection: {'file': file, 'name': source.name},
         },
       });
-      _loaded = file;
+      if (activate) _loaded = file;
     } catch (_) {
-      await stop();
+      if (activate) await stop();
       await _discard(path);
       rethrow;
     }
     if (previous?.file case final old?) await _discard('$folder/$old');
   }
 
-  Future<void> unlink(String selection) async {
+  Future<void> unlink(String selection, {bool activate = true}) async {
     final previous = await track(selection);
     final attachments = await _attachments();
     attachments.remove(selection);
     await library.updatePreferences({'localScoreAudio': attachments});
-    await stop();
+    await _stopBeforeEditing(previous, activate: activate);
     if (previous?.file case final old?)
       await _discard('${await _folder()}/$old');
+  }
+
+  Future<void> _stopBeforeEditing(
+    LinkedAudio? previous, {
+    required bool activate,
+  }) async {
+    final file = previous?.file;
+    final musicId = previous?.musicId;
+    if (activate ||
+        (file != null && file == _loaded) ||
+        (musicId != null && musicId == _playingMusicId)) {
+      await stop();
+    }
   }
 
   Future<void> _discard(String path) async {

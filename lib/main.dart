@@ -3337,6 +3337,10 @@ class _ReaderState extends State<Reader> {
       onMidi: _restricted(RestrictedTool.connections)
           ? null
           : () => _editMidiAutomation(_library.lookup(score.id) ?? score),
+      onAudio:
+          ScoreAudioSession.supported && !_restricted(RestrictedTool.transfers)
+          ? () => _editScoreAudioLink(score)
+          : null,
     );
     if (updated == null || !mounted) return;
     try {
@@ -3377,6 +3381,23 @@ class _ReaderState extends State<Reader> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not save score details.')),
         );
+    }
+  }
+
+  Future<void> _editScoreAudioLink(ScoreEntry score) async {
+    final audio = _scoreAudio ??= ScoreAudioSession(_library);
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ScoreAudioDialog(
+        audio: audio,
+        selection: score.id,
+        title: score.title,
+        cueMode: AudioPageCueMode.off,
+        linkOnly: true,
+      ),
+    );
+    if (mounted && _audioCueFile != null && audio.loadedFile != _audioCueFile) {
+      _stopAudioCues();
     }
   }
 

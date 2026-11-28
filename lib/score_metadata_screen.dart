@@ -33,6 +33,7 @@ Future<ScoreMetadataEdit?> editScoreMetadata(
   required List<Setlist> setlists,
   required List<String> libraries,
   VoidCallback? onMidi,
+  VoidCallback? onAudio,
 }) => showDialog(
   context: context,
   builder: (_) => _ScoreMetadataDialog(
@@ -42,12 +43,14 @@ Future<ScoreMetadataEdit?> editScoreMetadata(
     setlists: setlists,
     libraries: libraries,
     onMidi: onMidi,
+    onAudio: onAudio,
   ),
 );
 
 enum _MetadataSection {
   properties('Properties', Icons.info_outline),
   setlists('Setlists', Icons.queue_music),
+  audio('Audio', Icons.headphones_outlined),
   midi('MIDI', Icons.settings_input_component),
   libraries('Libraries', Icons.library_books_outlined);
 
@@ -64,6 +67,7 @@ class _ScoreMetadataDialog extends StatefulWidget {
     required this.setlists,
     required this.libraries,
     this.onMidi,
+    this.onAudio,
   });
 
   final ScoreEntry score;
@@ -72,6 +76,7 @@ class _ScoreMetadataDialog extends StatefulWidget {
   final List<Setlist> setlists;
   final List<String> libraries;
   final VoidCallback? onMidi;
+  final VoidCallback? onAudio;
 
   @override
   State<_ScoreMetadataDialog> createState() => _ScoreMetadataDialogState();
@@ -216,7 +221,9 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
     final wide = size.width >= 720;
     final sections = [
       for (final section in _MetadataSection.values)
-        if (section != _MetadataSection.midi || widget.onMidi != null) section,
+        if ((section != _MetadataSection.midi || widget.onMidi != null) &&
+            (section != _MetadataSection.audio || widget.onAudio != null))
+          section,
     ];
     return AlertDialog(
       title: const Text('Score details'),
@@ -300,6 +307,17 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
   );
 
   Widget _sectionContent() => switch (_section) {
+    _MetadataSection.audio => ListView(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.headphones_outlined),
+          title: const Text('Linked audio'),
+          subtitle: const Text('Link, replace, or remove this score’s track.'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: widget.onAudio,
+        ),
+      ],
+    ),
     _MetadataSection.midi => ListView(
       children: [
         ListTile(
