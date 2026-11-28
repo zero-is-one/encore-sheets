@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:encoresheets/page_crop.dart';
 import 'package:encoresheets/library_storage_native.dart';
 import 'package:encoresheets/library_sync.dart';
 import 'package:encoresheets/score_library.dart';
@@ -310,6 +311,59 @@ void main() {
     await first.synchronize(endpoint);
     expect(first.recent.single.id, score.id);
   });
+
+  test(
+    'restores crop versions with annotations, bookmarks and setlist references',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'encore_versions',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final library = ScoreLibrary(NativeLibraryStorage(directory: directory));
+      final (score, _) = await library.import(XFile('assets/first_light.pdf'));
+      const bookmark = ScoreBookmark('section', 'Section', 2, endPage: 3);
+      await library.updateScore(
+        score.id,
+        (entry) => entry.copyWith(bookmarks: [bookmark]),
+      );
+      await library.saveSetlist(
+        Setlist('concert', 'Concert', [bookmark.selectionId(score.id)]),
+      );
+      final ink = {
+        '2': [
+          {
+            'tool': 'pen',
+            'points': [
+              [.15, .2],
+            ],
+          },
+        ],
+      };
+      await library.writeInk(score.id, ink);
+      await library.saveCrop(score.id, {2: const PageCrop(left: .1)});
+
+      final reopened = ScoreLibrary(NativeLibraryStorage(directory: directory));
+      await reopened.load();
+      final version = reopened.recentlyUpdated.single;
+      expect(reopened.recentlyDeleted, isEmpty);
+      final copy = await reopened.restoreScoreVersion(
+        version.id,
+        replace: false,
+      );
+      expect(copy.crops, isEmpty);
+      expect(copy.bookmarks.single.page, 2);
+      expect(await reopened.readInk(copy.id), ink);
+      final restored = await reopened.restoreScoreVersion(
+        version.id,
+        replace: true,
+      );
+      expect(reopened.lookup(score.id), isNull);
+      expect(reopened.setlists.single.scores, [
+        bookmark.selectionId(restored.id),
+      ]);
+      expect(reopened.replacementFor(version)?.id, restored.id);
+    },
+  );
 
   test('recovers a deleted score with its PDF and setlist reference', () async {
     final directory = await Directory.systemTemp.createTemp(

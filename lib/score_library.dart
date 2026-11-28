@@ -92,6 +92,7 @@ class ScoreEntry {
     this.reflowZones = const [],
     this.pdfSourceId,
     this.deletedAt,
+    this.versionOf,
     this.validUntil,
     this.scrollMode,
   });
@@ -107,6 +108,7 @@ class ScoreEntry {
       _ => null,
     },
     deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
+    versionOf: json['versionOf'] as String?,
     scrollMode: ReaderScrollMode.fromJson(json['scrollMode']),
     validUntil: switch (json['validUntil']) {
       null => null,
@@ -161,6 +163,7 @@ class ScoreEntry {
   final DateTime openedAt;
   final DateTime? addedAt;
   final DateTime? deletedAt;
+  final String? versionOf;
   final DateTime? validUntil;
   final ReaderScrollMode? scrollMode;
   bool get expired => validUntil?.isAfter(DateTime.now()) == false;
@@ -196,6 +199,7 @@ class ScoreEntry {
     String? pdfSourceId,
     bool detachPdf = false,
     DateTime? deletedAt,
+    String? versionOf,
     bool recover = false,
     DateTime? validUntil,
     ReaderScrollMode? scrollMode,
@@ -218,6 +222,7 @@ class ScoreEntry {
     reflowZones: reflowZones ?? this.reflowZones,
     pdfSourceId: detachPdf ? null : pdfSourceId ?? this.pdfSourceId,
     deletedAt: recover ? null : deletedAt ?? this.deletedAt,
+    versionOf: recover ? null : versionOf ?? this.versionOf,
     validUntil: validUntil ?? this.validUntil,
     scrollMode: inheritScrollMode ? null : scrollMode ?? this.scrollMode,
   );
@@ -230,6 +235,7 @@ class ScoreEntry {
     if (addedAt != null) 'addedAt': addedAt!.toIso8601String(),
     if (pdfSourceId != null) 'pdfSourceId': pdfSourceId,
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+    if (versionOf != null) 'versionOf': versionOf,
     if (validUntil != null) 'validUntil': validUntil!.toUtc().toIso8601String(),
     if (scrollMode != null) 'scrollMode': scrollMode!.name,
     if (metadata.isNotEmpty) 'metadata': metadata,
@@ -386,8 +392,79 @@ class ScoreLibrary {
         ..sort((a, b) => b.openedAt.compareTo(a.openedAt));
 
   List<ScoreEntry> get recentlyDeleted =>
-      _scores.values.where((score) => score.deletedAt != null).toList()
+      _scores.values
+          .where((score) => score.deletedAt != null && score.versionOf == null)
+          .toList()
         ..sort((a, b) => b.deletedAt!.compareTo(a.deletedAt!));
+
+  List<ScoreEntry> get recentlyUpdated =>
+      _scores.values
+          .where(
+            (score) =>
+                score.deletedAt != null &&
+                score.versionOf != null &&
+                !score.expired,
+          )
+          .toList()
+        ..sort((a, b) => b.deletedAt!.compareTo(a.deletedAt!));
+
+  ScoreEntry? replacementFor(ScoreEntry version) {
+    final visited = <String>{version.id};
+    var target = version.versionOf;
+    while (target != null && visited.add(target)) {
+      if (lookup(target) case final score?) return score;
+      target = _scores[target]?.versionOf;
+    }
+    return null;
+  }
+
+  Future<void> saveCrop(String id, Map<int, PageCrop> crops) =>
+      _serialize(() async {
+        final original = lookup(id);
+        if (original == null) throw StateError('The source score is missing.');
+        if (jsonEncode(original.toJson()['crops']) ==
+            jsonEncode(original.copyWith(crops: crops).toJson()['crops']))
+          return;
+        final snapshot = original.copyWith(
+          id: newRecordId(),
+          deletedAt: DateTime.now().toUtc(),
+          versionOf: original.id,
+          pdfSourceId: original.storedPdfId,
+        );
+        final updated = original.copyWith(crops: crops);
+        final catalog = {..._scores, id: updated, snapshot.id: snapshot};
+        final annotations = await storage.readInk(id);
+        try {
+          if (annotations.isNotEmpty)
+            await storage.writeInk(snapshot.id, annotations);
+          await storage.writeIndex(catalog.values.toList());
+        } catch (_) {
+          await storage.removeScore(snapshot.id);
+          rethrow;
+        }
+        _scores.addAll(catalog);
+      });
+
+  Future<ScoreEntry> restoreScoreVersion(
+    String id, {
+    required bool replace,
+  }) => _serialize(() async {
+    final snapshot = _scores[id];
+    if (snapshot == null || snapshot.versionOf == null || snapshot.expired) {
+      throw StateError('The saved version is missing.');
+    }
+    final active = replace ? replacementFor(snapshot) : null;
+    if (replace && active == null)
+      throw StateError('The edited score is missing.');
+    final pdf = await storage.openScore(snapshot.storedPdfId);
+    final (restored, _) = await _import(
+      XFile(pdf.path, name: '${snapshot.title} (restored).pdf'),
+      template: active == null ? snapshot : snapshot.copyWith(id: active.id),
+      annotations: await storage.readInk(snapshot.id),
+      replace: replace,
+    );
+    return restored;
+  });
 
   ScoreEntry? lookup(String id) {
     final score = _scores[id];
@@ -1156,6 +1233,7 @@ class ScoreLibrary {
     Map<String, dynamic> annotations = const {},
     bool replace = false,
     bool bundledSample = false,
+    String? titleOverride,
   }) async {
     final now = DateTime.now().toUtc();
     final previous = replace && template != null ? lookup(template.id) : null;
@@ -1170,7 +1248,7 @@ class ScoreLibrary {
       id: newRecordId(),
       title: bundledSample
           ? 'First Light'
-          : (title.isEmpty ? 'Untitled score' : title),
+          : titleOverride ?? (title.isEmpty ? 'Untitled score' : title),
       page: 1,
       openedAt: now,
       addedAt: now,
@@ -1198,7 +1276,10 @@ class ScoreLibrary {
     entries[score.id] = score;
     final lists = Map.of(_setlists);
     if (previous != null) {
-      entries[previous.id] = previous.copyWith(deletedAt: now);
+      entries[previous.id] = previous.copyWith(
+        deletedAt: now,
+        versionOf: score.id,
+      );
       final remaining = score.bookmarks
           .where((bookmark) => bookmark.isItem)
           .map((bookmark) => bookmark.id)

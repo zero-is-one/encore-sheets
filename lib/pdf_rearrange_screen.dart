@@ -119,7 +119,7 @@ class _PdfRearrangeScreenState extends State<PdfRearrangeScreen> {
         builder: (dialog) => AlertDialog(
           title: const Text('Replace this score?'),
           content: const Text(
-            'Setlists will use the rearranged copy. The previous version can be recovered from Recently deleted.',
+            'Setlists will use the rearranged copy. The previous version can be recovered from Recently updated.',
           ),
           actions: [
             TextButton(

@@ -1992,7 +1992,23 @@ class _ReaderState extends State<Reader> {
         await _openReaderPanel<void>(
           (_) => LibraryBackupScreen(library: _library),
         );
-        if (mounted) await _restorePreferences();
+        if (!mounted) return;
+        await _restorePreferences();
+        if (!mounted) return;
+        if (_entry case final entry? when _library.lookup(entry.id) == null) {
+          final previous = _library.recentlyUpdated
+              .where((version) => version.id == entry.id)
+              .firstOrNull;
+          final replacement = previous == null
+              ? null
+              : _library.replacementFor(previous);
+          if (replacement != null) {
+            await _openLibraryScore(replacement);
+          } else {
+            _playing = null;
+            _load(null, null, null);
+          }
+        }
         return;
       }
       if (result == 'metadata-csv') {
@@ -5729,10 +5745,7 @@ class _ReaderState extends State<Reader> {
         case PageCropScope.resetAll:
           next.clear();
       }
-      await _library.updateScore(
-        score.id,
-        (previous) => previous.copyWith(crops: next),
-      );
+      await _library.saveCrop(score.id, next);
       if (!mounted || _entry?.id != score.id) return;
       setState(() => _entry = _library.lookup(score.id));
       _fit();

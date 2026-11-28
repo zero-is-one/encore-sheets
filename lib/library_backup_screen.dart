@@ -84,6 +84,38 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
     }
   }
 
+  Future<void> _restoreScoreVersion(ScoreEntry version, bool replace) async {
+    if (replace) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text('Replace ${version.title}?'),
+          content: const Text(
+            'The current version will still be available under Recently updated.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await _run('Restore score version', () async {
+      final restored = await widget.library.restoreScoreVersion(
+        version.id,
+        replace: replace,
+      );
+      return 'Restored ${restored.title}.';
+    });
+  }
+
   Future<String?> _export({bool includeScores = true}) async {
     final box = context.findRenderObject() as RenderBox;
     final origin = box.localToGlobal(Offset.zero) & box.size;
@@ -207,6 +239,42 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
                                 return 'Recovered ${score.title}.';
                               }),
                         child: const Text('Recover'),
+                      ),
+                    ),
+                ],
+              ),
+              ExpansionTile(
+                leading: const Icon(Icons.history),
+                title: const Text('Recently updated'),
+                subtitle: Text(
+                  '${widget.library.recentlyUpdated.length} previous versions',
+                ),
+                children: [
+                  if (widget.library.recentlyUpdated.isEmpty)
+                    const ListTile(title: Text('No previous versions.')),
+                  for (final version in widget.library.recentlyUpdated)
+                    ListTile(
+                      title: Text(version.title),
+                      subtitle: Text(
+                        MaterialLocalizations.of(context)
+                            .formatMediumDate(version.deletedAt!.toLocal()),
+                      ),
+                      trailing: PopupMenuButton<bool>(
+                        tooltip: 'Restore version of ${version.title}',
+                        enabled: _operation == null,
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: false,
+                            child: Text('Restore as a copy'),
+                          ),
+                          if (widget.library.replacementFor(version) != null)
+                            const PopupMenuItem(
+                              value: true,
+                              child: Text('Replace edited score…'),
+                            ),
+                        ],
+                        onSelected: (replace) =>
+                            _restoreScoreVersion(version, replace),
                       ),
                     ),
                 ],

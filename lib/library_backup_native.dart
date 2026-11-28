@@ -416,8 +416,9 @@ void _exportBackup(
     }
 
     for (final (index, score) in scores.indexed) {
-      if (score.actions.isEmpty) continue;
+      if (score.actions.isEmpty && score.versionOf == null) continue;
       scores[index] = score.copyWith(
+        versionOf: mapped[score.versionOf],
         actions: [
           for (final action in score.actions)
             if (mapped[action.selection] case final target?)
