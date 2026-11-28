@@ -48,7 +48,7 @@ void main() {
         final rightButtons = [
           for (final label in [
             'Annotations',
-            'Quick access',
+            'Services',
             'Audio tools',
             'Reader tools',
           ])

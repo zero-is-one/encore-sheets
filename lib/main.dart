@@ -6482,7 +6482,15 @@ class _ReaderState extends State<Reader> {
               color: _inking ? _brass : null,
               icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
             ),
-          _quickAccessMenu(),
+          if (!_restricted(RestrictedTool.transfers) &&
+              !_restricted(RestrictedTool.connections))
+            IconButton(
+              tooltip: 'Services',
+              icon: const Icon(Icons.cloud_outlined),
+              onPressed: _picking
+                  ? null
+                  : () => _runReaderDisplayAction(_ReaderDisplay.cloudServices),
+            ),
         ];
         if (constraints.maxWidth < 720) {
           return Column(
@@ -6624,31 +6632,22 @@ class _ReaderState extends State<Reader> {
     ].where((item) => _readerActionAllowed(item.value)).toList(),
   );
 
-  Widget _quickAccessMenu() => PopupMenuButton<QuickReaderTool>(
-    tooltip: 'Quick access',
-    enabled: !_picking,
-    icon: const Icon(Icons.bolt_outlined),
-    onSelected: _runQuickTool,
-    itemBuilder: (_) => [
+  Widget _quickAccessMenu() => SubmenuButton(
+    leadingIcon: const Icon(Icons.bolt_outlined),
+    menuChildren: [
       for (final tool in _quickTools)
-        PopupMenuItem(
-          value: tool,
-          enabled: _quickToolEnabled(tool),
-          child: ListTile(
-            leading: Icon(tool.icon),
-            title: Text(tool.label),
-            contentPadding: EdgeInsets.zero,
-          ),
+        MenuItemButton(
+          onPressed: _quickToolEnabled(tool) ? () => _runQuickTool(tool) : null,
+          leadingIcon: Icon(tool.icon),
+          child: Text(tool.label),
         ),
-      PopupMenuItem(
-        onTap: _pinQuickTools,
-        child: const ListTile(
-          leading: Icon(Icons.push_pin_outlined),
-          title: Text('Pin tools…'),
-          contentPadding: EdgeInsets.zero,
-        ),
+      MenuItemButton(
+        onPressed: _pinQuickTools,
+        leadingIcon: const Icon(Icons.push_pin_outlined),
+        child: const Text('Pin tools…'),
       ),
     ],
+    child: const Text('Quick access'),
   );
 
   static const _displayActions = {
@@ -7531,6 +7530,7 @@ class _ReaderState extends State<Reader> {
         SubmenuButton(
           leadingIcon: const Icon(Icons.more_horiz),
           menuChildren: [
+            _quickAccessMenu(),
             for (final entry in items.entries)
               MenuItemButton(
                 onPressed: entry.value.enabled
