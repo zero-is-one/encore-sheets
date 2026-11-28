@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:material_ui/material_ui.dart';
 
 import 'score_library.dart';
@@ -16,20 +18,55 @@ const scoreMetadataFields = {
   'key': 'Key',
 };
 
-Future<({String title, Map<String, String> fields})?> editScoreMetadata(
+typedef ScoreMetadataEdit = ({
+  String title,
+  Map<String, String> fields,
+  Set<String> setlists,
+  Set<String> libraries,
+});
+
+Future<ScoreMetadataEdit?> editScoreMetadata(
   BuildContext context,
   ScoreEntry score, {
   Future<Map<String, String>> Function()? loadPdfInfo,
+  Future<Uint8List?>? preview,
+  required List<Setlist> setlists,
+  required List<String> libraries,
 }) => showDialog(
   context: context,
-  builder: (_) => _ScoreMetadataDialog(score: score, loadPdfInfo: loadPdfInfo),
+  builder: (_) => _ScoreMetadataDialog(
+    score: score,
+    loadPdfInfo: loadPdfInfo,
+    preview: preview,
+    setlists: setlists,
+    libraries: libraries,
+  ),
 );
 
+enum _MetadataSection {
+  properties('Properties', Icons.info_outline),
+  setlists('Setlists', Icons.queue_music),
+  libraries('Libraries', Icons.library_books_outlined);
+
+  const _MetadataSection(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
 class _ScoreMetadataDialog extends StatefulWidget {
-  const _ScoreMetadataDialog({required this.score, this.loadPdfInfo});
+  const _ScoreMetadataDialog({
+    required this.score,
+    this.loadPdfInfo,
+    this.preview,
+    required this.setlists,
+    required this.libraries,
+  });
 
   final ScoreEntry score;
   final Future<Map<String, String>> Function()? loadPdfInfo;
+  final Future<Uint8List?>? preview;
+  final List<Setlist> setlists;
+  final List<String> libraries;
 
   @override
   State<_ScoreMetadataDialog> createState() => _ScoreMetadataDialogState();
@@ -43,6 +80,12 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
   };
   bool _loading = false;
   String? _status;
+  var _section = _MetadataSection.properties;
+  late final _setlists = {
+    for (final list in widget.setlists)
+      if (list.scores.contains(widget.score.id)) list.id,
+  };
+  late final _libraries = widget.score.collections.toSet();
 
   Future<void> _usePdfInfo() async {
     setState(() {
@@ -83,59 +126,164 @@ class _ScoreMetadataDialogState extends State<_ScoreMetadataDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Score details'),
-    content: SizedBox(
-      width: 440,
-      child: ListView(
-        shrinkWrap: true,
-        children: [
-          if (widget.loadPdfInfo != null)
-            TextButton(
-              onPressed: _loading ? null : _usePdfInfo,
-              child: const Text('Use embedded PDF details'),
-            ),
-          if (_loading) const LinearProgressIndicator(),
-          if (_status case final status?) Text(status),
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Title'),
-            onChanged: (_) => setState(() {}),
-          ),
-          for (final field in scoreMetadataFields.entries)
-            TextField(
-              controller: _fields[field.key],
-              decoration: InputDecoration(
-                labelText: field.value,
-                hintText: field.key == 'duration'
-                    ? 'm:ss, h:mm:ss, or whole minutes'
-                    : null,
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width >= 720;
+    return AlertDialog(
+      title: const Text('Score details'),
+      content: SizedBox(
+        width: wide ? 720 : 440,
+        height: (size.height * .65).clamp(180.0, 620.0),
+        child: wide
+            ? Row(
+                children: [
+                  SizedBox(
+                    width: 164,
+                    child: ListView(
+                      children: [
+                        for (final section in _MetadataSection.values)
+                          ListTile(
+                            leading: Icon(section.icon),
+                            title: Text(section.label),
+                            selected: section == _section,
+                            onTap: () => setState(() => _section = section),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const VerticalDivider(width: 20),
+                  Expanded(child: _sectionContent()),
+                ],
+              )
+            : Column(
+                children: [
+                  DropdownButton<_MetadataSection>(
+                    isExpanded: true,
+                    value: _section,
+                    items: [
+                      for (final section in _MetadataSection.values)
+                        DropdownMenuItem(
+                          value: section,
+                          child: Text(section.label),
+                        ),
+                    ],
+                    onChanged: (section) {
+                      if (section != null) setState(() => _section = section);
+                    },
+                  ),
+                  Expanded(child: _sectionContent()),
+                ],
               ),
-            ),
-        ],
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _loading || _title.text.trim().isEmpty
-            ? null
-            : () {
-                Navigator.pop(context, (
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _loading || _title.text.trim().isEmpty
+              ? null
+              : () => Navigator.pop<ScoreMetadataEdit>(context, (
                   title: _title.text.trim(),
                   fields: {
                     for (final field in _fields.entries)
                       field.key: field.value.text.trim(),
                   },
-                ));
-              },
-        child: const Text('Save'),
-      ),
+                  setlists: _setlists,
+                  libraries: _libraries,
+                )),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  Widget _membership({
+    required Iterable<({String id, String name})> options,
+    required Set<String> selected,
+    required String empty,
+  }) => ListView(
+    children: [
+      if (options.isEmpty) Text(empty),
+      for (final option in options)
+        CheckboxListTile(
+          title: Text(option.name),
+          value: selected.contains(option.id),
+          onChanged: (value) => setState(() {
+            if (value == true) {
+              selected.add(option.id);
+            } else {
+              selected.remove(option.id);
+            }
+          }),
+        ),
     ],
   );
+
+  Widget _sectionContent() => switch (_section) {
+    _MetadataSection.setlists => _membership(
+      options: widget.setlists.map((list) => (id: list.id, name: list.name)),
+      selected: _setlists,
+      empty: 'Create a setlist to add this score to it.',
+    ),
+    _MetadataSection.libraries => _membership(
+      options: widget.libraries.map((name) => (id: name, name: name)),
+      selected: _libraries,
+      empty: 'Create a library to assign this score to it.',
+    ),
+    _MetadataSection.properties => ListView(
+      key: const PageStorageKey('score-properties'),
+      children: [
+        if (widget.preview != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 86,
+                  height: 112,
+                  child: FutureBuilder<Uint8List?>(
+                    future: widget.preview,
+                    builder: (_, snapshot) => switch (snapshot.data) {
+                      final bytes? => Image.memory(
+                        bytes,
+                        fit: BoxFit.contain,
+                        excludeFromSemantics: true,
+                      ),
+                      null => const Icon(Icons.description_outlined),
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(widget.score.title)),
+              ],
+            ),
+          ),
+        if (widget.loadPdfInfo != null)
+          TextButton(
+            onPressed: _loading ? null : _usePdfInfo,
+            child: const Text('Use embedded PDF details'),
+          ),
+        if (_loading) const LinearProgressIndicator(),
+        if (_status case final status?) Text(status),
+        TextField(
+          controller: _title,
+          decoration: const InputDecoration(labelText: 'Title'),
+          onChanged: (_) => setState(() {}),
+        ),
+        for (final field in scoreMetadataFields.entries)
+          TextField(
+            controller: _fields[field.key],
+            decoration: InputDecoration(
+              labelText: field.value,
+              hintText: field.key == 'duration'
+                  ? 'm:ss, h:mm:ss, or whole minutes'
+                  : null,
+            ),
+          ),
+      ],
+    ),
+  };
 }
 
 Future<({Set<String> ids, String field, String value, bool append})?>

@@ -3282,15 +3282,44 @@ class _ReaderState extends State<Reader> {
   }
 
   Future<void> _editScore(ScoreEntry score) async {
+    final setlists = _library.setlists;
+    final originalMembership = {
+      for (final list in setlists)
+        if (list.scores.contains(score.id)) list.id,
+    };
     final updated = await editScoreMetadata(
       context,
       score,
       loadPdfInfo: () async =>
           readEmbeddedPdfInfo(await _library.storage.openScore(score.id)),
+      preview: renderLibraryScorePreview(
+        _library,
+        score,
+      ).catchError((Object _) => null),
+      setlists: setlists,
+      libraries: _library.collections,
     );
     if (updated == null || !mounted) return;
     try {
       await _library.editMetadata(score.id, updated.title, updated.fields);
+      if (!setEquals(updated.libraries, score.collections.toSet())) {
+        await _library.assignCollections(score.id, updated.libraries);
+      }
+      for (final list in _library.setlists) {
+        final include = updated.setlists.contains(list.id);
+        if (include == originalMembership.contains(list.id)) continue;
+        final present = list.scores.contains(score.id);
+        if (include == present) continue;
+        await _library.saveSetlist(
+          list.copyWith(
+            scores: [
+              for (final id in list.scores)
+                if (id != score.id) id,
+              if (include) score.id,
+            ],
+          ),
+        );
+      }
       if (mounted && _entry?.id == score.id) {
         setState(() => _entry = _library.lookup(score.id));
       }
