@@ -21,11 +21,88 @@ bool isEnsembleAddress(InternetAddress address) {
       first == 192 && second == 168;
 }
 
+typedef NearbyEnsemble = ({String address, String name});
+typedef EnsembleFollower = ({String name, bool hasScore});
+
+const _discoveryPort = 43862;
+const _discoveryQuery = 'encoresheets:ensemble:discover:1';
+final _broadcast = InternetAddress('255.255.255.255');
+
+Future<List<NearbyEnsemble>> discoverEnsembles() async {
+  final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+  final nearby = <String, NearbyEnsemble>{};
+  final listener = socket.listen((event) {
+    if (event != RawSocketEvent.read) return;
+    for (
+      var packet = socket.receive();
+      packet != null;
+      packet = socket.receive()
+    ) {
+      if (!isEnsembleAddress(packet.address) || packet.data.length > 512)
+        continue;
+      try {
+        final response = jsonDecode(utf8.decode(packet.data));
+        if (response
+            case {
+              'kind': _discoveryQuery,
+              'port': final int port,
+              'name': final String name,
+            }
+            when port > 0 && port <= 65535 && name.length <= 80) {
+          final address = '${packet.address.address}:$port';
+          nearby[address] = (address: address, name: name);
+        }
+      } on FormatException {
+        continue;
+      }
+    }
+  });
+  try {
+    socket.broadcastEnabled = true;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      socket.send(utf8.encode(_discoveryQuery), _broadcast, _discoveryPort);
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+    }
+    return nearby.values.toList();
+  } finally {
+    await listener.cancel();
+    socket.close();
+  }
+}
+
 class EnsembleSession {
   static const _endpoint = '/encore-session/v1';
   static const _timeout = Duration(seconds: 3);
 
   HttpServer? _server;
+  RawDatagramSocket? _discovery;
+  String? _leadingScore;
+  String? leaderName;
+  final _followers = <String, ({String name, String? score, DateTime seen})>{};
+
+  void _pruneFollowers() {
+    final cutoff = DateTime.now().subtract(const Duration(seconds: 4));
+    _followers.removeWhere((_, follower) => follower.seen.isBefore(cutoff));
+  }
+
+  List<EnsembleFollower> get followers {
+    _pruneFollowers();
+    return [
+      for (final follower in _followers.values)
+        (
+          name: follower.name,
+          hasScore: _leadingScore != null && follower.score == _leadingScore,
+        ),
+    ];
+  }
+
+  String get _deviceName {
+    final name = Platform.localHostname;
+    return name.isEmpty
+        ? 'EncoreSheets'
+        : String.fromCharCodes(name.runes.take(32));
+  }
+
   HttpClient? _client;
   Timer? _poller;
   String? address;
@@ -52,6 +129,42 @@ class EnsembleSession {
     _server = server;
     address = '${local.address}:${server.port}';
     code = secret;
+    leaderName = _deviceName;
+    try {
+      final discovery = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        _discoveryPort,
+      );
+      if (_server != server) {
+        discovery.close();
+      } else {
+        _discovery = discovery;
+        final announcement = utf8.encode(
+          jsonEncode({
+            'kind': _discoveryQuery,
+            'port': server.port,
+            'name': _deviceName,
+          }),
+        );
+        discovery.listen((event) {
+          if (event != RawSocketEvent.read) return;
+          for (
+            var packet = discovery.receive();
+            packet != null;
+            packet = discovery.receive()
+          ) {
+            if (packet.data.length == _discoveryQuery.length &&
+                isEnsembleAddress(packet.address) &&
+                utf8.decode(packet.data, allowMalformed: true) ==
+                    _discoveryQuery) {
+              discovery.send(announcement, packet.address, packet.port);
+            }
+          }
+        });
+      }
+    } on SocketException {
+      // The address and group code remain available when discovery is blocked.
+    }
     server.listen((request) async {
       final response = request.response;
       if (request.method != 'GET' ||
@@ -61,6 +174,27 @@ class EnsembleSession {
         response.statusCode = HttpStatus.notFound;
       } else {
         final current = position();
+        _leadingScore = current.id;
+        _pruneFollowers();
+        final follower = request.headers.value('x-encore-follower');
+        if (follower != null &&
+            follower.length <= 32 &&
+            (_followers.containsKey(follower) || _followers.length < 50)) {
+          final encodedName = request.headers.value('x-encore-name');
+          var name = 'EncoreSheets follower';
+          if (encodedName != null && encodedName.length <= 384) {
+            try {
+              name = Uri.decodeComponent(encodedName);
+            } on FormatException {
+              // Older or malformed headers use the generic device name.
+            }
+          }
+          _followers[follower] = (
+            name: name,
+            score: request.headers.value('x-encore-ready'),
+            seen: DateTime.now(),
+          );
+        }
         response.headers.contentType = ContentType.json;
         response.write(
           jsonEncode({
@@ -68,6 +202,7 @@ class EnsembleSession {
             'title': current.title,
             'composer': current.composer,
             'page': current.page,
+            'leader': _deviceName,
           }),
         );
       }
@@ -79,6 +214,7 @@ class EnsembleSession {
     required String address,
     required String code,
     required Future<void> Function(EnsemblePosition) onPosition,
+    required bool Function(EnsemblePosition) hasScore,
     required void Function() onDisconnect,
   }) async {
     await close();
@@ -105,6 +241,8 @@ class EnsembleSession {
     _client = client;
     this.address = address.trim();
     this.code = code.trim().toLowerCase();
+    final followerId = Random.secure().nextInt(1 << 32).toRadixString(16);
+    String? readyScore;
     Future<EnsemblePosition> read() async {
       final request = await client.getUrl(uri).timeout(_timeout);
       request.followRedirects = false;
@@ -112,6 +250,10 @@ class EnsembleSession {
         HttpHeaders.authorizationHeader,
         'Bearer ${this.code}',
       );
+      request.headers.set('x-encore-follower', followerId);
+      request.headers.set('x-encore-name', Uri.encodeComponent(_deviceName));
+      if (readyScore != null)
+        request.headers.set('x-encore-ready', readyScore!);
       final response = await request.close().timeout(_timeout);
       if (response.statusCode != HttpStatus.ok) {
         await response.drain<void>().timeout(_timeout);
@@ -133,7 +275,13 @@ class EnsembleSession {
             'page': final int page,
           }
           when page > 0) {
-        return (id: id, title: title, composer: composer, page: page);
+        final name = message['leader'];
+        leaderName = name is String && name.length <= 80
+            ? name
+            : 'EncoreSheets leader';
+        final position = (id: id, title: title, composer: composer, page: page);
+        readyScore = hasScore(position) ? id : null;
+        return position;
       }
       throw const FormatException('Invalid leader response.');
     }
@@ -175,7 +323,11 @@ class EnsembleSession {
     _client = null;
     final server = _server;
     _server = null;
-    address = code = null;
+    _discovery?.close();
+    _discovery = null;
+    _followers.clear();
+    _leadingScore = null;
+    address = code = leaderName = null;
     await server?.close(force: true);
   }
 }

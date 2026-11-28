@@ -4892,6 +4892,7 @@ class _ReaderState extends State<Reader> {
             await session.follow(
               address: address,
               code: code,
+              hasScore: (position) => _ensembleScore(position) != null,
               onPosition: (position) => _followEnsemble(position, mode),
               onDisconnect: () {
                 if (!mounted) return;
@@ -4994,28 +4995,35 @@ class _ReaderState extends State<Reader> {
     }
   }
 
+  bool _matchesEnsembleScore(ScoreEntry score, EnsemblePosition position) =>
+      score.title.toLowerCase() == position.title.toLowerCase() &&
+      (score.metadata['composer'] ?? '').toLowerCase() ==
+          position.composer.toLowerCase();
+
+  ScoreEntry? _ensembleScore(EnsemblePosition position) {
+    final exact = position.id == null ? null : _library.lookup(position.id!);
+    if (exact != null && _matchesEnsembleScore(exact, position)) return exact;
+    final options = _library.recent
+        .where((score) => _matchesEnsembleScore(score, position))
+        .take(2)
+        .toList();
+    return options.length == 1 ? options.single : null;
+  }
+
   Future<void> _followEnsemble(
     EnsemblePosition position,
     EnsembleFollowMode mode,
   ) async {
     if (!mounted || _picking || _inking) return;
-    bool matches(ScoreEntry score) =>
-        score.title.toLowerCase() == position.title.toLowerCase() &&
-        (score.metadata['composer'] ?? '').toLowerCase() ==
-            position.composer.toLowerCase();
     final current = _entry;
-    final sameScore = current == null ? position.id == null : matches(current);
+    final sameScore = current == null
+        ? position.id == null
+        : _matchesEnsembleScore(current, position);
     final acceptPage = mode != EnsembleFollowMode.scores;
     final facing = mode == EnsembleFollowMode.facing;
     final targetPage = position.page + (facing ? 1 : 0);
     if (!sameScore && mode != EnsembleFollowMode.pages) {
-      final exact = position.id == null ? null : _library.lookup(position.id!);
-      final options = _library.recent.where(matches).take(2).toList();
-      final target = exact != null && matches(exact)
-          ? exact
-          : options.length == 1
-          ? options.single
-          : null;
+      final target = _ensembleScore(position);
       if (target == null) return;
       final revision = _revision;
       final local = await _library.storage.openScore(target.id);

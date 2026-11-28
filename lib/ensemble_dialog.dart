@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -39,9 +41,21 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
   EnsembleFollowMode _mode = EnsembleFollowMode.both;
   bool _busy = false;
   String? _error;
+  List<NearbyEnsemble> _nearby = [];
+  bool _searched = false;
+  Timer? _statusTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (widget.session.leading) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
+    _statusTimer?.cancel();
     _address.dispose();
     _code.dispose();
     super.dispose();
@@ -81,7 +95,22 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
               if (_busy) const LinearProgressIndicator(),
               if (_error case final error?) Text(error),
               if (session.leading || session.following) ...[
-                Text(session.leading ? 'Leading' : 'Following'),
+                Text(
+                  session.leading
+                      ? 'Leading on ${session.leaderName ?? 'this device'}'
+                      : 'Following ${session.leaderName ?? 'the leader'}',
+                ),
+                if (session.leading)
+                  for (final follower in session.followers)
+                    ListTile(
+                      dense: true,
+                      title: Text(follower.name),
+                      subtitle: Text(
+                        follower.hasScore
+                            ? 'Has current score'
+                            : 'Missing current score',
+                      ),
+                    ),
                 SelectableText(session.address ?? ''),
                 if (session.leading)
                   SelectableText('Group code ${session.code}'),
@@ -125,6 +154,32 @@ class _EnsembleDialogState extends State<EnsembleDialog> {
                   onPressed: _busy ? null : () => _run(widget.lead),
                   child: const Text('Lead a session'),
                 ),
+                TextButton.icon(
+                  icon: const Icon(Icons.radar),
+                  onPressed: _busy
+                      ? null
+                      : () => _run(() async {
+                          final nearby = await discoverEnsembles();
+                          if (!mounted) return;
+                          setState(() {
+                            _searched = true;
+                            _nearby = nearby;
+                          });
+                        }),
+                  label: const Text('Find nearby leaders'),
+                ),
+                if (_searched && _nearby.isEmpty)
+                  const Text(
+                    'No nearby leaders found. You can still enter the connection details below.',
+                  ),
+                for (final leader in _nearby)
+                  ListTile(
+                    title: Text(leader.name),
+                    subtitle: Text(leader.address),
+                    onTap: _busy
+                        ? null
+                        : () => setState(() => _address.text = leader.address),
+                  ),
                 TextField(
                   controller: _address,
                   enabled: !_busy,
