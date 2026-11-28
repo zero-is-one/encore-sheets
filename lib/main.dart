@@ -8133,6 +8133,13 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         ? const <String, dynamic>{}
         : widget.browseState;
     _gridView = saved['gridView'] == true;
+    if (saved['browseCategory'] case final String field
+        when _browseSections.containsKey(field)) {
+      _browseCategory = field;
+      if (saved['browseCategoryValue'] case final String value) {
+        _browseCategoryValue = value;
+      }
+    }
     if (saved['sort'] case final String sort
         when _sortLabels.containsKey(sort)) {
       _browseBy = sort;
@@ -8188,6 +8195,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     widget.onBrowseState({
       'sort': _browseBy,
       'gridView': _gridView,
+      'browseCategory': _browseCategory,
+      'browseCategoryValue': _browseCategoryValue,
       'collection': _collection,
       'exclude': _excludeCollection,
       'unassigned': _unassigned,
@@ -8235,6 +8244,8 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   String _query = '';
   String _browseBy = 'Recent';
   bool _gridView = false;
+  String? _browseCategory;
+  String? _browseCategoryValue;
   final Map<String, Future<Uint8List?>> _scorePreviews = {};
   String? _filterField;
   final Map<String, String> _filters = {};
@@ -8576,6 +8587,42 @@ class _LibraryScreenState extends State<_LibraryScreen> {
     );
   }
 
+  static const _browseSections = {
+    'Composer': 'Composers',
+    'Genre': 'Genres',
+    'Label': 'Labels',
+    'Tag': 'Tags',
+  };
+
+  void _showCategory(String? field, [String? value]) {
+    if (_libraryScroll.hasClients) _libraryScroll.jumpTo(0);
+    setState(() {
+      _browseCategory = field;
+      _browseCategoryValue = value;
+      _browseOffset = 0;
+    });
+  }
+
+  Widget _categoryNavigation() => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final (field, label) in [
+          (null, 'All scores'),
+          ..._browseSections.entries.map((entry) => (entry.key, entry.value)),
+        ])
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 6),
+            child: ChoiceChip(
+              selected: _browseCategory == field,
+              label: Text(label),
+              onSelected: (_) => _showCategory(field),
+            ),
+          ),
+      ],
+    ),
+  );
+
   void _openListedScore(ScoreEntry score, List<ScoreEntry> visible) {
     widget.onScoreQueue([for (final item in visible) item.id]);
     Navigator.pop(context, score.id);
@@ -8683,6 +8730,26 @@ class _LibraryScreenState extends State<_LibraryScreen> {
             .toSet()
             .toList()
           ..sort();
+    final categoryCounts = <String, int>{};
+    if (_browseCategory != null) {
+      for (final score in inCollection) {
+        for (final category in _categories(score, _browseCategory).toSet()) {
+          categoryCounts.update(
+            category,
+            (count) => count + 1,
+            ifAbsent: () => 1,
+          );
+        }
+      }
+    }
+    final categoryValue = categoryCounts.containsKey(_browseCategoryValue)
+        ? _browseCategoryValue
+        : null;
+    final browsingCategories = _browseCategory != null && categoryValue == null;
+    final categoryNames = [
+      for (final name in categoryCounts.keys)
+        if (name.toLowerCase().contains(_query)) name,
+    ]..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     final selected = _filters[_filterField];
     final selectedCategory = categories.contains(selected) ? selected : null;
     final visible = inCollection
@@ -8696,6 +8763,11 @@ class _LibraryScreenState extends State<_LibraryScreen> {
           (score) => _filters.entries.every(
             (filter) => _categories(score, filter.key).contains(filter.value),
           ),
+        )
+        .where(
+          (score) =>
+              categoryValue == null ||
+              _categories(score, _browseCategory).contains(categoryValue),
         )
         .toList();
     if (_browseBy != 'Recent') {
@@ -8724,6 +8796,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                   .compareTo(_searchOptions.titleKey(b.title));
       });
     } else if (_query.isEmpty &&
+        categoryValue == null &&
         _filters.isEmpty &&
         _searchOptions.recentLimit > 0 &&
         visible.length > _searchOptions.recentLimit) {
@@ -8764,10 +8837,12 @@ class _LibraryScreenState extends State<_LibraryScreen> {
       if (_query.isNotEmpty ||
           !_searchOptions.hidden.contains(LibraryResultGroup.bookmarks))
         for (final score in inCollection)
-          for (final bookmark in score.bookmarks)
-            if ((bookmark.isItem || _query.isNotEmpty) &&
-                bookmark.title.toLowerCase().contains(_query))
-              (score, bookmark),
+          if (categoryValue == null ||
+              _categories(score, _browseCategory).contains(categoryValue))
+            for (final bookmark in score.bookmarks)
+              if ((bookmark.isItem || _query.isNotEmpty) &&
+                  bookmark.title.toLowerCase().contains(_query))
+                (score, bookmark),
     ];
     final groups = {
       LibraryResultGroup.scores: visible.length,
@@ -8804,6 +8879,24 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                 preview: _preview(score),
                 onOpen: () => _openListedScore(score, visible),
                 onEdit: () => Navigator.pop(context, 'edit:${score.id}'),
+              );
+            },
+          )
+        : null;
+    final categoryList = browsingCategories
+        ? ListView.builder(
+            controller: _libraryScroll,
+            itemCount: categoryNames.isEmpty ? 1 : categoryNames.length,
+            itemBuilder: (context, index) {
+              if (categoryNames.isEmpty) {
+                return const ListTile(title: Text('No matching categories.'));
+              }
+              final name = categoryNames[index];
+              return ListTile(
+                title: Text(name),
+                subtitle: Text('${categoryCounts[name]} scores'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showCategory(_browseCategory, name),
               );
             },
           )
@@ -8871,6 +8964,16 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                         setState(() => _query = value.trim().toLowerCase()),
                   ),
                   const SizedBox(height: 12),
+                  if (!widget.focusSearch) _categoryNavigation(),
+                  if (categoryValue != null)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: () => _showCategory(_browseCategory),
+                        icon: const Icon(Icons.arrow_back),
+                        label: Text(categoryValue),
+                      ),
+                    ),
                   if (widget.focusSearch)
                     Align(
                       alignment: AlignmentDirectional.centerStart,
@@ -9123,7 +9226,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                       'Browser preview keeps scores for this session.',
                     ),
                   Expanded(
-                    child: indices.isEmpty
+                    child: indices.isEmpty && !browsingCategories
                         ? Center(
                             child: Text(
                               _query.isEmpty
@@ -9139,6 +9242,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                               return false;
                             },
                             child:
+                                categoryList ??
                                 grid ??
                                 ListView.builder(
                                   controller: _libraryScroll,
@@ -9257,95 +9361,120 @@ class _LibraryScreenState extends State<_LibraryScreen> {
                                                 'Resume at page ${score.page}',
                                               ].join(' · '),
                                             ),
-                                      trailing: PopupMenuButton<String>(
-                                        tooltip: 'Options for ${score.title}',
-                                        onSelected: (action) {
-                                          if (action == 'setlist') {
-                                            _dropIntoSetlist(score.id);
-                                          } else if (action == 'libraries') {
-                                            _assignCollections(score);
-                                          } else if (action == 'ranges') {
-                                            _openBookmarkRange(score);
-                                          } else if (action == 'tab') {
-                                            Navigator.pop(
-                                              context,
-                                              'tab:${score.id}',
-                                            );
-                                          } else if (action == 'copy') {
-                                            _copyLibraryScore(score);
-                                          } else if (action == 'trash') {
-                                            _trashScore(score);
-                                          } else if (action == 'extract') {
-                                            Navigator.pop(
-                                              context,
-                                              'extract:${score.id}',
-                                            );
-                                          } else if (action == 'rearrange') {
-                                            Navigator.pop(
-                                              context,
-                                              'rearrange:${score.id}',
-                                            );
-                                          } else if (action == 'clone') {
-                                            Navigator.pop(
-                                              context,
-                                              'clone:${score.id}',
-                                            );
-                                          } else {
-                                            Navigator.pop(
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip:
+                                                'Properties for ${score.title}',
+                                            onPressed: () => Navigator.pop(
                                               context,
                                               'edit:${score.id}',
-                                            );
-                                          }
-                                        },
-                                        itemBuilder: (_) => [
-                                          if (widget.canOpenTabs)
-                                            const PopupMenuItem(
-                                              value: 'tab',
-                                              child: Text('Open in new tab'),
                                             ),
-                                          if (score.bookmarks.any(
-                                            (bookmark) => bookmark.isItem,
-                                          ))
-                                            const PopupMenuItem(
-                                              value: 'ranges',
-                                              child: Text(
-                                                'Open bookmarked range',
+                                            icon: const Icon(
+                                              Icons.info_outline,
+                                            ),
+                                          ),
+                                          PopupMenuButton<String>(
+                                            tooltip:
+                                                'Options for ${score.title}',
+                                            onSelected: (action) {
+                                              if (action == 'setlist') {
+                                                _dropIntoSetlist(score.id);
+                                              } else if (action ==
+                                                  'libraries') {
+                                                _assignCollections(score);
+                                              } else if (action == 'ranges') {
+                                                _openBookmarkRange(score);
+                                              } else if (action == 'tab') {
+                                                Navigator.pop(
+                                                  context,
+                                                  'tab:${score.id}',
+                                                );
+                                              } else if (action == 'copy') {
+                                                _copyLibraryScore(score);
+                                              } else if (action == 'trash') {
+                                                _trashScore(score);
+                                              } else if (action == 'extract') {
+                                                Navigator.pop(
+                                                  context,
+                                                  'extract:${score.id}',
+                                                );
+                                              } else if (action ==
+                                                  'rearrange') {
+                                                Navigator.pop(
+                                                  context,
+                                                  'rearrange:${score.id}',
+                                                );
+                                              } else if (action == 'clone') {
+                                                Navigator.pop(
+                                                  context,
+                                                  'clone:${score.id}',
+                                                );
+                                              } else {
+                                                Navigator.pop(
+                                                  context,
+                                                  'edit:${score.id}',
+                                                );
+                                              }
+                                            },
+                                            itemBuilder: (_) => [
+                                              if (widget.canOpenTabs)
+                                                const PopupMenuItem(
+                                                  value: 'tab',
+                                                  child: Text(
+                                                    'Open in new tab',
+                                                  ),
+                                                ),
+                                              if (score.bookmarks.any(
+                                                (bookmark) => bookmark.isItem,
+                                              ))
+                                                const PopupMenuItem(
+                                                  value: 'ranges',
+                                                  child: Text(
+                                                    'Open bookmarked range',
+                                                  ),
+                                                ),
+                                              const PopupMenuItem(
+                                                value: 'setlist',
+                                                child: Text('Add to setlist'),
                                               ),
-                                            ),
-                                          const PopupMenuItem(
-                                            value: 'setlist',
-                                            child: Text('Add to setlist'),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'copy',
-                                            child: Text('Copy to clipboard'),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'details',
-                                            child: Text(
-                                              'Rename or edit details',
-                                            ),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'libraries',
-                                            child: Text('Assign to libraries'),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'trash',
-                                            child: Text('Delete score'),
-                                          ),
-                                          if (!widget.transferRestricted)
-                                            const PopupMenuItem(
-                                              value: 'extract',
-                                              child: Text('Extract pages'),
-                                            ),
-                                          const PopupMenuItem(
-                                            value: 'rearrange',
-                                            child: Text('Rearrange pages'),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'clone',
-                                            child: Text('Duplicate score'),
+                                              const PopupMenuItem(
+                                                value: 'copy',
+                                                child: Text(
+                                                  'Copy to clipboard',
+                                                ),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'details',
+                                                child: Text(
+                                                  'Rename or edit details',
+                                                ),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'libraries',
+                                                child: Text(
+                                                  'Assign to libraries',
+                                                ),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'trash',
+                                                child: Text('Delete score'),
+                                              ),
+                                              if (!widget.transferRestricted)
+                                                const PopupMenuItem(
+                                                  value: 'extract',
+                                                  child: Text('Extract pages'),
+                                                ),
+                                              const PopupMenuItem(
+                                                value: 'rearrange',
+                                                child: Text('Rearrange pages'),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'clone',
+                                                child: Text('Duplicate score'),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
