@@ -7,10 +7,12 @@ class MetronomeDialog extends StatefulWidget {
   const MetronomeDialog({
     super.key,
     required this.metronome,
+    this.title,
     this.page,
     this.initialPageBeats = 0,
     this.onPageBeatsChanged,
   });
+  final Widget? title;
   final RehearsalMetronome metronome;
   final int? page;
   final int initialPageBeats;
@@ -90,7 +92,7 @@ class _MetronomeDialogState extends State<MetronomeDialog> {
         _pageBeats.text.trim().isNotEmpty &&
         (count == null || count < 0 || count > _maximumCount);
     return AlertDialog(
-      title: const Text('Metronome'),
+      title: widget.title ?? const Text('Metronome'),
       scrollable: true,
       content: SizedBox(
         width: 400,

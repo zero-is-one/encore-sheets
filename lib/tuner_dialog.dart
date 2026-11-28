@@ -19,7 +19,15 @@ enum _TunerSensitivity {
 }
 
 class TunerDialog extends StatefulWidget {
-  const TunerDialog({super.key, required this.tone, required this.microphone});
+  const TunerDialog({
+    super.key,
+    this.title,
+    this.showPitch = true,
+    required this.tone,
+    required this.microphone,
+  });
+  final Widget? title;
+  final bool showPitch;
   final ReferenceTone tone;
   final bool microphone;
 
@@ -138,7 +146,7 @@ class _TunerDialogState extends State<TunerDialog> {
     final frequency = _frequency;
     final pitch = frequency == null ? null : describePitch(frequency);
     return AlertDialog(
-      title: const Text('Pitch pipe & tuner'),
+      title: widget.title ?? const Text('Pitch pipe & tuner'),
       scrollable: true,
       content: SizedBox(
         width: 400,
@@ -146,44 +154,46 @@ class _TunerDialogState extends State<TunerDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_error case final error?) Text(error),
-            DropdownButton<int>(
-              value: _reference,
-              onChanged: _busy || _holding
-                  ? null
-                  : (value) => setState(() => _reference = value!),
-              items: [
-                for (var note = 48; note <= 84; note++)
-                  DropdownMenuItem(value: note, child: Text(noteLabel(note))),
-              ],
-            ),
-            Text('${noteFrequency(_reference).toStringAsFixed(1)} Hz'),
-            DropdownButton<ReferenceTimbre>(
-              value: _timbre,
-              onChanged: _busy || _holding
-                  ? null
-                  : (value) => setState(() => _timbre = value!),
-              items: [
-                for (final timbre in ReferenceTimbre.values)
-                  DropdownMenuItem(value: timbre, child: Text(timbre.label)),
-              ],
-            ),
-            TextButton.icon(
-              onPressed: _busy || _holding
-                  ? null
-                  : () => _run(() async {
-                      await _stop();
-                      await widget.tone.play(_reference, timbre: _timbre);
-                    }),
-              icon: const Icon(Icons.volume_up_outlined),
-              label: const Text('Play reference tone'),
-            ),
-            TextButton.icon(
-              onPressed: _busy ? null : () => _run(_toggleHold),
-              icon: Icon(_holding ? Icons.stop : Icons.repeat),
-              label: Text(_holding ? 'Stop drone' : 'Hold note'),
-            ),
+            if (widget.showPitch) ...[
+              DropdownButton<int>(
+                value: _reference,
+                onChanged: _busy || _holding
+                    ? null
+                    : (value) => setState(() => _reference = value!),
+                items: [
+                  for (var note = 48; note <= 84; note++)
+                    DropdownMenuItem(value: note, child: Text(noteLabel(note))),
+                ],
+              ),
+              Text('${noteFrequency(_reference).toStringAsFixed(1)} Hz'),
+              DropdownButton<ReferenceTimbre>(
+                value: _timbre,
+                onChanged: _busy || _holding
+                    ? null
+                    : (value) => setState(() => _timbre = value!),
+                items: [
+                  for (final timbre in ReferenceTimbre.values)
+                    DropdownMenuItem(value: timbre, child: Text(timbre.label)),
+                ],
+              ),
+              TextButton.icon(
+                onPressed: _busy || _holding
+                    ? null
+                    : () => _run(() async {
+                        await _stop();
+                        await widget.tone.play(_reference, timbre: _timbre);
+                      }),
+                icon: const Icon(Icons.volume_up_outlined),
+                label: const Text('Play reference tone'),
+              ),
+              TextButton.icon(
+                onPressed: _busy ? null : () => _run(_toggleHold),
+                icon: Icon(_holding ? Icons.stop : Icons.repeat),
+                label: Text(_holding ? 'Stop drone' : 'Hold note'),
+              ),
+            ],
             if (widget.microphone) ...[
-              const Divider(),
+              if (widget.showPitch) const Divider(),
               DropdownButtonFormField<_TunerSensitivity>(
                 initialValue: _sensitivity,
                 decoration: const InputDecoration(

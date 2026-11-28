@@ -96,6 +96,8 @@ import 'text_annotation_dialog.dart';
 
 enum _ReaderMenu { display, score, tools }
 
+enum _AudioUtility { metronome, pitch, tuner }
+
 enum _ReaderDisplay {
   readerSettings,
   annotate,
@@ -3161,7 +3163,7 @@ class _ReaderState extends State<Reader> {
     }
   }
 
-  Future<void> _showMetronome() async {
+  Future<void> _showMetronome({bool showUtilities = false}) async {
     if (_picking || !ScoreAudioSession.supported) return;
     final score = _entry;
     final meter = _rehearsalMeter;
@@ -3181,16 +3183,86 @@ class _ReaderState extends State<Reader> {
     }
     setState(() => _picking = true);
     try {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => MetronomeDialog(
-          metronome: meter,
-          page: score == null ? null : page,
-          initialPageBeats: pageBeats,
-          onPageBeatsChanged: (count) => pageBeats = count,
-        ),
-      );
+      var utility = _AudioUtility.metronome;
+      ReferenceTone? tone;
+      var switching = false;
+      try {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => StatefulBuilder(
+            builder: (dialog, update) {
+              final title = showUtilities
+                  ? Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final (tab, label) in const [
+                          (_AudioUtility.metronome, 'Metronome'),
+                          (_AudioUtility.pitch, 'Pitch'),
+                          (_AudioUtility.tuner, 'Tuner'),
+                        ])
+                          if (tab != _AudioUtility.tuner ||
+                              _supportsSharedImport)
+                            ChoiceChip(
+                              label: Text(label),
+                              selected: utility == tab,
+                              onSelected: switching || utility == tab
+                                  ? null
+                                  : (_) async {
+                                      update(() => switching = true);
+                                      try {
+                                        if (tab == _AudioUtility.metronome) {
+                                          await tone?.stop();
+                                        } else {
+                                          if (meter.running) await meter.stop();
+                                          await _scoreAudio?.pause();
+                                          await tone?.stop();
+                                        }
+                                        if (dialog.mounted)
+                                          update(() => utility = tab);
+                                      } catch (_) {
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Could not switch audio utilities.',
+                                                  ),
+                                                ),
+                                              );
+                                        }
+                                      } finally {
+                                        if (dialog.mounted)
+                                          update(() => switching = false);
+                                      }
+                                    },
+                            ),
+                      ],
+                    )
+                  : null;
+              if (utility == _AudioUtility.metronome) {
+                return MetronomeDialog(
+                  title: title,
+                  metronome: meter,
+                  page: score == null ? null : page,
+                  initialPageBeats: pageBeats,
+                  onPageBeatsChanged: (count) => pageBeats = count,
+                );
+              }
+              return TunerDialog(
+                key: ValueKey(utility),
+                title: title,
+                tone: tone ??= _referenceTone ??= ReferenceTone(),
+                showPitch: utility == _AudioUtility.pitch,
+                microphone: utility == _AudioUtility.tuner,
+              );
+            },
+          ),
+        );
+      } finally {
+        if (showUtilities && utility != _AudioUtility.metronome)
+          await tone?.stop();
+      }
       if (!mounted || score == null || _entry?.id != score.id) return;
       await _library.updateScore(
         score.id,
@@ -6462,13 +6534,17 @@ class _ReaderState extends State<Reader> {
             onPressed: _picking ? null : () => _showLibrary(setlists: true),
             icon: const Icon(Icons.queue_music),
           ),
-          IconButton(
-            tooltip: ReaderText.search.of(context),
-            onPressed: _picking ? null : () => _showLibrary(focusSearch: true),
-            icon: const Icon(Icons.search),
-          ),
+          if (!_restricted(RestrictedTool.transfers) &&
+              !_restricted(RestrictedTool.connections))
+            IconButton(
+              tooltip: 'Services',
+              icon: const Icon(Icons.cloud_outlined),
+              onPressed: _picking
+                  ? null
+                  : () => _runReaderDisplayAction(_ReaderDisplay.cloudServices),
+            ),
         ];
-        final utilities = [_audioToolsMenu(), _readerToolsMenu()];
+        final utilities = [_audioUtilitiesButton(), _readerToolsMenu()];
         final title = _readerTitle();
         final display = _displayButton();
         final scoreActions = _scoreActionsMenu();
@@ -6482,15 +6558,11 @@ class _ReaderState extends State<Reader> {
               color: _inking ? _brass : null,
               icon: Icon(_inking ? Icons.check : Icons.draw_outlined),
             ),
-          if (!_restricted(RestrictedTool.transfers) &&
-              !_restricted(RestrictedTool.connections))
-            IconButton(
-              tooltip: 'Services',
-              icon: const Icon(Icons.cloud_outlined),
-              onPressed: _picking
-                  ? null
-                  : () => _runReaderDisplayAction(_ReaderDisplay.cloudServices),
-            ),
+          IconButton(
+            tooltip: ReaderText.search.of(context),
+            onPressed: _picking ? null : () => _showLibrary(focusSearch: true),
+            icon: const Icon(Icons.search),
+          ),
         ];
         if (constraints.maxWidth < 720) {
           return Column(
@@ -6503,14 +6575,17 @@ class _ReaderState extends State<Reader> {
                     display,
                     Expanded(child: title),
                     scoreActions,
-                    ...editing,
                   ],
                 ),
               ),
               const Divider(height: 1, indent: 12, endIndent: 12),
               Row(
                 children: [
-                  for (final control in [...navigation, ...utilities])
+                  for (final control in [
+                    ...navigation,
+                    ...editing,
+                    ...utilities,
+                  ])
                     Expanded(child: Center(child: control)),
                 ],
               ),
@@ -6587,49 +6662,12 @@ class _ReaderState extends State<Reader> {
     );
   }
 
-  Widget _audioToolsMenu() => PopupMenuButton<_ReaderDisplay>(
-    tooltip: 'Audio tools',
-    icon: const Icon(Icons.headphones_outlined),
-    enabled: !_picking && ScoreAudioSession.supported,
-    onSelected: (action) {
-      if (!_readerActionAllowed(action)) return;
-      switch (action) {
-        case _ReaderDisplay.scoreAudio:
-          _showScoreAudio();
-        case _ReaderDisplay.metronome:
-          _showMetronome();
-        case _ReaderDisplay.tuner:
-          _showTuner();
-        case _ReaderDisplay.piano:
-          _showPiano();
-        case _ReaderDisplay.practiceRecordings:
-          _showPracticeRecordings();
-        default:
-          break;
-      }
-    },
-    itemBuilder: (_) => <PopupMenuItem<_ReaderDisplay>>[
-      PopupMenuItem(
-        value: _ReaderDisplay.scoreAudio,
-        enabled: _entry != null,
-        child: const Text('Linked audio'),
-      ),
-      const PopupMenuItem(
-        value: _ReaderDisplay.metronome,
-        child: Text('Metronome'),
-      ),
-      const PopupMenuItem(
-        value: _ReaderDisplay.tuner,
-        child: Text('Pitch pipe & tuner'),
-      ),
-      const PopupMenuItem(value: _ReaderDisplay.piano, child: Text('Piano')),
-      if (_supportsSharedImport)
-        PopupMenuItem(
-          value: _ReaderDisplay.practiceRecordings,
-          enabled: _entry != null,
-          child: const Text('Practice recordings'),
-        ),
-    ].where((item) => _readerActionAllowed(item.value)).toList(),
+  Widget _audioUtilitiesButton() => IconButton(
+    tooltip: 'Audio utilities',
+    icon: const Icon(Icons.timer_outlined),
+    onPressed: _picking || !ScoreAudioSession.supported
+        ? null
+        : () => _showMetronome(showUtilities: true),
   );
 
   Widget _quickAccessMenu() => SubmenuButton(
