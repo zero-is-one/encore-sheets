@@ -173,9 +173,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getRect(find.byType(PdfViewer)), scoreBounds);
     expect(viewer().controller!.visibleRect, visiblePage);
-    await tester.tap(find.byTooltip('Annotation layers'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('PDF page'));
+    await tester.tap(find.byTooltip('Select PDF passage'));
     await tester.pumpAndSettle();
     final activeReader = viewer().controller!;
     Offset pagePoint(double x, double y, {int page = 1}) {

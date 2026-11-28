@@ -6514,6 +6514,15 @@ class _ReaderState extends State<Reader> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                    if (_performance && _page == _lastPage)
+                      if (_nextTitle case final title?)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'Next: $title',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                     if (_performance)
                       _performanceBar()
                     else if (_showControls)
@@ -8615,6 +8624,14 @@ class _ReaderState extends State<Reader> {
           icon: const Icon(Icons.straighten),
           onPressed: () => setState(() => _showRuler = !_showRuler),
         ),
+        IconButton(
+          tooltip: 'Select PDF passage',
+          icon: const Icon(Icons.document_scanner_outlined),
+          isSelected: _selectingPdf && !_placingMeasure,
+          onPressed: _pdfSelectionAvailable && !_copyingMeasure
+              ? () => _selectPdf()
+              : null,
+        ),
         if (_tool == InkTool.selection && _selectingPdf) ...[
           if (_placingMeasure)
             const Text('Tap the score to place')
@@ -8636,29 +8653,21 @@ class _ReaderState extends State<Reader> {
                   ? () => _copyPdfSelection(cut: true)
                   : null,
             ),
-            IconButton(
-              tooltip: 'Place copied music',
-              icon: const Icon(Icons.content_paste),
-              onPressed:
-                  _measureClipboard != null &&
-                      _activeInkLayer != null &&
-                      !_copyingMeasure
-                  ? () => _selectPdf(paste: true)
-                  : null,
-            ),
           ],
         ],
         if (_ink[_annotationPage ?? _page] case final ink?
             when _tool == InkTool.selection && !_selectingPdf)
           _selectionActions(ink),
-        if (_tool == InkTool.selection &&
-            !_selectingPdf &&
-            _measureClipboard != null &&
-            _activeInkLayer != null)
+        if ((_measureClipboard != null || _selectingPdf) && !_placingMeasure)
           IconButton(
             tooltip: 'Place copied music',
-            icon: const Icon(Icons.post_add),
-            onPressed: () => _selectPdf(paste: true),
+            icon: const Icon(Icons.content_paste),
+            onPressed:
+                _measureClipboard != null &&
+                    _activeInkLayer != null &&
+                    !_copyingMeasure
+                ? () => _selectPdf(paste: true)
+                : null,
           ),
         IconButton(
           tooltip: 'Annotation layers',
