@@ -29,6 +29,7 @@ import 'pdf_rearrange_screen.dart';
 import 'reader_input.dart';
 import 'reader_shortcuts_dialog.dart';
 import 'reader_preferences.dart';
+import 'three_page_layout.dart';
 import 'vertical_score_layout.dart';
 import 'library_backup_screen.dart';
 import 'library_sync.dart';
@@ -4306,6 +4307,14 @@ class _ReaderState extends State<Reader> {
       _turnVertical(step);
       return;
     }
+    if (_spreadStep == 3) {
+      final first = _page - (_page - 1) % 3;
+      final target = first + step * 3;
+      if (target <= _lastPage || _hasNextScore) {
+        _go(target, backwardTurn: step < 0);
+      }
+      return;
+    }
     if (_spreadStep > 0) {
       _go(_page + step * _spreadStep, backwardTurn: step < 0);
       return;
@@ -4331,6 +4340,12 @@ class _ReaderState extends State<Reader> {
       setState(() => _halfPreview = turn.preview);
   }
 
+  bool get _canThreeUp {
+    final view = MediaQuery.sizeOf(context);
+    final width = view.width - (_wideReaderDock ? _dockWidth : 0);
+    return width >= 1120 && width > view.height;
+  }
+
   int get _spreadStep =>
       _verticalScrolling ||
           _inking ||
@@ -4338,6 +4353,8 @@ class _ReaderState extends State<Reader> {
           _halfPageTurns ||
           _ensemble?.leading == true && _leadingSpread ||
           _followingSpread
+      ? 0
+      : _preferences.spreadStep == 3 && !_canThreeUp
       ? 0
       : _preferences.spreadStep;
 
@@ -5898,6 +5915,8 @@ class _ReaderState extends State<Reader> {
           ? item != null && item.endPage != null
                 ? VerticalExcerptLayout(scrollLayout, item.page, item.endPage!)
                 : scrollLayout
+          : _spreadStep == 3
+          ? const ThreePageLayout()
           : _spreadStep > 0
           ? FacingPagesLayout(
               coverPage: _spreadStep == 1 && _page.isEven,
@@ -7148,6 +7167,7 @@ class _ReaderState extends State<Reader> {
                 (0, 'Single page'),
                 (1, 'Two pages · advance one'),
                 (2, 'Two pages · advance two'),
+                if (_canThreeUp) (3, 'Three pages · advance three'),
               ])
                 SimpleDialogOption(
                   onPressed: () => Navigator.pop(context, step),
@@ -7347,6 +7367,20 @@ class _ReaderState extends State<Reader> {
                   ),
                 ]),
                 section('Page options', [
+                  if (canSpread && _canThreeUp)
+                    control(
+                      'Three-up',
+                      Icons.view_column_outlined,
+                      _verticalScrolling
+                          ? null
+                          : () => _savePreferences(
+                              _preferences.copyWith(
+                                spreadStep: _spreadStep == 3 ? 0 : 3,
+                                halfPageTurns: false,
+                              ),
+                            ),
+                      active: _spreadStep == 3,
+                    ),
                   if (canSpread)
                     control(
                       'Two-up',
@@ -7355,11 +7389,13 @@ class _ReaderState extends State<Reader> {
                           ? null
                           : () => _savePreferences(
                               _preferences.copyWith(
-                                spreadStep: _spreadStep > 0 ? 0 : 2,
+                                spreadStep: _spreadStep == 1 || _spreadStep == 2
+                                    ? 0
+                                    : 2,
                                 halfPageTurns: false,
                               ),
                             ),
-                      active: _spreadStep > 0,
+                      active: _spreadStep == 1 || _spreadStep == 2,
                       settingsLabel: 'Two-up settings',
                       settings: _verticalScrolling
                           ? null
@@ -7546,6 +7582,9 @@ class _ReaderState extends State<Reader> {
         ? const <int>[]
         : _library.lookup(score.id)?.flags ?? const <int>[];
     final facingPage = _spreadStep > 0 && _page < _lastPage ? _page + 1 : null;
+    final thirdPage = _spreadStep == 3 && _page + 2 <= _lastPage
+        ? _page + 2
+        : null;
     String flagLabel(int page) =>
         flags.contains(page) ? 'Unflag page' : 'Flag page';
     MenuItemButton flagButton(int page, {String? side}) => MenuItemButton(
@@ -7586,7 +7625,11 @@ class _ReaderState extends State<Reader> {
             leadingIcon: const Icon(Icons.outlined_flag),
             menuChildren: [
               flagButton(_page, side: 'left'),
-              flagButton(facingPage, side: 'right'),
+              flagButton(
+                facingPage,
+                side: thirdPage == null ? 'right' : 'center',
+              ),
+              if (thirdPage != null) flagButton(thirdPage, side: 'right'),
             ],
             child: const Text('Page flags'),
           ),

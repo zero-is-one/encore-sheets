@@ -87,6 +87,7 @@ class ReaderPreferences {
       spreadStep: switch (json['spreadStep']) {
         1 => 1,
         2 => 2,
+        3 => 3,
         _ => 0,
       },
       sepia: json['sepia'] == true,

@@ -6,6 +6,7 @@ import 'package:encoresheets/reader_input.dart';
 import 'package:encoresheets/reader_appearance_options.dart';
 import 'package:encoresheets/reader_preferences.dart';
 import 'package:encoresheets/score_library.dart';
+import 'package:encoresheets/three_page_layout.dart';
 import 'package:encoresheets/vertical_score_layout.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
@@ -507,6 +508,32 @@ void main() {
     expect(restored.scrollMode, ReaderScrollMode.paged);
     expect(restored.page, 2);
     expect(restored.copyWith(inheritScrollMode: true).scrollMode, isNull);
+  });
+
+  test('three-page spreads fit and center the final short group', () async {
+    await pdfrxFlutterInitialize();
+    final document = await PdfDocument.openFile('assets/first_light.pdf');
+    try {
+      const viewport = Size(1360, 750);
+      final layout = const ThreePageLayout().resolve(
+        PdfPageLayoutContext(
+          pages: [...document.pages, document.pages.first],
+          viewport: viewport,
+          paged: true,
+        ),
+      );
+      expect(layout.spreads.map((spread) => spread.firstPageNumber), [1, 4]);
+      expect(layout.spreads.map((spread) => spread.lastPageNumber), [3, 4]);
+      expect(layout.pageLayouts[0].right, lessThan(layout.pageLayouts[1].left));
+      expect(layout.pageLayouts[1].right, lessThan(layout.pageLayouts[2].left));
+      expect(layout.pageLayouts[2].right, lessThan(viewport.width));
+      expect(layout.pageLayouts.last.center.dx, viewport.width / 2);
+      expect(layout.pageLayouts.last.top, greaterThan(viewport.height));
+      const preferences = ReaderPreferences(spreadStep: 3);
+      expect(ReaderPreferences.fromJson(preferences.toJson()).spreadStep, 3);
+    } finally {
+      await document.dispose();
+    }
   });
 
   test(
