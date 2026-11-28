@@ -8566,6 +8566,7 @@ class _LibraryScreenState extends State<_LibraryScreen> {
   static const _sortLabels = {
     'Recent': 'Recently opened',
     'Title': 'Title',
+    'Newest': 'Newest added',
     'Composer': 'Composer',
     'Genre': 'Genre',
     'Rating': 'Rating (highest first)',
@@ -8776,6 +8777,9 @@ class _LibraryScreenState extends State<_LibraryScreen> {
         final av = a.metadata[field] ?? '';
         final bv = b.metadata[field] ?? '';
         final order = switch (_browseBy) {
+          'Newest' => (b.addedAt?.millisecondsSinceEpoch ?? -1).compareTo(
+            a.addedAt?.millisecondsSinceEpoch ?? -1,
+          ),
           'Rating' => (double.tryParse(bv) ?? 0).compareTo(
             double.tryParse(av) ?? 0,
           ),

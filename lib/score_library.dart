@@ -79,6 +79,7 @@ class ScoreEntry {
     required this.title,
     required this.page,
     required this.openedAt,
+    this.addedAt,
     this.metadata = const {},
     this.collections = const [],
     this.bookmarks = const [],
@@ -100,6 +101,7 @@ class ScoreEntry {
     title: json['title'] as String,
     page: json['page'] as int,
     openedAt: DateTime.parse(json['openedAt'] as String),
+    addedAt: DateTime.tryParse(json['addedAt'] as String? ?? ''),
     pdfSourceId: switch (json['pdfSourceId']) {
       final String id when RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(id) => id,
       _ => null,
@@ -157,6 +159,7 @@ class ScoreEntry {
   final String title;
   final int page;
   final DateTime openedAt;
+  final DateTime? addedAt;
   final DateTime? deletedAt;
   final DateTime? validUntil;
   final ReaderScrollMode? scrollMode;
@@ -179,6 +182,7 @@ class ScoreEntry {
     String? title,
     int? page,
     DateTime? openedAt,
+    DateTime? addedAt,
     Map<String, String>? metadata,
     List<String>? collections,
     List<ScoreBookmark>? bookmarks,
@@ -201,6 +205,7 @@ class ScoreEntry {
     title: title ?? this.title,
     page: page ?? this.page,
     openedAt: openedAt ?? this.openedAt,
+    addedAt: addedAt ?? this.addedAt,
     metadata: metadata ?? this.metadata,
     collections: collections ?? this.collections,
     bookmarks: bookmarks ?? this.bookmarks,
@@ -222,6 +227,7 @@ class ScoreEntry {
     'title': title,
     'page': page,
     'openedAt': openedAt.toIso8601String(),
+    if (addedAt != null) 'addedAt': addedAt!.toIso8601String(),
     if (pdfSourceId != null) 'pdfSourceId': pdfSourceId,
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
     if (validUntil != null) 'validUntil': validUntil!.toUtc().toIso8601String(),
@@ -669,6 +675,7 @@ class ScoreLibrary {
       id: newRecordId(),
       title: name,
       openedAt: now,
+      addedAt: now,
       pdfSourceId: original.storedPdfId,
       metadata: {...original.metadata}..remove(ScoreEntry.sampleMetadataKey),
     );
@@ -698,6 +705,7 @@ class ScoreLibrary {
   static const _sharedScoreFields = {
     'id',
     'title',
+    'addedAt',
     'collections',
     'bookmarks',
     'deletedAt',
@@ -925,6 +933,8 @@ class ScoreLibrary {
           'pdfSourceId': existing?.pdfSourceId,
           'page': existing?.page ?? 1,
           'openedAt': (existing?.openedAt ?? DateTime.now()).toIso8601String(),
+          if (existing?.addedAt case final added?)
+            'addedAt': added.toIso8601String(),
         });
         if (score.id != id) throw const FormatException('Invalid shared score');
         if (shared &&
@@ -1157,6 +1167,7 @@ class ScoreLibrary {
           : (title.isEmpty ? 'Untitled score' : title),
       page: 1,
       openedAt: now,
+      addedAt: now,
       metadata: bundledSample
           ? const {ScoreEntry.sampleMetadataKey: 'firstLight'}
           : const {},
@@ -1171,6 +1182,7 @@ class ScoreLibrary {
         id: score.id,
         title: previous?.title ?? score.title,
         openedAt: now,
+        addedAt: previous == null ? now : previous.addedAt,
         recover: true,
         detachPdf: true,
         metadata: metadata,

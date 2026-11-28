@@ -354,6 +354,8 @@ void main() {
       library.import(XFile(second.path)),
     ]);
     expect(a.id, isNot(b.id));
+    expect(a.addedAt, isNotNull);
+    expect(b.addedAt, isNotNull);
     expect(aCopy.path, isNot(first.path));
     expect(bCopy.path, isNot(second.path));
     await first.delete();
@@ -369,6 +371,8 @@ void main() {
     expect(restored.recent.map((score) => score.title), ['First', 'Second']);
     expect(restored.lookup(a.id)?.page, 4);
     expect(restored.lookup(b.id)?.page, 3);
+    expect(restored.lookup(a.id)?.addedAt, a.addedAt);
+    expect(restored.lookup(b.id)?.addedAt, b.addedAt);
     expect(
       await (await restored.storage.openScore(a.id)).readAsString(),
       'first',
