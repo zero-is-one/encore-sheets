@@ -812,6 +812,13 @@ class ScoreLibrary {
     String fingerprint(Map<String, dynamic> data) =>
         sha256.convert(utf8.encode(jsonEncode(data))).toString();
     final shared = endpoint is SharedLibrarySyncEndpoint;
+    final includeMarkings =
+        endpoint is MarkingsSyncEndpoint && endpoint.includesMarkings;
+    const markingsField = 'personal-markings';
+    bool hasMarkings(Object? value) =>
+        value is Map &&
+        value.values.any((part) => part is Map && part.isNotEmpty);
+    final conflicts = <String, Map<String, dynamic>>{};
     final stateKey = shared ? endpoint.stateKey : 'librarySyncState';
     final preferences = await storage.readPreferences();
     final state = preferences[stateKey] as Map? ?? {};
@@ -831,6 +838,7 @@ class ScoreLibrary {
         if (shared &&
             (parts.first == 's'
                 ? !_sharedScoreFields.contains(parts.last) &&
+                      !(includeMarkings && parts.last == markingsField) &&
                       !_metadataField.hasMatch(parts.last)
                 : !_sharedSetlistFields.contains(parts.last)))
           continue;
@@ -862,10 +870,20 @@ class ScoreLibrary {
     final local = <String, Map<String, dynamic>>{};
     for (final score in _scores.values) {
       if (shared) {
-        if (score.validUntil != null) continue;
+        if (score.validUntil != null ||
+            (score.versionOf != null && score.pdfSourceId != null))
+          continue;
         final data = score.toJson();
         for (final field in _sharedScoreFields) {
           local['s:${score.id}:$field'] = {'value': data[field]};
+        }
+        if (includeMarkings) {
+          local['s:${score.id}:$markingsField'] = {
+            'value': {
+              'ink': await storage.readInk(score.id),
+              'pageNotes': data['pageNotes'] ?? <String, dynamic>{},
+            },
+          };
         }
         for (final entry in score.metadata.entries) {
           final field =
@@ -922,10 +940,28 @@ class ScoreLibrary {
           shared &&
           row.key.startsWith('$recordKey:$_metadataFieldPrefix') &&
           known.containsKey('$recordKey:id');
+      final personalField =
+          includeMarkings && row.key.endsWith(':$markingsField');
+      final remoteHash = remote == null ? null : fingerprint(remote);
+      final firstPersonalEdit =
+          personalField &&
+          !known.containsKey(row.key) &&
+          hasMarkings(row.value['value']);
+      if (remote?['value'] case final Map<String, dynamic> competing
+          when personalField &&
+              remoteHash != serialized &&
+              remoteHash != known[row.key] &&
+              (firstPersonalEdit ||
+                  serialized != known[row.key] && known.containsKey(row.key)) &&
+              hasMarkings(competing)) {
+        conflicts[row.key.split(':')[1]] = competing;
+      }
       if (remote != null &&
           (serialized == known[row.key] ||
               serialized == fingerprint(remote) ||
-              !known.containsKey(row.key) && !newMetadataField)) {
+              !known.containsKey(row.key) &&
+                  !newMetadataField &&
+                  !firstPersonalEdit)) {
         continue;
       }
       if (remote == null &&
@@ -995,6 +1031,13 @@ class ScoreLibrary {
           continue;
         }
         final existing = _scores[id];
+        final markings =
+            incoming.remove(markingsField) as Map<String, dynamic>?;
+        final incomingInk = markings?['ink'] as Map<String, dynamic>?;
+        if (markings != null) {
+          incoming['pageNotes'] =
+              markings['pageNotes'] as Map<String, dynamic>?;
+        }
         if (shared && existing?.validUntil != null) continue;
         if (shared && existing == null && incoming['deletedAt'] != null)
           continue;
@@ -1020,19 +1063,49 @@ class ScoreLibrary {
             'addedAt': added.toIso8601String(),
         });
         if (score.id != id) throw const FormatException('Invalid shared score');
+        final storedInk = existing == null || incomingInk == null
+            ? null
+            : await storage.readInk(id);
+        final inkChanged =
+            incomingInk != null &&
+            fingerprint(storedInk ?? {}) != fingerprint(incomingInk);
+        if (conflicts[id] case final conflict?
+            when existing != null && !score.expired) {
+          final snapshot = ScoreEntry.fromJson({
+            ...existing.toJson(),
+            'id': newRecordId(),
+            'versionOf': id,
+            'pdfSourceId': existing.storedPdfId,
+            'deletedAt': DateTime.now().toUtc().toIso8601String(),
+            'pageNotes': conflict['pageNotes'],
+          });
+          staged.add(snapshot.id);
+          await storage.writeInk(
+            snapshot.id,
+            conflict['ink'] as Map<String, dynamic>? ?? {},
+          );
+          scores[snapshot.id] = snapshot;
+          updated.add(snapshot.id);
+        }
         if (shared &&
             existing != null &&
-            fingerprint(existing.toJson()) == fingerprint(score.toJson()))
+            !inkChanged &&
+            fingerprint(existing.toJson()) == fingerprint(score.toJson())) {
           continue;
+        }
         if (existing == null) {
           final pdf = await endpoint.fetchPdf(id);
           await storage.copyScore(id, pdf);
           staged.add(id);
-        } else if (!shared) {
-          previousInk[id] = previous!['ink'] as Map<String, dynamic>;
+        } else if (!shared || inkChanged) {
+          previousInk[id] =
+              storedInk ?? previous!['ink'] as Map<String, dynamic>;
         }
-        if (!shared) {
-          await storage.writeInk(id, incoming['ink'] as Map<String, dynamic>);
+        if (!shared || inkChanged) {
+          await storage.writeInk(
+            id,
+            incomingInk ?? incoming['ink'] as Map<String, dynamic>,
+          );
         }
         scores[id] = score;
         updated.add(id);

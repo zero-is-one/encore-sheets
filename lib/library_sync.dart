@@ -15,6 +15,11 @@ abstract interface class SharedLibrarySyncEndpoint
   String get stateKey;
 }
 
+abstract interface class MarkingsSyncEndpoint
+    implements SharedLibrarySyncEndpoint {
+  bool get includesMarkings;
+}
+
 class AppleLibrarySync implements LibrarySyncEndpoint {
   static const _channel = MethodChannel('encoresheets/library-sync');
 

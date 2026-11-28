@@ -23,6 +23,7 @@ class _WifiLibrarySyncScreenState extends State<WifiLibrarySyncScreen> {
   WifiLibraryPeer? _peer;
   bool _busy = false;
   bool _joining = false;
+  bool _includeMarkings = false;
   String? _message;
 
   Future<void> _run(Future<void> Function() action) async {
@@ -45,7 +46,10 @@ class _WifiLibrarySyncScreenState extends State<WifiLibrarySyncScreen> {
   }
 
   Future<void> _start() => _run(() async {
-    final host = await WifiLibraryHost.start(widget.apply);
+    final host = await WifiLibraryHost.start(
+      widget.apply,
+      includeMarkings: _includeMarkings,
+    );
     if (!mounted) {
       await host.close();
       return;
@@ -120,7 +124,8 @@ class _WifiLibrarySyncScreenState extends State<WifiLibrarySyncScreen> {
           content: Text(
             'The other device has $count available scores. EncoreSheets will '
             'merge scores, metadata, and setlists on both devices. '
-            'Previously synced deletions also apply.',
+            'Previously synced deletions also apply. '
+            '${peer.includesMarkings ? 'This personal pairing also transfers ink layers and page notes. If both devices changed the markings, the other version is kept in Recently updated on the device that detects the conflict.' : 'Ink and page notes stay on each device.'}',
           ),
           actions: [
             TextButton(
@@ -164,10 +169,22 @@ class _WifiLibrarySyncScreenState extends State<WifiLibrarySyncScreen> {
           children: [
             const Text(
               'Keep both devices on the same Wi-Fi network with this screen open. '
-              'Scores, metadata, and setlists sync. Annotations, page notes, '
-              'and reading positions stay on each device.',
+              'Scores, metadata, and setlists sync. Shared pairing keeps ink, '
+              'page notes, and reading positions on each device.',
             ),
             const SizedBox(height: 16),
+            if (_host == null && !_joining)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Personal sync'),
+                subtitle: const Text(
+                  'Include editable ink and page notes when pairing with your own device.',
+                ),
+                value: _includeMarkings,
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _includeMarkings = value),
+              ),
             if (_busy) const LinearProgressIndicator(),
             if (_message case final message?) Text(message),
             if (_host case final host?) ...[

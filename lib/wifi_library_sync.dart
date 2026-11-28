@@ -53,6 +53,7 @@ class WifiLibraryHost {
     WifiSyncApply apply, {
     InternetAddress? bindAddress,
     Directory? storeDirectory,
+    bool includeMarkings = false,
   }) async {
     final local = bindAddress ?? await _localAddress();
     if (local == null) {
@@ -62,7 +63,10 @@ class WifiLibraryHost {
     }
     final store = await _WifiStore.open(
       storeDirectory ??
-          Directory('${(await managedDocuments()).path}/wifi-sync'),
+          Directory(
+            '${(await managedDocuments()).path}/${includeMarkings ? 'wifi-sync-personal' : 'wifi-sync'}',
+          ),
+      includeMarkings: includeMarkings,
     );
     await apply(store);
     final random = Random.secure();
@@ -160,7 +164,7 @@ class WifiLibraryHost {
   }
 }
 
-class WifiLibraryPeer implements SharedLibrarySyncEndpoint {
+class WifiLibraryPeer implements MarkingsSyncEndpoint {
   WifiLibraryPeer._(this._origin, this._key);
   final Uri _origin;
   final SecretKey _key;
@@ -169,6 +173,9 @@ class WifiLibraryPeer implements SharedLibrarySyncEndpoint {
     ..findProxy = (_) => 'DIRECT';
   @override
   late final String stateKey;
+
+  @override
+  bool get includesMarkings => stateKey.endsWith('-personal');
 
   static Future<WifiLibraryPeer> connect(
     String code, {
@@ -193,7 +200,8 @@ class WifiLibraryPeer implements SharedLibrarySyncEndpoint {
     );
     try {
       final state = utf8.decode(await peer._call('hello'));
-      if (!RegExp(r'^wifiLibrarySync-[a-f0-9]{32}$').hasMatch(state)) {
+      if (!RegExp(r'^wifiLibrarySync-[a-f0-9]{32}(-personal)?$')
+          .hasMatch(state)) {
         throw const FormatException('Invalid sync space.');
       }
       peer.stateKey = state;
@@ -265,13 +273,19 @@ class WifiLibraryPeer implements SharedLibrarySyncEndpoint {
   }
 }
 
-class _WifiStore implements SharedLibrarySyncEndpoint {
-  const _WifiStore(this._folder, this.stateKey);
+class _WifiStore implements MarkingsSyncEndpoint {
+  const _WifiStore(this._folder, this.stateKey, this.includesMarkings);
+
+  @override
+  final bool includesMarkings;
   final Directory _folder;
   @override
   final String stateKey;
 
-  static Future<_WifiStore> open(Directory folder) async {
+  static Future<_WifiStore> open(
+    Directory folder, {
+    required bool includeMarkings,
+  }) async {
     await folder.create(recursive: true);
     final identity = File('${folder.path}/identity');
     if (!await identity.exists()) {
@@ -283,7 +297,11 @@ class _WifiStore implements SharedLibrarySyncEndpoint {
         'Could not read this device’s Wi-Fi sync identity.',
       );
     }
-    return _WifiStore(folder, 'wifiLibrarySync-$value');
+    return _WifiStore(
+      folder,
+      'wifiLibrarySync-$value${includeMarkings ? '-personal' : ''}',
+      includeMarkings,
+    );
   }
 
   File _file(String prefix, String id) =>

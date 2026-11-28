@@ -89,4 +89,103 @@ void main() {
     await peer.complete();
     expect(hostLibrary.lookup(a.id)?.title, 'Updated');
   });
+
+  test(
+    'personal pairing transfers markings and preserves offline conflicts',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'encore-personal-wifi',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final first = ScoreLibrary(
+        NativeLibraryStorage(directory: Directory('${root.path}/first')),
+      );
+      final second = ScoreLibrary(
+        NativeLibraryStorage(directory: Directory('${root.path}/second')),
+      );
+      final (score, _) = await first.import(XFile('assets/first_light.pdf'));
+      final baseInk = {
+        '1': [
+          {
+            'tool': 'pen',
+            'points': [
+              [.1, .2],
+            ],
+          },
+        ],
+      };
+      final firstEdit = {
+        '1': [
+          {
+            'tool': 'pen',
+            'points': [
+              [.3, .4],
+            ],
+          },
+        ],
+      };
+      final secondEdit = {
+        '1': [
+          {
+            'tool': 'pen',
+            'points': [
+              [.5, .6],
+            ],
+          },
+        ],
+      };
+      await first.writeInk(score.id, baseInk);
+      await first.updateScore(
+        score.id,
+        (row) => row.copyWith(pageNotes: {1: 'Original note'}),
+      );
+
+      Future<void> pair() async {
+        final host = await WifiLibraryHost.start(
+          (endpoint) async {
+            await first.synchronize(endpoint);
+          },
+          bindAddress: InternetAddress.loopbackIPv4,
+          storeDirectory: Directory('${root.path}/exchange'),
+          includeMarkings: true,
+        );
+        try {
+          final peer = await WifiLibraryPeer.connect(
+            host.code,
+            allowLoopback: true,
+          );
+          try {
+            expect(peer.includesMarkings, isTrue);
+            await second.synchronize(peer);
+            await peer.complete();
+          } finally {
+            peer.close();
+          }
+        } finally {
+          await host.close();
+        }
+      }
+
+      await pair();
+      expect(await second.readInk(score.id), baseInk);
+      expect(second.lookup(score.id)?.pageNotes, {1: 'Original note'});
+      await first.writeInk(score.id, firstEdit);
+      await first.updateScore(
+        score.id,
+        (row) => row.copyWith(pageNotes: {1: 'First device'}),
+      );
+      await second.writeInk(score.id, secondEdit);
+      await second.updateScore(
+        score.id,
+        (row) => row.copyWith(pageNotes: {1: 'Second device'}),
+      );
+      await pair();
+
+      expect(await first.readInk(score.id), secondEdit);
+      expect(first.lookup(score.id)?.pageNotes, {1: 'Second device'});
+      final alternate = second.recentlyUpdated.single;
+      expect(alternate.pageNotes, {1: 'First device'});
+      expect(await second.readInk(alternate.id), firstEdit);
+    },
+  );
 }
