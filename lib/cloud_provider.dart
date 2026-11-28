@@ -20,8 +20,9 @@ enum DirectCloudProvider {
 typedef CloudItem = ({String id, String name, bool folder});
 
 class CloudTransferError implements Exception {
-  const CloudTransferError(this.message);
+  const CloudTransferError(this.message, {this.needsRenewal = false});
   final String message;
+  final bool needsRenewal;
 }
 
 class CloudProviderSession {
@@ -41,8 +42,13 @@ class CloudProviderSession {
   http.Response _check(http.Response response) {
     final status = response.statusCode;
     if (status >= 200 && status < 300) return response;
+    if (status == 401) {
+      throw const CloudTransferError(
+        'Your connection expired. Sign in again to continue.',
+        needsRenewal: true,
+      );
+    }
     throw CloudTransferError(switch (status) {
-      401 => 'The session token is expired or invalid.',
       403 => 'This token lacks permission for the requested file or folder.',
       404 => 'The file or folder is no longer available.',
       409 ||

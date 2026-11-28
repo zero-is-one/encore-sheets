@@ -1,4 +1,9 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'cloud_provider.dart';
 import 'score_library.dart';
@@ -18,6 +23,21 @@ class DirectCloudScreen extends StatefulWidget {
 }
 
 class _DirectCloudScreenState extends State<DirectCloudScreen> {
+  static const _oneDriveClientId = String.fromEnvironment(
+    'ENCORE_ONEDRIVE_CLIENT_ID',
+  );
+  static final _oneDriveDeviceCode = Uri.https(
+    'login.microsoftonline.com',
+    '/common/oauth2/v2.0/devicecode',
+  );
+  static final _oneDriveToken = Uri.https(
+    'login.microsoftonline.com',
+    '/common/oauth2/v2.0/token',
+  );
+  bool get _canSignIn =>
+      widget.provider == DirectCloudProvider.oneDrive &&
+      _oneDriveClientId.isNotEmpty;
+
   final _token = TextEditingController();
   late final _path = <CloudItem>[
     (id: widget.provider.root, name: widget.provider.label, folder: true),
@@ -44,6 +64,12 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
     try {
       await operation();
     } catch (error) {
+      if (error is CloudTransferError && error.needsRenewal) {
+        _session?.close();
+        _session = null;
+        _items = [];
+        _path.removeRange(1, _path.length);
+      }
       _status = error is CloudTransferError
           ? error.message
           : 'Could not complete the cloud transfer.';
@@ -56,6 +82,10 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
     final token = _token.text.trim();
     if (token.isEmpty)
       throw const CloudTransferError('Enter a provider access token.');
+    await _connectToken(token);
+  });
+
+  Future<void> _connectToken(String token) async {
     final session = CloudProviderSession(widget.provider, token);
     try {
       final items = await session.folder(widget.provider.root);
@@ -69,6 +99,111 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
     } catch (_) {
       session.close();
       rethrow;
+    }
+  }
+
+  Future<void> _signIn() => _run(() async {
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            _oneDriveDeviceCode,
+            body: {
+              'client_id': _oneDriveClientId,
+              'scope': 'https://graph.microsoft.com/Files.ReadWrite',
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+      final code = jsonDecode(response.body);
+      if (response.statusCode != 200 ||
+          code is! Map<String, dynamic> ||
+          code['device_code'] is! String ||
+          code['user_code'] is! String ||
+          code['expires_in'] is! int) {
+        throw const CloudTransferError(
+          'OneDrive could not start sign-in. Try again.',
+        );
+      }
+      if (!mounted) return;
+      final expiry = DateTime.now().add(
+        Duration(seconds: code['expires_in'] as int),
+      );
+      var interval = code['interval'] is int ? code['interval'] as int : 5;
+      final token = await showDialog<String>(
+        context: context,
+        builder: (dialog) {
+          return AlertDialog(
+            title: const Text('Sign in to OneDrive'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Enter this code on the Microsoft sign-in page.'),
+                SelectableText(code['user_code'] as String),
+                TextButton(
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: code['user_code'] as String),
+                    );
+                    await launchUrl(
+                      Uri.https('microsoft.com', '/devicelogin'),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  },
+                  child: const Text('Copy code and open Microsoft'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(dialog, code['device_code'] as String),
+                child: const Text('I signed in'),
+              ),
+            ],
+          );
+        },
+      );
+      if (token == null || !mounted) return;
+      while (mounted && DateTime.now().isBefore(expiry)) {
+        await Future<void>.delayed(
+          Duration(seconds: interval.clamp(1, 60).toInt()),
+        );
+        if (!mounted) return;
+        final result = await client
+            .post(
+              _oneDriveToken,
+              body: {
+                'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+                'client_id': _oneDriveClientId,
+                'device_code': token,
+              },
+            )
+            .timeout(const Duration(seconds: 15));
+        final data = jsonDecode(result.body);
+        if (data is Map<String, dynamic>) {
+          if (data['access_token'] case final String access
+              when access.isNotEmpty) {
+            await _connectToken(access);
+            return;
+          }
+          if (data['error'] == 'authorization_pending') continue;
+          if (data['error'] == 'slow_down') {
+            interval += 5;
+            continue;
+          }
+        }
+        break;
+      }
+      if (mounted)
+        throw const CloudTransferError(
+          'OneDrive sign-in ended. Start again to reconnect.',
+        );
+    } finally {
+      client.close();
     }
   });
 
@@ -206,7 +341,12 @@ class _DirectCloudScreenState extends State<DirectCloudScreen> {
           children: [
             if (_busy) const LinearProgressIndicator(),
             if (_status case final status?) Text(status),
-            if (_session == null) ...[
+            if (_session == null && _canSignIn)
+              FilledButton(
+                onPressed: _busy ? null : _signIn,
+                child: const Text('Sign in to OneDrive'),
+              )
+            else if (_session == null) ...[
               Text(switch (widget.provider) {
                 DirectCloudProvider.googleDrive => 'Use a Google Drive access token with the Drive read/write scope.',
                 DirectCloudProvider.oneDrive => 'Use a Microsoft Graph access token with delegated Files.ReadWrite permission.',

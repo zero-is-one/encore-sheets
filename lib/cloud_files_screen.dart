@@ -167,15 +167,16 @@ class _CloudFilesScreenState extends State<CloudFilesScreen> {
             const Text(
               'Use the file picker to browse services connected to your device. On a tablet, choose a storage provider from the share sheet when saving a PDF.',
             ),
+            FilledButton.icon(
+              onPressed: _busy ? null : _import,
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Browse device and cloud files'),
+            ),
             for (final provider in DirectCloudProvider.values)
               TextButton(
                 onPressed: _busy ? null : () => _openProvider(provider),
                 child: Text('Browse ${provider.label} directly'),
               ),
-            FilledButton(
-              onPressed: _busy ? null : _import,
-              child: const Text('Browse and import PDFs'),
-            ),
             if (_appleFiles)
               TextButton(
                 onPressed: _busy ? null : _importTransferFile,
