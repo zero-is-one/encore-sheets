@@ -98,6 +98,11 @@ enum _ReaderMenu { display, score, tools }
 
 enum _ReaderDisplay {
   readerSettings,
+  importScore,
+  scanScore,
+  cloudServices,
+  scoreTemplates,
+  libraryBackup,
   nowPlaying,
   findInScore,
   pageNote,
@@ -1668,6 +1673,7 @@ class _ReaderState extends State<Reader> {
   Future<void> _showLibrary({
     bool setlists = false,
     bool focusSearch = false,
+    String? entryAction,
   }) async {
     if (_picking) return;
     setState(() => _picking = true);
@@ -1676,34 +1682,39 @@ class _ReaderState extends State<Reader> {
       await _library.flush();
       if (!mounted) return;
       var selectedQueue = const <String>[];
-      final result = setlists
-          ? 'setlists'
-          : await _openReaderPanel<String>(
-              (_) => _LibraryScreen(
-                library: _library,
-                scores: _library.recent,
-                setlists: _library.setlists,
-                persistent: _library.storage.persistent,
-                canScan: _supportsSharedImport,
-                canSync: _library.storage.persistent,
-                transferRestricted: _restricted(RestrictedTool.transfers),
-                connectionsRestricted: _restricted(RestrictedTool.connections),
-                onScoreQueue: (ids) => selectedQueue = ids,
-                canOpenTabs: _appearance.showTabs,
-                onPinScore: (id) => _updateScoreTabs([
-                  ..._scoreTabIds.where((value) => value != id),
-                  id,
-                ]),
-                compact:
-                    _preferences.compactLibrary || !_appearance.showMetadata,
-                metadataIconKeys: _metadataSymbols,
-                focusSearch: focusSearch,
-                canSearchScore: _pages > 0 && _viewer.isReady,
-                browseState: _libraryBrowseState,
-                onBrowseState: _rememberLibraryBrowse,
-              ),
-              dockable: !focusSearch,
-            );
+      final result =
+          entryAction ??
+          (setlists
+              ? 'setlists'
+              : await _openReaderPanel<String>(
+                  (_) => _LibraryScreen(
+                    library: _library,
+                    scores: _library.recent,
+                    setlists: _library.setlists,
+                    persistent: _library.storage.persistent,
+                    canScan: _supportsSharedImport,
+                    canSync: _library.storage.persistent,
+                    transferRestricted: _restricted(RestrictedTool.transfers),
+                    connectionsRestricted: _restricted(
+                      RestrictedTool.connections,
+                    ),
+                    onScoreQueue: (ids) => selectedQueue = ids,
+                    canOpenTabs: _appearance.showTabs,
+                    onPinScore: (id) => _updateScoreTabs([
+                      ..._scoreTabIds.where((value) => value != id),
+                      id,
+                    ]),
+                    compact:
+                        _preferences.compactLibrary ||
+                        !_appearance.showMetadata,
+                    metadataIconKeys: _metadataSymbols,
+                    focusSearch: focusSearch,
+                    canSearchScore: _pages > 0 && _viewer.isReady,
+                    browseState: _libraryBrowseState,
+                    onBrowseState: _rememberLibraryBrowse,
+                  ),
+                  dockable: !focusSearch,
+                ));
       if (!mounted) return;
       if (_entry case final current?) {
         if (_library.lookup(current.id) == null) {
@@ -6640,6 +6651,16 @@ class _ReaderState extends State<Reader> {
     switch (action) {
       case _ReaderDisplay.readerSettings:
         await _showReaderSettings();
+      case _ReaderDisplay.importScore:
+        await _showLibrary(entryAction: 'import');
+      case _ReaderDisplay.scanScore:
+        await _showLibrary(entryAction: 'scan');
+      case _ReaderDisplay.cloudServices:
+        await _showLibrary(entryAction: 'cloud-files');
+      case _ReaderDisplay.scoreTemplates:
+        await _showLibrary(entryAction: 'create-template');
+      case _ReaderDisplay.libraryBackup:
+        await _showLibrary(entryAction: 'backup');
       case _ReaderDisplay.nowPlaying:
         _showNowPlaying();
       case _ReaderDisplay.findInScore:
@@ -7146,8 +7167,99 @@ class _ReaderState extends State<Reader> {
       enabled: _pages > 0 && !_picking,
       icon: Icon(score ? Icons.more_horiz : Icons.tune),
       onSelected: _runReaderDisplayAction,
-      itemBuilder: (_) => _readerMenuItems(group),
+      itemBuilder: (_) => _groupedReaderMenuItems(group),
     );
+  }
+
+  List<PopupMenuEntry<_ReaderDisplay>> _groupedReaderMenuItems(
+    _ReaderMenu group,
+  ) {
+    final items = {
+      for (final item in _readerMenuItems(group))
+        if (item.value case final action?) action: item,
+    };
+    final sections = group == _ReaderMenu.score
+        ? <(String, List<_ReaderDisplay>)>[
+            (
+              'This score',
+              [
+                _ReaderDisplay.findInScore,
+                _ReaderDisplay.bookmarks,
+                _ReaderDisplay.pageNote,
+                _ReaderDisplay.jumpLinks,
+                _ReaderDisplay.pageActions,
+                _ReaderDisplay.crop,
+                _ReaderDisplay.copyMeasure,
+                _ReaderDisplay.pasteMeasure,
+              ],
+            ),
+            (
+              'Play and navigate',
+              [
+                _ReaderDisplay.nowPlaying,
+                _ReaderDisplay.scoreAudio,
+                _ReaderDisplay.practiceRecordings,
+                _ReaderDisplay.midiAutomation,
+                _ReaderDisplay.previousPage,
+                _ReaderDisplay.previousScore,
+                _ReaderDisplay.scoreTabs,
+                _ReaderDisplay.scoreWindow,
+              ],
+            ),
+            (
+              'Share',
+              [
+                _ReaderDisplay.exportPdf,
+                _ReaderDisplay.shareScorePackage,
+                _ReaderDisplay.shareScoreLink,
+              ],
+            ),
+          ]
+        : <(String, List<_ReaderDisplay>)>[
+            (
+              'Add scores',
+              [
+                _ReaderDisplay.importScore,
+                _ReaderDisplay.cloudServices,
+                _ReaderDisplay.scanScore,
+                _ReaderDisplay.scoreTemplates,
+              ],
+            ),
+            (
+              'Practice and connect',
+              [
+                _ReaderDisplay.metronome,
+                _ReaderDisplay.tuner,
+                _ReaderDisplay.piano,
+                _ReaderDisplay.practiceActivity,
+                _ReaderDisplay.ensemble,
+                _ReaderDisplay.faceTurns,
+                _ReaderDisplay.inputShortcuts,
+                _ReaderDisplay.midiDevices,
+              ],
+            ),
+            (
+              'Manage',
+              [
+                _ReaderDisplay.libraryBackup,
+                _ReaderDisplay.readerSettings,
+                _ReaderDisplay.support,
+              ],
+            ),
+          ];
+    return [
+      for (final (label, actions) in sections)
+        if (actions.any(items.containsKey)) ...[
+          PopupMenuItem<_ReaderDisplay>(
+            enabled: false,
+            height: 32,
+            child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+          ),
+          for (final action in actions)
+            if (items.remove(action) case final item?) item,
+        ],
+      ...items.values,
+    ];
   }
 
   List<PopupMenuItem<_ReaderDisplay>> _readerMenuItems(_ReaderMenu group) =>
@@ -7156,6 +7268,31 @@ class _ReaderState extends State<Reader> {
               value: _ReaderDisplay.readerSettings,
               child: Text('Reader settings'),
             ),
+            if (!_restricted(RestrictedTool.transfers)) ...[
+              const PopupMenuItem(
+                value: _ReaderDisplay.importScore,
+                child: Text('Import PDF'),
+              ),
+              if (!_restricted(RestrictedTool.connections))
+                const PopupMenuItem(
+                  value: _ReaderDisplay.cloudServices,
+                  child: Text('Cloud services'),
+                ),
+              if (_supportsSharedImport)
+                const PopupMenuItem(
+                  value: _ReaderDisplay.scanScore,
+                  child: Text('Scan sheet music'),
+                ),
+              const PopupMenuItem(
+                value: _ReaderDisplay.scoreTemplates,
+                child: Text('Create from template'),
+              ),
+              if (_library.storage.persistent)
+                const PopupMenuItem(
+                  value: _ReaderDisplay.libraryBackup,
+                  child: Text('Backup & restore'),
+                ),
+            ],
             PopupMenuItem(
               value: _ReaderDisplay.nowPlaying,
               enabled: _entry != null,
