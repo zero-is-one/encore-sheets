@@ -31,6 +31,41 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
   String? _operation;
   String? _message;
 
+  Future<void> _chooseBackupType() async {
+    final includeScores = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => SimpleDialog(
+        title: const Text('Create backup'),
+        children: [
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Full backup'),
+            subtitle: const Text(
+              'Includes score PDFs and library data. Restoring adds copies to your library.',
+            ),
+            onTap: () => Navigator.pop(dialog, true),
+          ),
+          ListTile(
+            leading: const Icon(Icons.inventory_2_outlined),
+            title: const Text('Metadata-only backup'),
+            subtitle: const Text(
+              'Updates matching scores on restore. Keep your PDFs separately.',
+            ),
+            onTap: () => Navigator.pop(dialog, false),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 12, 24, 12),
+            child: Text(
+              'Keep separate copies of linked audio and practice recordings.',
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || includeScores == null) return;
+    await _run('Create backup', () => _export(includeScores: includeScores));
+  }
+
   Future<void> _run(String operation, Future<String?> Function() work) async {
     if (_operation != null) return;
     setState(() {
@@ -146,79 +181,64 @@ class _LibraryBackupScreenState extends State<LibraryBackupScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              widget.recoveryRequired
-                  ? 'The library catalog could not be recovered automatically. Restore a full library backup to open the library again.'
-                  : 'A backup includes your PDFs, annotations, setlists, libraries, and reader settings. Keep separate copies of linked audio and practice recordings. EncoreSheets keeps two local catalog snapshots for automatic recovery.',
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed:
-                  !widget.recoveryRequired &&
-                      _operation == null &&
-                      widget.library.storage.persistent
-                  ? () => _run('Create backup', _export)
-                  : null,
-              icon: const Icon(Icons.save_alt),
-              label: const Text('Create full backup'),
-            ),
-            const Text(
-              'Includes score PDFs and library data. Restoring adds copies to your library.',
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _operation == null && widget.library.storage.persistent
+            if (widget.recoveryRequired)
+              const Text(
+                'The library catalog could not be recovered automatically. Restore a full library backup to continue.',
+              ),
+            if (!widget.recoveryRequired) ...[
+              Text('Items', style: Theme.of(context).textTheme.titleMedium),
+              ExpansionTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Recently deleted'),
+                subtitle: Text(
+                  '${widget.library.recentlyDeleted.length} scores',
+                ),
+                children: [
+                  if (widget.library.recentlyDeleted.isEmpty)
+                    const ListTile(title: Text('No deleted scores.')),
+                  for (final score in widget.library.recentlyDeleted)
+                    ListTile(
+                      title: Text(score.title),
+                      trailing: TextButton(
+                        onPressed: _operation != null
+                            ? null
+                            : () => _run('Recover score', () async {
+                                await widget.library.recoverScore(score.id);
+                                return 'Recovered ${score.title}.';
+                              }),
+                        child: const Text('Recover'),
+                      ),
+                    ),
+                ],
+              ),
+              const Divider(),
+            ],
+            Text('Backups', style: Theme.of(context).textTheme.titleMedium),
+            if (!widget.recoveryRequired && widget.library.storage.persistent)
+              ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('Create backup'),
+                subtitle: const Text('Full or metadata-only'),
+                enabled: _operation == null,
+                onTap: _operation == null ? _chooseBackupType : null,
+              ),
+            ListTile(
+              leading: const Icon(Icons.settings_backup_restore),
+              title: const Text('Restore from a file'),
+              enabled: _operation == null && widget.library.storage.persistent,
+              onTap: _operation == null && widget.library.storage.persistent
                   ? () => _run('Restore backup', _restore)
                   : null,
-              icon: const Icon(Icons.settings_backup_restore),
-              label: const Text('Restore backup'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed:
-                  !widget.recoveryRequired &&
-                      _operation == null &&
-                      widget.library.storage.persistent
-                  ? () => _run(
-                      'Create metadata backup',
-                      () => _export(includeScores: false),
-                    )
-                  : null,
-              icon: const Icon(Icons.inventory_2_outlined),
-              label: const Text('Create metadata-only backup'),
-            ),
-            const Text(
-              'Excludes score PDFs. Restoring updates metadata on matching scores.',
             ),
             if (widget.library.storage.persistent)
-              TextButton.icon(
-                onPressed: _operation == null
+              ListTile(
+                leading: const Icon(Icons.history),
+                title: const Text('Restore latest local backup'),
+                enabled: _operation == null,
+                onTap: _operation == null
                     ? () =>
                           _run('Restore latest local backup', _recoverSnapshot)
                     : null,
-                icon: const Icon(Icons.history),
-                label: const Text('Restore latest local backup'),
-              ),
-            const SizedBox(height: 24),
-            Text(
-              'Recently deleted',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            if (widget.library.recentlyDeleted.isEmpty)
-              const Text('No deleted scores.'),
-            for (final score in widget.library.recentlyDeleted)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(score.title),
-                trailing: TextButton(
-                  onPressed: _operation != null
-                      ? null
-                      : () => _run('Recover score', () async {
-                          await widget.library.recoverScore(score.id);
-                          return 'Recovered ${score.title}.';
-                        }),
-                  child: const Text('Recover'),
-                ),
               ),
             if (_operation != null) ...[
               const SizedBox(height: 16),
